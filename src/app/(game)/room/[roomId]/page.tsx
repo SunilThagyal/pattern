@@ -871,13 +871,25 @@ export default function GameRoomPage() {
     if (room?.gameState === 'drawing' && room.currentPattern && playerId === room.hostId && room.roundEndsAt && room.config) {
         const currentPattern = room.currentPattern;
         const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
-        const maxConfigHints = room.config.maxHintLetters;
+        const hostConfiguredMaxHints = room.config.maxHintLetters; // e.g., 1, 2, or 3 from host settings
 
         const numLettersInWord = currentPattern.replace(/\s/g, '').length;
-        // Ensure we don't try to reveal more than 50% of letters, or more than maxConfigHints
-        const actualHintsToReveal = Math.min(maxConfigHints, Math.floor(numLettersInWord / 2));
 
-        if (actualHintsToReveal === 0) return; // No hints to reveal for this word/config
+        // Determine the actual number of hints to reveal based on game rules:
+        // 1. It cannot exceed the host's configured maximum (hostConfiguredMaxHints).
+        // 2. It cannot exceed 50% of the word's non-space length, rounded down.
+        //    (e.g., 6-letter word -> max 3 hints; 5-letter word -> max 2 hints; 3-letter word -> max 1 hint)
+        const maxHintsByWordLength = Math.floor(numLettersInWord / 2);
+        const actualHintsToReveal = Math.min(hostConfiguredMaxHints, maxHintsByWordLength);
+        
+        // If actualHintsToReveal is 0 (e.g., for a 1-letter word, or if hostConfiguredMaxHints is 0 somehow, though form validates 1-3),
+        // no hints will be scheduled. This is correct as we can't hint a 1-letter word without giving it away,
+        // and 0 hints means no action.
+        if (actualHintsToReveal === 0) {
+          hintTimersRef.current.forEach(clearTimeout); // Clear any previous timers from a prior effect run
+          hintTimersRef.current = [];
+          return; // No hints to reveal for this word/config
+        }
 
         // Hints start revealing after half the round time has passed
         // And are spread across the second half of the round duration
