@@ -310,7 +310,7 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
       setGuess('');
     }
   };
-  const wordCount = guess.trim() === '' ? 0 : guess.trim().split(/\s+/).filter(Boolean).length;
+  const letterCount = guess.trim().length;
 
   return (
     <form onSubmit={handleSubmit} className="flex gap-2 mt-2">
@@ -321,10 +321,10 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
           onChange={e => setGuess(e.target.value)}
           placeholder="Type your guess..."
           disabled={disabled}
-          className="pr-20 md:pr-24" // Adjusted padding for word count
+          className="pr-24 md:pr-28" // Adjusted padding for letter count
         />
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-          {wordCount} {wordCount === 1 ? 'word' : 'words'}
+          {letterCount} {letterCount === 1 ? 'letter' : 'letters'}
         </span>
       </div>
       <Button type="submit" disabled={disabled}><Send size={18} className="mr-1" /> Guess</Button>
@@ -729,16 +729,14 @@ export default function GameRoomPage() {
         if (!roomData.config) {
             roomData.config = { roundTimeoutSeconds: 90, totalRounds: 5, maxWordLength: 20, maxHintLetters: 2 };
         }
-        // Safer handling for revealedPattern initialization
+        // Safer handling for revealedPattern initialization:
+        // If revealedPattern is absolutely missing from Firebase data, treat it as an empty array.
+        // The actual content (underscores or revealed letters) is managed by confirmWordAndStartDrawing (initial underscores)
+        // and the host's hint effect (revealing letters).
+        // This client-side code should not try to "correct" it beyond ensuring it's a valid array.
         if (roomData.revealedPattern === undefined) {
-            // If revealedPattern is absolutely missing from Firebase data,
-            // treat it as an empty array to avoid errors.
-            // The actual content (underscores or revealed letters)
-            // is managed by confirmWordAndStartDrawing and the host's hint effect.
             roomData.revealedPattern = [];
         }
-        // Removed aggressive client-side reset of revealedPattern to underscores based on length mismatch,
-        // as this could overwrite legitimate hints from the host.
 
         setRoom(roomData);
         setError(null);
@@ -910,7 +908,7 @@ export default function GameRoomPage() {
               if (unrevealedIndices.length > 0) {
                 const randomIndexToReveal = unrevealedIndices[Math.floor(Math.random() * unrevealedIndices.length)];
                 newRevealedPattern[randomIndexToReveal] = currentPattern[randomIndexToReveal];
-                await update(ref(database, `rooms/${roomId}/revealedPattern`), newRevealedPattern);
+                await set(ref(database, `rooms/${roomId}/revealedPattern`), newRevealedPattern);
               }
             }
           }, revealTimeOffset);
@@ -1175,3 +1173,4 @@ export default function GameRoomPage() {
     </TooltipProvider>
   );
 }
+
