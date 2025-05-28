@@ -57,13 +57,20 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       toast({ title: "Room ID Required", description: "Please enter a Room ID to join.", variant: "destructive" });
       return;
     }
-    if (mode === 'create' && (roundTimeoutSeconds < 30 || totalRounds < 1 || maxWordLength < 3)) {
-        toast({ title: "Invalid Config", description: "Please check room settings (min timeout 30s, min 1 round, min word length 3).", variant: "destructive" });
+
+    setIsLoading(true);
+
+    if (mode === 'create' && (
+        Number.isNaN(roundTimeoutSeconds) || roundTimeoutSeconds < 30 ||
+        Number.isNaN(totalRounds) || totalRounds < 1 ||
+        Number.isNaN(maxWordLength) || maxWordLength < 3
+    )) {
+        toast({ title: "Invalid Config", description: "Please check room settings. Values must be valid numbers (min timeout 30s, min 1 round, min word length 3).", variant: "destructive" });
+        setIsLoading(false);
         return;
     }
 
 
-    setIsLoading(true);
     localStorage.setItem('patternPartyPlayerName', playerName);
     const playerId = getPlayerId();
 
@@ -72,9 +79,9 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       const player: Player = { id: playerId, name: playerName, score: 0, isOnline: true, isHost: true };
       
       const roomConfig: RoomConfig = {
-        roundTimeoutSeconds,
-        totalRounds,
-        maxWordLength,
+        roundTimeoutSeconds: roundTimeoutSeconds, // Will be valid numbers due to check above
+        totalRounds: totalRounds,
+        maxWordLength: maxWordLength,
       };
       
       const roomData: RoomCreationData = {
@@ -174,17 +181,38 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
               <h3 className="text-xl font-semibold pt-2 border-t mt-4">Room Configuration</h3>
               <div className="space-y-2">
                 <Label htmlFor="roundTimeout" className="flex items-center"><Timer size={16} className="mr-2 text-muted-foreground"/> Round Timeout (seconds)</Label>
-                <Input id="roundTimeout" type="number" value={roundTimeoutSeconds} onChange={e => setRoundTimeoutSeconds(Math.max(30, parseInt(e.target.value)))} min="30" className="text-base py-3"/>
+                <Input 
+                  id="roundTimeout" 
+                  type="number" 
+                  value={Number.isNaN(roundTimeoutSeconds) ? '' : roundTimeoutSeconds} 
+                  onChange={e => setRoundTimeoutSeconds(Math.max(30, parseInt(e.target.value)))} 
+                  min="30" 
+                  className="text-base py-3"
+                />
                 <p className="text-xs text-muted-foreground">Time limit for each player to draw (min 30s).</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="totalRounds" className="flex items-center"><ListChecks size={16} className="mr-2 text-muted-foreground"/> Total Rounds</Label>
-                <Input id="totalRounds" type="number" value={totalRounds} onChange={e => setTotalRounds(Math.max(1, parseInt(e.target.value)))} min="1" className="text-base py-3"/>
+                <Input 
+                  id="totalRounds" 
+                  type="number" 
+                  value={Number.isNaN(totalRounds) ? '' : totalRounds} 
+                  onChange={e => setTotalRounds(Math.max(1, parseInt(e.target.value)))} 
+                  min="1" 
+                  className="text-base py-3"
+                />
                 <p className="text-xs text-muted-foreground">Number of rounds before the game ends (min 1).</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="maxWordLength" className="flex items-center"><TextCursorInput size={16} className="mr-2 text-muted-foreground"/> Max Word Length</Label>
-                <Input id="maxWordLength" type="number" value={maxWordLength} onChange={e => setMaxWordLength(Math.max(3, parseInt(e.target.value)))} min="3" className="text-base py-3"/>
+                <Input 
+                  id="maxWordLength" 
+                  type="number" 
+                  value={Number.isNaN(maxWordLength) ? '' : maxWordLength} 
+                  onChange={e => setMaxWordLength(Math.max(3, parseInt(e.target.value)))} 
+                  min="3" 
+                  className="text-base py-3"
+                />
                 <p className="text-xs text-muted-foreground">Maximum character length for words to be drawn (min 3).</p>
               </div>
             </>
