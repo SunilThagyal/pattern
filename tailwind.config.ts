@@ -82,11 +82,16 @@ export default {
   				to: {
   					height: '0'
   				}
-  			}
+  			},
+            'pulse-bg-once': {
+              '0%, 100%': { backgroundColor: 'hsl(var(--card))' }, /* Use card or a transparent/default bg */
+              '50%': { backgroundColor: 'hsl(var(--primary) / 0.15)' }, /* Primary with some opacity */
+            }
   		},
   		animation: {
   			'accordion-down': 'accordion-down 0.2s ease-out',
-  			'accordion-up': 'accordion-up 0.2s ease-out'
+  			'accordion-up': 'accordion-up 0.2s ease-out',
+            'pulse-bg-once': 'pulse-bg-once 0.8s ease-in-out',
   		}
   	}
   },
