@@ -1,16 +1,17 @@
+
 "use client";
 
 import { useState, useEffect, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { ref, set, get, child, serverTimestamp } from 'firebase/database';
 import { database } from '@/lib/firebase';
-import type { Room, Player, RoomCreationData } from '@/lib/types';
+import type { Room, Player, RoomCreationData, RoomConfig } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Timer, ListChecks, TextCursorInput } from 'lucide-react';
 
 interface RoomFormProps {
   mode: 'create' | 'join';
@@ -23,6 +24,12 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
+
+  // Room config states
+  const [roundTimeoutSeconds, setRoundTimeoutSeconds] = useState(90);
+  const [totalRounds, setTotalRounds] = useState(5);
+  const [maxWordLength, setMaxWordLength] = useState(20);
+
 
   useEffect(() => {
     const storedPlayerName = localStorage.getItem('patternPartyPlayerName');
@@ -50,6 +57,11 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       toast({ title: "Room ID Required", description: "Please enter a Room ID to join.", variant: "destructive" });
       return;
     }
+    if (mode === 'create' && (roundTimeoutSeconds < 30 || totalRounds < 1 || maxWordLength < 3)) {
+        toast({ title: "Invalid Config", description: "Please check room settings (min timeout 30s, min 1 round, min word length 3).", variant: "destructive" });
+        return;
+    }
+
 
     setIsLoading(true);
     localStorage.setItem('patternPartyPlayerName', playerName);
@@ -57,14 +69,23 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
 
     if (mode === 'create') {
       const newRoomId = Math.random().toString(36).substr(2, 6).toUpperCase();
-      const player: Player = { id: playerId, name: playerName, isDrawing: false, score: 0, isOnline: true, isHost: true };
+      const player: Player = { id: playerId, name: playerName, score: 0, isOnline: true, isHost: true };
+      
+      const roomConfig: RoomConfig = {
+        roundTimeoutSeconds,
+        totalRounds,
+        maxWordLength,
+      };
+      
       const roomData: RoomCreationData = {
         id: newRoomId,
         hostId: playerId,
         players: { [playerId]: player },
         gameState: 'waiting',
-        createdAt: serverTimestamp() as unknown as number, // Firebase will convert this
+        createdAt: serverTimestamp() as unknown as number,
         drawingData: [],
+        config: roomConfig,
+        currentRoundNumber: 0, // Will be set to 1 when game starts
       };
 
       try {
@@ -83,16 +104,15 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         const snapshot = await get(roomRef);
         if (snapshot.exists()) {
           const room: Room = snapshot.val();
-          if (room.players[playerId]) { // Player is rejoining
+          if (room.players[playerId]) { 
              await set(child(roomRef, `players/${playerId}/isOnline`), true);
-          } else { // New player joining
-            const player: Player = { id: playerId, name: playerName, isDrawing: false, score: 0, isOnline: true };
-             // Limit number of players if needed in future
-            // if (Object.keys(room.players).length >= 8) {
-            //   toast({ title: "Room Full", description: "This room is full.", variant: "destructive" });
-            //   setIsLoading(false);
-            //   return;
-            // }
+          } else { 
+            if (Object.keys(room.players || {}).length >= 10) { // Max 10 players
+                toast({ title: "Room Full", description: "This room has reached its maximum player limit.", variant: "destructive" });
+                setIsLoading(false);
+                return;
+            }
+            const player: Player = { id: playerId, name: playerName, score: 0, isOnline: true, isHost: false };
             await set(child(roomRef, `players/${playerId}`), player);
           }
           toast({ title: "Joined Room!", description: `Successfully joined room ${roomId}.` });
@@ -115,7 +135,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         <CardTitle className="text-3xl">{mode === 'create' ? 'Create a New Room' : 'Join an Existing Room'}</CardTitle>
         <CardDescription>
           {mode === 'create'
-            ? "Enter your name to start a new game session."
+            ? "Enter your name and configure your game session."
             : `Enter your name and the Room ID to join the fun.${initialRoomId ? ` You're joining room: ${initialRoomId}` : ''}`}
         </CardDescription>
       </CardHeader>
@@ -148,6 +168,26 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                 maxLength={6}
               />
             </div>
+          )}
+          {mode === 'create' && (
+            <>
+              <h3 className="text-xl font-semibold pt-2 border-t mt-4">Room Configuration</h3>
+              <div className="space-y-2">
+                <Label htmlFor="roundTimeout" className="flex items-center"><Timer size={16} className="mr-2 text-muted-foreground"/> Round Timeout (seconds)</Label>
+                <Input id="roundTimeout" type="number" value={roundTimeoutSeconds} onChange={e => setRoundTimeoutSeconds(Math.max(30, parseInt(e.target.value)))} min="30" className="text-base py-3"/>
+                <p className="text-xs text-muted-foreground">Time limit for each player to draw (min 30s).</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="totalRounds" className="flex items-center"><ListChecks size={16} className="mr-2 text-muted-foreground"/> Total Rounds</Label>
+                <Input id="totalRounds" type="number" value={totalRounds} onChange={e => setTotalRounds(Math.max(1, parseInt(e.target.value)))} min="1" className="text-base py-3"/>
+                <p className="text-xs text-muted-foreground">Number of rounds before the game ends (min 1).</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="maxWordLength" className="flex items-center"><TextCursorInput size={16} className="mr-2 text-muted-foreground"/> Max Word Length</Label>
+                <Input id="maxWordLength" type="number" value={maxWordLength} onChange={e => setMaxWordLength(Math.max(3, parseInt(e.target.value)))} min="3" className="text-base py-3"/>
+                <p className="text-xs text-muted-foreground">Maximum character length for words to be drawn (min 3).</p>
+              </div>
+            </>
           )}
         </CardContent>
         <CardFooter>
