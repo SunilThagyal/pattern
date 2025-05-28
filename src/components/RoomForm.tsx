@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Timer, ListChecks, TextCursorInput, Info } from 'lucide-react';
+import { Loader2, Timer, ListChecks, TextCursorInput } from 'lucide-react'; // Removed Info icon
 
 interface RoomFormProps {
   mode: 'create' | 'join';
@@ -29,7 +29,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   const [roundTimeoutSeconds, setRoundTimeoutSeconds] = useState(90);
   const [totalRounds, setTotalRounds] = useState(5);
   const [maxWordLength, setMaxWordLength] = useState(20);
-  const [maxHintLetters, setMaxHintLetters] = useState(2);
+  // maxHintLetters state removed
 
 
   useEffect(() => {
@@ -65,14 +65,13 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         if (
             Number.isNaN(roundTimeoutSeconds) || roundTimeoutSeconds < 30 ||
             Number.isNaN(totalRounds) || totalRounds < 1 ||
-            Number.isNaN(maxWordLength) || maxWordLength < 3 ||
-            Number.isNaN(maxHintLetters) || maxHintLetters < 1 // Min 1 hint letter can be configured
+            Number.isNaN(maxWordLength) || maxWordLength < 3
+            // Removed maxHintLetters validation
         ) {
-            toast({ title: "Invalid Config", description: "Please check room settings. Timeout >= 30s, Rounds >= 1, Max Word Length >= 3, Hint Letters >= 1.", variant: "destructive" });
+            toast({ title: "Invalid Config", description: "Please check room settings. Timeout >= 30s, Rounds >= 1, Max Word Length >= 3.", variant: "destructive" });
             setIsLoading(false);
             return;
         }
-        // Removed validation: maxHintLetters < maxWordLength per user request
     }
 
 
@@ -87,7 +86,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         roundTimeoutSeconds: roundTimeoutSeconds,
         totalRounds: totalRounds,
         maxWordLength: maxWordLength,
-        maxHintLetters: maxHintLetters,
+        // maxHintLetters removed from config
       };
       
       const roomData: RoomCreationData = {
@@ -228,19 +227,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                 />
                 <p className="text-xs text-muted-foreground">Maximum character length for words to be drawn (min 3 chars).</p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxHintLetters" className="flex items-center"><Info size={16} className="mr-2 text-muted-foreground"/> Hint Letters to Reveal</Label>
-                <Input 
-                  id="maxHintLetters" 
-                  type="number" 
-                  value={Number.isNaN(maxHintLetters) ? '' : maxHintLetters} 
-                  onChange={e => setMaxHintLetters(parseInt(e.target.value))} 
-                  min="1" 
-                  // Max value isn't strictly necessary here, as runtime logic will cap it by word.length - 1
-                  className="text-base py-3"
-                />
-                <p className="text-xs text-muted-foreground">Number of letters to reveal as hints (min 1). Will not reveal all letters.</p>
-              </div>
+              {/* maxHintLetters input removed */}
             </>
           )}
         </CardContent>

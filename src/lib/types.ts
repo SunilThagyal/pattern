@@ -1,3 +1,4 @@
+
 export interface Player {
   id: string;
   name: string;
@@ -27,7 +28,7 @@ export interface RoomConfig {
   roundTimeoutSeconds: number;
   totalRounds: number;
   maxWordLength: number;
-  maxHintLetters: number; // Max number of letters to reveal as hints (1-3)
+  // maxHintLetters removed as hints are now manual by host
 }
 
 export interface Room {
