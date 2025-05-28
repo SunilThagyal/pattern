@@ -10,15 +10,14 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
-export const SuggestWordsInputSchema = z.object({
+const SuggestWordsInputSchema = z.object({
   previouslyUsedWords: z.array(z.string()).describe('A list of words that have already been used in the current game session and should be avoided.'),
   count: z.number().min(1).max(5).default(3).describe('The number of words to suggest.'),
   maxWordLength: z.number().min(3).optional().describe('Optional maximum length for the suggested words.'),
 });
 export type SuggestWordsInput = z.infer<typeof SuggestWordsInputSchema>;
 
-// The output schema ensures we get an array of strings, and we request 3.
-export const SuggestWordsOutputSchema = z.array(z.string()).length(3).describe("An array of three distinct, simple, drawable common nouns.");
+const SuggestWordsOutputSchema = z.array(z.string()).length(3).describe("An array of three distinct, simple, drawable common nouns.");
 export type SuggestWordsOutput = z.infer<typeof SuggestWordsOutputSchema>;
 
 
