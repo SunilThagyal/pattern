@@ -729,9 +729,15 @@ export default function GameRoomPage() {
         if (!roomData.config) {
             roomData.config = { roundTimeoutSeconds: 90, totalRounds: 5, maxWordLength: 20, maxHintLetters: 2 };
         }
+         // Safer handling for revealedPattern initialization:
+        // If revealedPattern is absolutely missing from Firebase data, treat it as an empty array.
+        // The actual content (underscores or revealed letters) is managed by confirmWordAndStartDrawing (initial underscores)
+        // and the host's hint effect (revealing letters).
+        // This client-side code should not try to "correct" it beyond ensuring it's a valid array.
         if (roomData.revealedPattern === undefined) {
             roomData.revealedPattern = [];
         }
+
 
         setRoom(roomData);
         setError(null);
@@ -858,7 +864,7 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.hostId, playerId, selectWordForNewRound, roomId, toast]);
 
 
-  // Effect for host to reveal hints
+ // Effect for host to reveal hints
   useEffect(() => {
     hintTimersRef.current.forEach(clearTimeout);
     hintTimersRef.current = [];
@@ -869,23 +875,30 @@ export default function GameRoomPage() {
         
         // Calculate number of hints based on 50% of word length (non-space characters)
         const numLettersInWord = currentPattern.replace(/\s/g, '').length;
+
+        // Aggressive fix: Prioritize revealing 40-50% of the word.
+        // The number of hints is primarily driven by 50% of the word length.
+        // Host config (maxHintLetters) is not a strict cap if 50% is higher.
         let actualHintsToReveal = 0;
         if (numLettersInWord >= 2) { // Only reveal hints for words with 2 or more letters
             actualHintsToReveal = Math.floor(numLettersInWord / 2);
         }
-        // actualHintsToReveal will be 0 for 1-letter words, 1 for 2/3-letter, 2 for 4/5-letter etc.
-        // This ensures "atleast reveal around 40% - 50% word hint" is prioritized.
+        // Example: "joghadsdss" (10 letters) -> actualHintsToReveal = 5
+        // Example: "bridge" (6 letters) -> actualHintsToReveal = 3
+        // Example: "cat" (3 letters) -> actualHintsToReveal = 1
+        // Example: "go" (2 letters) -> actualHintsToReveal = 1
+        // Example: "a" (1 letter) -> actualHintsToReveal = 0
 
-        if (actualHintsToReveal === 0) {
+        if (actualHintsToReveal === 0) { // No hints to reveal (e.g., for 1-letter words or if calculation results in 0)
           hintTimersRef.current.forEach(clearTimeout); 
           hintTimersRef.current = [];
-          return; 
+          return; // Exit early if no hints are to be scheduled
         }
 
         // Hints start revealing after half the round time has passed
         // And are spread across the second half of the round duration
         const hintPhaseStartTime = roundDurationMs / 2; 
-        const timeSlotPerHint = (roundDurationMs / 2) / actualHintsToReveal; 
+        const timeSlotPerHint = (roundDurationMs / 2) / actualHintsToReveal; // Time per hint in the second half
 
         for (let i = 0; i < actualHintsToReveal; i++) {
           const revealTimeOffset = hintPhaseStartTime + (i * timeSlotPerHint);
@@ -895,6 +908,7 @@ export default function GameRoomPage() {
             if (!currentRoomSnapshot.exists()) return;
             const currentRoomData: Room = currentRoomSnapshot.val();
 
+            // Ensure still in drawing phase, same pattern, and revealedPattern exists
             if (currentRoomData.gameState === 'drawing' &&
                 currentRoomData.currentPattern === currentPattern &&
                 currentRoomData.revealedPattern) { 
@@ -902,7 +916,7 @@ export default function GameRoomPage() {
               let newRevealedPattern = [...currentRoomData.revealedPattern];
               const unrevealedIndices = newRevealedPattern
                 .map((char, index) => (char === '_' ? index : -1))
-                .filter(idx => idx !== -1 && currentPattern[idx] && currentPattern[idx] !== ' '); 
+                .filter(idx => idx !== -1 && currentPattern[idx] && currentPattern[idx] !== ' '); // Exclude spaces from being revealed
 
               if (unrevealedIndices.length > 0) {
                 const randomIndexToReveal = unrevealedIndices[Math.floor(Math.random() * unrevealedIndices.length)];
@@ -1094,7 +1108,7 @@ export default function GameRoomPage() {
 
       {room.gameState === 'drawing' && room.currentPattern && (
         <Card className="p-3 text-center bg-accent/10 border-accent shadow">
-          <p className="text-sm text-accent-foreground flex items-center justify-center">
+          <div className="text-sm text-accent-foreground flex items-center justify-center">
             {isCurrentPlayerDrawing ? "Your word to draw is: " : (room.correctGuessersThisRound || []).includes(playerId) ? "You guessed it! The word is: " : "Guess the word!"}
             <strong className="text-xl ml-2 font-mono tracking-wider">{wordToDisplay()}</strong>
             {!isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId) && (
@@ -1108,7 +1122,7 @@ export default function GameRoomPage() {
                     </TooltipContent>
                 </Tooltip>
             )}
-          </p>
+          </div>
         </Card>
       )}
 
