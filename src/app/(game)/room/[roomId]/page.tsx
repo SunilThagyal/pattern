@@ -373,13 +373,15 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
           onChange={e => setGuess(e.target.value)}
           placeholder="Type your guess..."
           disabled={disabled}
-          className="pr-20 sm:pr-24" 
+          className="pr-12 sm:pr-16" // Adjusted padding for letter count
         />
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-          {letterCount} {letterCount === 1 ? 'letter' : 'letters'}
+          {letterCount}
         </span>
       </div>
-      <Button type="submit" disabled={disabled}><Send size={18} className="mr-1" /> Guess</Button>
+      <Button type="submit" disabled={disabled} size="icon" aria-label="Send guess">
+        <Send size={18} />
+      </Button>
     </form>
   );
 };
@@ -1037,8 +1039,7 @@ export default function GameRoomPage() {
 
         if (currentPatternNonSpaceLength === 0) return;
 
-        const hostConfiguredMaxHints = room.config.maxHintLetters;
-        const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
+        const finalHintCount = Math.min(room.config.maxHintLetters, Math.max(0, currentPatternNonSpaceLength - 1));
         
         if (finalHintCount === 0) {
             return; 
@@ -1403,7 +1404,8 @@ export default function GameRoomPage() {
             />
           </div>
 
-          <div className="order-2 flex-grow flex flex-row gap-4 min-h-0 md:hidden"> 
+          {/* Mobile layout for PlayerList and ChatArea (side-by-side) */}
+          <div className="order-2 md:hidden flex flex-row gap-4 h-[calc(40vh-theme(space.12))] min-h-0"> {/* Adjust height to account for gaps */}
             <div className="w-1/2 h-full flex flex-col">
               <PlayerList
                 players={playersArray}
@@ -1423,7 +1425,7 @@ export default function GameRoomPage() {
             </div>
           </div>
 
-
+          {/* Desktop Sidebar: ChatArea (top, grows), PlayerList (middle, collapsible), GuessInput (bottom, via ChatArea) */}
           <div className="order-3 hidden md:flex md:flex-col md:w-1/3 md:gap-4 md:flex-grow-[1] md:min-h-0"> 
             <ChatArea
                 guesses={room.guesses || []}
@@ -1438,6 +1440,7 @@ export default function GameRoomPage() {
                 isMinimized={isPlayerListMinimized}
                 setIsMinimized={setIsPlayerListMinimized}
             />
+            {/* GuessInput is now part of ChatArea */}
           </div>
         </div>
     </div>
