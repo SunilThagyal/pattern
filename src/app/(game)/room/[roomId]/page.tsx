@@ -24,6 +24,7 @@ import {
 import { suggestWords, type SuggestWordsInput, type SuggestWordsOutput } from '@/ai/flows/suggest-words-flow';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 
 const DrawingCanvas = ({
@@ -48,6 +49,8 @@ const DrawingCanvas = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
   const [isPainting, setIsPainting] = useState(false);
+  const [isToolbarMinimized, setIsToolbarMinimized] = useState(false);
+  const isMobile = useIsMobile();
 
   const [color, setColor] = useState("#000000");
   const [lineWidth, setLineWidth] = useState(5);
@@ -233,31 +236,59 @@ const DrawingCanvas = ({
   };
 
   return (
-    <Card className="w-full h-full flex flex-col shadow-lg overflow-hidden"> {/* Ensure Card takes full height */}
-      <CardHeader className="flex flex-row items-center justify-between p-2 border-b bg-muted/30">
-        <div className="flex items-center gap-1 flex-wrap">
-          {isDrawingEnabled && colors.map(c => (
-            <button key={c} onClick={() => setColor(c)} className="w-6 h-6 rounded-full border-2 shadow-sm" style={{ backgroundColor: c, borderColor: color.toLowerCase() === c.toLowerCase() ? 'hsl(var(--primary))' : 'hsl(var(--border))' }} aria-label={`Select color ${c}`}/>
-          ))}
-           {isDrawingEnabled && <Input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-10 h-8 p-0.5 border-none rounded-md" />}
-        </div>
-        {isDrawingEnabled && (
-          <div className="flex items-center gap-2">
-            <Palette className="w-5 h-5 text-muted-foreground" />
-            <Input type="range" min="1" max="30" value={lineWidth} onChange={(e) => setLineWidth(parseInt(e.target.value))} className="w-20 md:w-24 h-6" />
-            <span className="text-xs text-muted-foreground w-4 text-right">{lineWidth}</span>
-            <Button variant="ghost" size="icon" onClick={localClearAndPropagate} title="Clear Canvas">
-              <Eraser className="w-5 h-5" />
-            </Button>
+    <Card className="w-full h-full flex flex-col shadow-lg overflow-hidden">
+      <CardHeader className="p-2 border-b bg-muted/30">
+        <div className="flex flex-row items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            {isDrawingEnabled 
+              ? (isMobile ? (isToolbarMinimized ? "Tools (Tap to expand)" : "Tools (Tap to collapse)") : "Drawing Tools")
+              : (currentDrawerId ? `It's ${currentDrawerName || 'someone'}'s turn to draw.` : (gameState !== 'word_selection' ? "Waiting for drawer..." : ""))}
           </div>
-        )}
-        {!isDrawingEnabled && currentDrawerId && <p className="text-sm text-muted-foreground">It's {currentDrawerName || 'someone'}'s turn to draw.</p>}
-        {!currentDrawerId && gameState !== 'word_selection' && <p className="text-sm text-muted-foreground">Waiting for drawer...</p>}
+          
+          {isDrawingEnabled && isMobile && (
+              <Button variant="ghost" size="icon" onClick={() => setIsToolbarMinimized(!isToolbarMinimized)} aria-label={isToolbarMinimized ? "Expand toolbar" : "Collapse toolbar"}>
+                  {isToolbarMinimized ? <ChevronDown className="h-5 w-5"/> : <ChevronUp className="h-5 w-5"/>}
+              </Button>
+          )}
+        </div>
+
+        <div className={cn(
+          "transition-all duration-300 ease-in-out overflow-hidden",
+          isDrawingEnabled ? 
+              (isMobile ? (isToolbarMinimized ? "max-h-0 opacity-0" : "max-h-28 opacity-100 pt-2")
+                         : "max-h-28 opacity-100 pt-2")
+              : "max-h-0 opacity-0" 
+        )}>
+          {isDrawingEnabled && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-1 flex-wrap">
+                    {colors.map(c => (
+                        <button 
+                            key={c} 
+                            onClick={() => setColor(c)} 
+                            className="w-6 h-6 rounded-full border-2 shadow-sm" 
+                            style={{ backgroundColor: c, borderColor: color.toLowerCase() === c.toLowerCase() ? 'hsl(var(--primary))' : 'hsl(var(--border))' }} 
+                            aria-label={`Select color ${c}`}
+                        />
+                    ))}
+                    <Input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-10 h-8 p-0.5 border-none rounded-md" />
+                </div>
+                <div className="flex items-center gap-2">
+                    <Palette className="w-5 h-5 text-muted-foreground" />
+                    <Input type="range" min="1" max="30" value={lineWidth} onChange={(e) => setLineWidth(parseInt(e.target.value))} className="w-20 md:w-24 h-6" />
+                    <span className="text-xs text-muted-foreground w-4 text-right">{lineWidth}</span>
+                    <Button variant="ghost" size="icon" onClick={localClearAndPropagate} title="Clear Canvas">
+                        <Eraser className="w-5 h-5" />
+                    </Button>
+                </div>
+            </div>
+          )}
+        </div>
       </CardHeader>
-      <CardContent className="flex-grow p-0 bg-slate-50 relative min-h-0"> {/* Ensure CardContent can grow and canvas takes space */}
+      <CardContent className="flex-grow p-0 bg-slate-50 relative min-h-0">
         <canvas
           ref={canvasRef}
-          className="w-full h-full bg-white touch-none" // Ensure canvas fills CardContent
+          className="w-full h-full bg-white touch-none"
           onMouseDown={startPaint}
           onMouseMove={paint}
           onMouseUp={exitPaint}
@@ -274,12 +305,12 @@ const DrawingCanvas = ({
 };
 
 const PlayerList = ({ players, currentPlayerId, hostId }: { players: Player[], currentPlayerId?: string | null, hostId?: string }) => (
-  <Card className="shadow-md h-full flex flex-col"> {/* Ensure Card takes full height of its mobile grid cell */}
+  <Card className="shadow-md h-full flex flex-col">
     <CardHeader>
       <CardTitle className="flex items-center gap-2"><Users /> Players ({players.length})</CardTitle>
     </CardHeader>
-    <CardContent className="flex-grow min-h-0"> {/* Allow content to grow and scroll */}
-      <ScrollArea className="h-full pr-3"> {/* ScrollArea should take full height of CardContent */}
+    <CardContent className="flex-grow min-h-0">
+      <ScrollArea className="h-full pr-3">
         <ul className="space-y-2">
           {players.map(player => (
             <li key={player.id} className={`flex items-center justify-between p-2 rounded-md ${player.id === currentPlayerId ? 'bg-primary/10' : ''}`}>
@@ -314,7 +345,7 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
   const letterCount = guess.trim().length;
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 mt-auto pt-2"> {/* mt-auto to push to bottom if in flex-col */}
+    <form onSubmit={handleSubmit} className="flex gap-2 mt-auto pt-2">
       <div className="relative flex-grow">
         <Input
           type="text"
@@ -334,12 +365,12 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
 };
 
 const ChatArea = ({ guesses, room }: { guesses: Guess[], room: Room | null }) => (
- <Card className="shadow-md flex-grow flex flex-col min-h-0"> {/* Ensure Card can grow and defines height for ScrollArea */}
+ <Card className="shadow-md flex-grow flex flex-col min-h-0">
     <CardHeader>
       <CardTitle className="flex items-center gap-2"><MessageSquare /> Guesses & Chat</CardTitle>
     </CardHeader>
-    <CardContent className="flex-grow min-h-0"> {/* Allow content to grow and ScrollArea to fill it */}
-      <ScrollArea className="h-full pr-3"> {/* ScrollArea should take full height of CardContent */}
+    <CardContent className="flex-grow min-h-0">
+      <ScrollArea className="h-full pr-3">
         <ul className="space-y-2 text-sm">
           {guesses.map((g, i) => (
             <li key={i} className={`p-2 rounded-md ${g.isCorrect ? 'bg-green-500/20 border border-green-500/30 animate-pulse-bg-once' : 'bg-muted/50'}`}>
@@ -558,9 +589,9 @@ export default function GameRoomPage() {
         usedWords: newUsedWords,
     };
     try {
-        await set(ref(database, `rooms/${roomId}/revealedPattern`), initialRevealedPattern);
         await set(ref(database, `rooms/${roomId}/drawingData`), [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }]);
-        await update(ref(database, `rooms/${roomId}`), updates);
+        await set(ref(database, `rooms/${roomId}/revealedPattern`), initialRevealedPattern); // Explicitly set initial revealedPattern
+        await update(ref(database, `rooms/${roomId}`), updates); // Then update the rest
 
         toast({title: "Drawing Started!", description: `The word has been chosen. Time to draw!`});
     } catch(err) {
@@ -580,22 +611,10 @@ export default function GameRoomPage() {
     if (currentRoomData.gameState !== 'drawing' || !playerId ) {
        return; 
     }
-    // Only allow host to end round explicitly, but allow any client to recognize game state changes for display.
-    // The actual state change for ending round should be host-authoritative or transactional.
-    // For now, if the host is the one calling this, it proceeds with Firebase update.
-    if (currentRoomData.hostId !== playerId && currentRoomData.gameState === 'drawing') {
-        // If a non-host calls this (e.g. from a timer that might exist if logic was duplicated),
-        // we don't want them to write to Firebase. Host's useEffect handles Firebase writes for timer end.
-        // This function might still be called if, for example, "all guessed" logic is triggered by a non-host.
-        // The key is that the actual Firebase update is guarded.
-    }
-
 
     hintTimerRef.current.forEach(clearTimeout);
     hintTimerRef.current = [];
 
-    // Guard the Firebase update: only host should make this specific update.
-    // Other round-ending conditions (like all guessed) might call this, but the state change is done by host or transaction.
     if (currentRoomData.hostId === playerId && currentRoomData.gameState === 'drawing') {
         try {
             await update(ref(database, `rooms/${roomId}`), {
@@ -608,15 +627,6 @@ export default function GameRoomPage() {
             console.error("Error ending round:", err);
             toast({ title: "Error", description: "Failed to end round.", variant: "destructive"});
         }
-    } else if (currentRoomData.gameState === 'drawing') {
-        // If not host, but round is ending for other reasons (e.g. all guessed, detected by host),
-        // just toast locally if appropriate, the host's effect handles the DB update.
-        // This toast here might be redundant if host also toasts.
-        // For "all guessed", the handleGuessSubmit will have the host end the round.
-        // This path is less likely to be hit with a meaningful message if not host.
-         if (reason !== "Timer ran out!" && reason !== "All players guessed correctly!") { // Avoid double toast from host's timer
-            // toast({ title: "Round Over!", description: `${reason} The word was: ${currentRoomData.currentPattern || "N/A"}`});
-         }
     }
   }, [playerId, roomId, toast]); 
 
@@ -681,8 +691,6 @@ export default function GameRoomPage() {
 
     await update(ref(database, `rooms/${roomId}`), updates);
     
-    // After submitting a guess, if the current player IS THE HOST and the guess was correct,
-    // check if all players have guessed. If so, end the round.
     if (isCorrect && currentRoom.hostId === playerId) {
         const updatedRoomSnap = await get(ref(database, `rooms/${roomId}`)); 
         if (!updatedRoomSnap.exists()) return;
@@ -712,7 +720,6 @@ export default function GameRoomPage() {
   }, [playerId, roomId, prepareNewGameSession, selectWordForNewRound]); 
 
 
-  // Effect for player initialization and listeners
   useEffect(() => {
     const pId = localStorage.getItem('patternPartyPlayerId');
     const pName = localStorage.getItem('patternPartyPlayerName');
@@ -781,7 +788,6 @@ export default function GameRoomPage() {
   };
 
 
-  // Effect for room data, player status, and basic presence
   useEffect(() => {
     if (!roomId || !playerId) return;
 
@@ -855,7 +861,6 @@ export default function GameRoomPage() {
   }, [roomId, playerId, router, toast, isLoading]);
 
 
-  // Effect for host to end round by timer or if all guessed
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId) {
       let roundTimer: NodeJS.Timeout | null = null;
@@ -904,7 +909,6 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room?.currentDrawerId, room?.correctGuessersThisRound, roomId]);
 
 
-  // Effect for host to automatically start next round after round_end
   useEffect(() => {
     if (room?.gameState === 'round_end' && playerId === room?.hostId) {
         const NEXT_ROUND_DELAY_SECONDS = 5;
@@ -949,7 +953,6 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.hostId, playerId, selectWordForNewRound, roomId, toast]);
 
 
-  // Effect for host to reveal hints progressively
   useEffect(() => {
     hintTimerRef.current.forEach(clearTimeout);
     hintTimerRef.current = []; 
@@ -966,11 +969,8 @@ export default function GameRoomPage() {
         const patternChars = currentPatternStr.split('');
         const currentPatternNonSpaceLength = patternChars.filter(char => char !== ' ').length;
         
-        // Use host configured hint count, but ensure it's not more than (word_length - 1)
         const hostConfiguredMaxHints = room.config.maxHintLetters;
-        // finalHintCount is the number of hints we'll actually reveal.
-        // It's the host's setting, but capped so at least one letter remains hidden.
-        // Also ensure it's not negative if currentPatternNonSpaceLength - 1 is negative.
+        
         const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
 
         if (finalHintCount === 0 || currentPatternNonSpaceLength === 0) {
@@ -1039,7 +1039,6 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.currentPattern, room?.hostId, playerId, roomId, room?.config, room?.roundEndsAt, room?.revealedPattern]); 
 
 
-  // Effect for host to handle word selection timeout
   useEffect(() => {
     if (room?.gameState === 'word_selection' && room?.hostId === playerId && room?.wordSelectionEndsAt && !room?.currentPattern) {
       const now = Date.now();
@@ -1185,9 +1184,8 @@ export default function GameRoomPage() {
         </Card>
 
 
-      {/* Word Selection Modal for Drawer */}
       {room.gameState === 'word_selection' && isCurrentPlayerDrawing && (
-        <Dialog open={true} onOpenChange={() => { /* Dialog controlled by game state */ }}>
+        <Dialog open={true} onOpenChange={() => {}}>
           <DialogContent className="sm:max-w-[480px] shadow-xl border-border/80">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-2xl"><Lightbulb className="text-yellow-400"/> Choose a word to draw</DialogTitle>
@@ -1240,7 +1238,6 @@ export default function GameRoomPage() {
         </Dialog>
       )}
 
-      {/* Message for Guessers during Word Selection */}
       {room.gameState === 'word_selection' && !isCurrentPlayerDrawing && (
           <Card className="p-4 text-center bg-muted/80 shadow animate-in fade-in">
               <div className="text-lg font-semibold flex items-center justify-center gap-2">
@@ -1255,7 +1252,6 @@ export default function GameRoomPage() {
           </Card>
       )}
 
-      {/* Word Display during Drawing Phase */}
       {room.gameState === 'drawing' && room.currentPattern && (
         <div className="p-3 text-center bg-accent/10 border-accent/30 shadow rounded-md">
           <div className="text-sm text-accent-foreground flex items-center justify-center">
@@ -1290,7 +1286,6 @@ export default function GameRoomPage() {
         </div>
       )}
 
-      {/* Round End Summary */}
       {room.gameState === 'round_end' && (
         <Card className="p-4 shadow-lg bg-green-500/10 border-green-500/30 animate-in fade-in">
             <CardTitle className="text-xl mb-2 text-green-700">Round Over!</CardTitle>
@@ -1308,7 +1303,6 @@ export default function GameRoomPage() {
         </Card>
       )}
 
-      {/* Game Over Summary */}
       {room.gameState === 'game_over' && (
         <Card className="p-6 shadow-xl bg-primary/10 border-primary/30 animate-in fade-in">
             <CardTitle className="text-2xl mb-4 text-center text-primary flex items-center justify-center gap-2"><Trophy /> Game Over! <Trophy /></CardTitle>
@@ -1325,7 +1319,6 @@ export default function GameRoomPage() {
       )}
 
 
-      {/* MAIN GAME CONTENT AREA */}
       <div className="flex-grow flex flex-col md:flex-row gap-4 min-h-0">
           
           <div className="order-1 w-full md:w-2/3 flex flex-col h-[60vh] md:h-auto md:flex-grow-[2] md:min-h-[300px]">
