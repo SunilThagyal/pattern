@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import { useEffect, useState, useRef, type MouseEvent, type TouchEvent, useCallback } from 'react';
@@ -50,7 +49,7 @@ const DrawingCanvas = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
   const [isPainting, setIsPainting] = useState(false);
-  const [isToolbarMinimized, setIsToolbarMinimized] = useState(true); 
+  const [isToolbarMinimized, setIsToolbarMinimized] = useState(true);
   const isMobile = useIsMobile();
 
   const [color, setColor] = useState("#000000");
@@ -327,7 +326,7 @@ const PlayerList = ({
     </CardHeader>
     <div className={cn(
         "transition-all duration-300 ease-in-out overflow-hidden",
-        isMinimized ? "max-h-0 opacity-0" : "max-h-72 opacity-100 flex-grow" // max-h-72 can be adjusted if needed
+        isMinimized ? "max-h-0 opacity-0" : "max-h-72 opacity-100 flex-grow"
     )}>
         <CardContent className="flex-grow min-h-0 pt-3 sm:pt-4">
         <ScrollArea className="h-full pr-3">
@@ -374,7 +373,7 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
           onChange={e => setGuess(e.target.value)}
           placeholder="Type your guess..."
           disabled={disabled}
-          className="pr-24 md:pr-28" // Increased padding for letter count
+          className="pr-24 md:pr-28"
         />
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
           {letterCount} {letterCount === 1 ? 'letter' : 'letters'}
@@ -387,10 +386,14 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
 
 const ChatArea = ({
     guesses,
-    room
+    room,
+    onGuessSubmit,
+    disabled
 }: {
     guesses: Guess[],
     room: Room | null,
+    onGuessSubmit: (guess: string) => void,
+    disabled: boolean
 }) => (
  <Card className="shadow-lg flex-grow flex flex-col min-h-0">
     <CardHeader className="p-3 sm:p-4 border-b">
@@ -412,6 +415,9 @@ const ChatArea = ({
         </ul>
       </ScrollArea>
     </CardContent>
+    <div className="p-2 border-t bg-background">
+        <GuessInput onGuessSubmit={onGuessSubmit} disabled={disabled} />
+    </div>
   </Card>
 );
 
@@ -435,10 +441,10 @@ const TimerDisplay = ({ targetTime, gameState, defaultSeconds, label }: { target
     return () => clearInterval(interval);
   }, [targetTime, defaultSeconds]);
 
-  if (timeLeft === null && (gameState === 'drawing' || gameState === 'word_selection')) { // Only show loading for active timed states
+  if (timeLeft === null && (gameState === 'drawing' || gameState === 'word_selection')) {
       return <div className="text-lg font-semibold"><Clock className="inline mr-2" />Loading...</div>;
   }
-  if (timeLeft === null) { // For states like 'waiting', 'game_over' where defaultSeconds is 0
+  if (timeLeft === null) {
       return <div className="text-lg font-semibold"><Clock className="inline mr-2" />Waiting...</div>;
   }
 
@@ -446,7 +452,6 @@ const TimerDisplay = ({ targetTime, gameState, defaultSeconds, label }: { target
 
   return <div className="text-2xl font-bold text-primary"><Clock className="inline mr-2 animate-pulse" /> {timeLeft}s <span className="text-sm font-normal text-muted-foreground">({displayLabel})</span></div>;
 };
-
 
 export default function GameRoomPage() {
   const params = useParams();
@@ -467,6 +472,7 @@ export default function GameRoomPage() {
 
 
   const hintTimerRef = useRef<NodeJS.Timeout[]>([]);
+
 
   const prepareNewGameSession = useCallback(async () => {
     if (!room || !playerId || room.hostId !== playerId) return;
@@ -561,9 +567,8 @@ export default function GameRoomPage() {
             } else {
                  console.warn("AI did not return 3 valid words, using defaults. Received:", aiSuggestions);
                  toast({ title: "AI Word Gen Issue", description: "Could not fetch 3 valid words from AI. Using default words.", variant: "default" });
-                 // Fallback to simpler words, ensuring they respect maxWordLength and are not used
                  wordsForSelection = ["Cat", "Sun", "Car"].filter(w => w.length <= (currentRoomData.config?.maxWordLength || 20) && !(currentRoomData.usedWords || []).includes(w));
-                 if (wordsForSelection.length < 3) { // Add more if filtering made it too short
+                 if (wordsForSelection.length < 3) {
                     const defaults = ["Tree", "House", "Star", "Dog", "Moon", "Boat"];
                     for (const defWord of defaults) {
                         if (wordsForSelection.length >=3) break;
@@ -572,16 +577,14 @@ export default function GameRoomPage() {
                         }
                     }
                  }
-                 // If still less than 3, fill with very generic defaults
                  while(wordsForSelection.length < 3) wordsForSelection.push("Ball");
             }
 
         } catch (aiError) {
             console.error("AI word suggestion error:", aiError);
             toast({ title: "AI Error", description: "Failed to get words from AI. Using default words.", variant: "destructive" });
-            // Fallback to simpler words, ensuring they respect maxWordLength and are not used
             wordsForSelection = ["Dog", "Moon", "Boat"].filter(w => w.length <= (currentRoomData.config?.maxWordLength || 20) && !(currentRoomData.usedWords || []).includes(w));
-             if (wordsForSelection.length < 3) { // Add more if filtering made it too short
+             if (wordsForSelection.length < 3) {
                 const defaults = ["Apple", "House", "Star", "Cat", "Sun", "Car"];
                 for (const defWord of defaults) {
                     if (wordsForSelection.length >=3) break;
@@ -600,13 +603,13 @@ export default function GameRoomPage() {
         currentDrawerId: newDrawer.id,
         currentPattern: null,
         roundEndsAt: null,
-        wordSelectionEndsAt: Date.now() + 15 * 1000, // 15 seconds to choose
+        wordSelectionEndsAt: Date.now() + 15 * 1000,
         currentRoundNumber: newRoundNumber,
-        drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }], // Clear canvas for new round
+        drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
         guesses: [],
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection,
-        revealedPattern: [], // Reset revealed pattern
+        revealedPattern: [],
     };
     try {
         await update(ref(database, `rooms/${roomId}`), updates);
@@ -634,17 +637,15 @@ export default function GameRoomPage() {
         gameState: 'drawing',
         currentPattern: word,
         roundEndsAt: Date.now() + currentRoomData.config.roundTimeoutSeconds * 1000,
-        selectableWords: [], // Clear selectable words
-        wordSelectionEndsAt: null, // Clear word selection timer
-        guesses: [], // Clear previous round's guesses
-        correctGuessersThisRound: [], // Reset correct guessers for the new round
+        selectableWords: [],
+        wordSelectionEndsAt: null,
+        guesses: [],
+        correctGuessersThisRound: [],
         usedWords: newUsedWords,
     };
     try {
-        // Explicitly set drawingData and revealedPattern first to ensure canvas/pattern is cleared/reset for new word
         await set(ref(database, `rooms/${roomId}/drawingData`), [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }]);
         await set(ref(database, `rooms/${roomId}/revealedPattern`), initialRevealedPattern);
-        // Then update the rest of the room state
         await update(ref(database, `rooms/${roomId}`), updates);
 
         toast({title: "Drawing Started!", description: `The word has been chosen. Time to draw!`});
@@ -653,7 +654,7 @@ export default function GameRoomPage() {
         toast({title: "Error", description: "Could not start drawing phase.", variant: "destructive"});
     } finally {
         setIsSubmittingWord(false);
-        setCustomWordInput(''); // Clear custom word input
+        setCustomWordInput('');
     }
   }, [playerId, roomId, toast]);
 
@@ -662,19 +663,19 @@ export default function GameRoomPage() {
     if (!currentRoomSnapshot.exists()) return;
     const currentRoomData: Room = currentRoomSnapshot.val();
 
-    if (currentRoomData.gameState !== 'drawing' || !playerId ) { // Only host should end the round via this function
+    if (currentRoomData.gameState !== 'drawing' || !playerId ) {
        return;
     }
 
-    hintTimerRef.current.forEach(clearTimeout); // Clear any active hint timers
+    hintTimerRef.current.forEach(clearTimeout);
     hintTimerRef.current = [];
 
-    if (currentRoomData.hostId === playerId && currentRoomData.gameState === 'drawing') { // Ensure only host can end the round
+    if (currentRoomData.hostId === playerId && currentRoomData.gameState === 'drawing') {
         try {
             await update(ref(database, `rooms/${roomId}`), {
                 gameState: 'round_end',
-                wordSelectionEndsAt: null, // Ensure word selection timer is cleared
-                roundEndsAt: null // Clear drawing timer
+                wordSelectionEndsAt: null,
+                roundEndsAt: null
             });
             toast({ title: "Round Over!", description: `${reason} The word was: ${currentRoomData.currentPattern || "N/A"}`});
         } catch (err) {
@@ -685,7 +686,6 @@ export default function GameRoomPage() {
   }, [playerId, roomId, toast]);
 
   const handleGuessSubmit = useCallback(async (guessText: string) => {
-    // Fetch the latest room state directly inside the callback to avoid stale closures
     const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
     if (!currentRoomSnapshot.exists()) return;
     const currentRoom: Room = currentRoomSnapshot.val();
@@ -711,7 +711,7 @@ export default function GameRoomPage() {
       text: guessText,
       isCorrect,
       isFirstCorrect: isCorrect && isFirstCorrectGlobal,
-      timestamp: serverTimestamp() as any // Firebase Server Timestamp
+      timestamp: serverTimestamp() as any
     };
 
     const currentGuesses = currentRoom.guesses || [];
@@ -725,22 +725,19 @@ export default function GameRoomPage() {
         let pointsAwardedToGuesser = 0;
 
         if (isFirstCorrectGlobal) {
-            pointsAwardedToGuesser = 10; // First correct guesser gets more points
+            pointsAwardedToGuesser = 10;
         } else {
-            pointsAwardedToGuesser = 5; // Subsequent correct guessers
+            pointsAwardedToGuesser = 5;
         }
 
-        // Award points to the guesser
         const currentPlayerData = currentRoom.players[playerId];
         if (currentPlayerData) {
              await update(playerRef, { score: (currentPlayerData.score || 0) + pointsAwardedToGuesser });
         }
 
-        // Award points to the drawer for each correct guess
         const drawerData = currentRoom.players[currentRoom.currentDrawerId!];
         if (drawerData) {
-            // Ensure drawer points are added transactionally or fetched just before update if high concurrency is an issue
-            await update(drawerRef, { score: (drawerData.score || 0) + 3 }); // Example: +3 points per correct guess
+            await update(drawerRef, { score: (drawerData.score || 0) + 3 });
         }
 
         newCorrectGuessers.push(playerId);
@@ -749,9 +746,6 @@ export default function GameRoomPage() {
 
     await update(ref(database, `rooms/${roomId}`), updates);
 
-    // Check if the round should end early (all online non-drawing players guessed correctly)
-    // This check should ideally be done by the host, or a robust mechanism for clients to signal this.
-    // For simplicity, letting the guesser who triggered the "all guessed" state also trigger the end if they are the host.
     if (isCorrect && currentRoom.hostId === playerId) {
         const updatedRoomSnap = await get(ref(database, `rooms/${roomId}`));
         if (!updatedRoomSnap.exists()) return;
@@ -765,7 +759,7 @@ export default function GameRoomPage() {
         }
     }
 
-  }, [playerId, playerName, roomId, toast, endCurrentRound]); // Add endCurrentRound to dependencies
+  }, [playerId, playerName, roomId, toast, endCurrentRound]);
 
   const manageGameStart = useCallback(async () => {
     const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
@@ -775,8 +769,8 @@ export default function GameRoomPage() {
     if (!currentRoomData || !playerId || currentRoomData.hostId !== playerId) return;
 
     if (currentRoomData.gameState === 'waiting' || currentRoomData.gameState === 'game_over') {
-        await prepareNewGameSession(); // This resets scores and prepares for round 1
-        await selectWordForNewRound(); // This will start the word selection for the first drawer
+        await prepareNewGameSession();
+        await selectWordForNewRound();
     }
   }, [playerId, roomId, prepareNewGameSession, selectWordForNewRound]);
 
@@ -849,7 +843,6 @@ export default function GameRoomPage() {
   };
 
 
-  // Effect for listening to room data changes
   useEffect(() => {
     if (!roomId || !playerId) return;
 
@@ -861,22 +854,15 @@ export default function GameRoomPage() {
       if (snapshot.exists()) {
         const roomData = snapshot.val() as Room;
 
-        // Ensure defaults for potentially missing fields
         if (!roomData.drawingData) roomData.drawingData = [];
         if (!roomData.guesses) roomData.guesses = [];
-        if (!roomData.players) roomData.players = {}; // Should be initialized by room creation
+        if (!roomData.players) roomData.players = {};
         if (!roomData.correctGuessersThisRound) roomData.correctGuessersThisRound = [];
         if (!roomData.usedWords) roomData.usedWords = [];
         if (!roomData.selectableWords) roomData.selectableWords = [];
         if (!roomData.config) {
-            // This default should ideally not be hit if room creation is robust
             roomData.config = { roundTimeoutSeconds: 90, totalRounds: 5, maxWordLength: 20, maxHintLetters: 2 };
         }
-        // Safer handling for revealedPattern initialization:
-        // If revealedPattern is absolutely missing from Firebase data, treat it as an empty array.
-        // The actual content (underscores or revealed letters) is managed by confirmWordAndStartDrawing (initial underscores)
-        // and the host's hint effect (revealing letters).
-        // This client-side code should not try to "correct" it beyond ensuring it's a valid array.
         if (roomData.revealedPattern === undefined) {
             roomData.revealedPattern = [];
         }
@@ -886,7 +872,7 @@ export default function GameRoomPage() {
       } else {
         setError("Room not found or has been deleted.");
         setRoom(null);
-        if (!isLoading) { // Only redirect/toast if not in initial loading phase
+        if (!isLoading) {
             toast({ title: "Room Error", description: "This room no longer exists.", variant: "destructive" });
             router.push('/');
         }
@@ -899,22 +885,19 @@ export default function GameRoomPage() {
       toast({ title: "Connection Error", description: "Could not connect to the room.", variant: "destructive" });
     });
 
-    // Handle player online status
     const onConnectedChange = onValue(playerConnectionsRef, (snap) => {
       if (snap.val() === true && playerId && roomId) {
         const playerRefForOnline = ref(database, `rooms/${roomId}/players/${playerId}`);
         get(playerRefForOnline).then(playerSnap => {
-            if (playerSnap.exists()) { // Only set online if player exists in room
+            if (playerSnap.exists()) {
                  set(playerStatusRef, true);
-                 // Set player offline on disconnect
                  onDisconnect(playerStatusRef).set(false).catch(err => console.error("onDisconnect error for player status", err));
             }
         });
       }
     });
 
-    // Initial online status set
-    if (playerId) { // Check if playerId is available
+    if (playerId) {
         get(child(ref(database, `rooms/${roomId}`), `players/${playerId}`)).then(playerSnap => {
           if (playerSnap.exists()) {
             update(child(ref(database, `rooms/${roomId}`), `players/${playerId}`), { isOnline: true });
@@ -925,33 +908,26 @@ export default function GameRoomPage() {
     return () => {
       off(roomRefVal, 'value', onRoomValueChange);
       off(playerConnectionsRef, 'value', onConnectedChange);
-      // Clear hint timers on unmount or when dependencies change that would stop hints
       if (hintTimerRef.current && Array.isArray(hintTimerRef.current)) {
         hintTimerRef.current.forEach(clearTimeout);
       }
       hintTimerRef.current = [];
     };
-  }, [roomId, playerId, router, toast, isLoading]); // isLoading in dep array to re-run if it changes after initial check
+  }, [roomId, playerId, router, toast, isLoading]);
 
 
-  // Effect for host to manage round timer and end round if all guessed
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId) {
       let roundTimer: NodeJS.Timeout | null = null;
 
-      // Check if all online non-drawing players have guessed correctly
       const onlineNonDrawingPlayers = Object.values(room.players || {}).filter(p => p.isOnline && p.id !== room.currentDrawerId);
       const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (room.correctGuessersThisRound || []).includes(p.id));
 
       if (allGuessed) {
-        // End round almost immediately if all have guessed
-        // Use a very short timeout to allow Firebase updates to propagate if needed
         setTimeout(() => {
-            // Re-fetch current room state to double check before ending
             get(ref(database, `rooms/${roomId}`)).then(snap => {
                 if (snap.exists()) {
                     const currentRoomData = snap.val() as Room;
-                     // Check again to ensure state is still drawing and all guessed
                      const currentOnlineNonDrawingPlayers = Object.values(currentRoomData.players || {}).filter(p => p.isOnline && p.id !== currentRoomData.currentDrawerId);
                      const currentAllGuessed = currentOnlineNonDrawingPlayers.length > 0 && currentOnlineNonDrawingPlayers.every(p => (currentRoomData.correctGuessersThisRound || []).includes(p.id));
                     if (currentRoomData.gameState === 'drawing' && currentAllGuessed) {
@@ -959,12 +935,11 @@ export default function GameRoomPage() {
                     }
                 }
             });
-        }, 500); // Small delay
+        }, 500);
       } else if (room.roundEndsAt) {
         const now = Date.now();
         const timeLeftMs = room.roundEndsAt - now;
         if (timeLeftMs <= 0) {
-          // Timer already expired, end round if still in drawing state
           get(ref(database, `rooms/${roomId}/gameState`)).then(snap => {
             if (snap.exists() && snap.val() === 'drawing') {
                endCurrentRound("Timer ran out!");
@@ -972,14 +947,13 @@ export default function GameRoomPage() {
           });
         } else {
           roundTimer = setTimeout(() => {
-            // Double check state before ending round due to timer
             get(ref(database, `rooms/${roomId}`)).then(snap => {
               if (snap.exists()) {
                 const currentRoomData = snap.val() as Room;
                 if (currentRoomData.gameState === 'drawing' &&
-                    currentRoomData.hostId === playerId && // Ensure still host
-                    currentRoomData.roundEndsAt && // Ensure roundEndsAt is still set
-                    Date.now() >= currentRoomData.roundEndsAt) { // Ensure time has indeed passed
+                    currentRoomData.hostId === playerId && 
+                    currentRoomData.roundEndsAt &&
+                    Date.now() >= currentRoomData.roundEndsAt) { 
                    endCurrentRound("Timer ran out!");
                 }
               }
@@ -994,11 +968,10 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room?.currentDrawerId, room?.correctGuessersThisRound, roomId]);
 
 
-  // Effect for host to automatically start next round after round_end
   useEffect(() => {
     if (room?.gameState === 'round_end' && playerId === room?.hostId) {
         const NEXT_ROUND_DELAY_SECONDS = 5;
-        setRoundEndCountdown(NEXT_ROUND_DELAY_SECONDS); // For UI display
+        setRoundEndCountdown(NEXT_ROUND_DELAY_SECONDS);
 
         const countdownInterval = setInterval(() => {
             setRoundEndCountdown(prev => (prev ? prev - 1 : null));
@@ -1008,7 +981,6 @@ export default function GameRoomPage() {
             clearInterval(countdownInterval);
             setRoundEndCountdown(null);
 
-            // Before starting next round, verify current state is still 'round_end' and there are players
             const playersSnap = await get(ref(database, `rooms/${roomId}/players`));
             if (playersSnap.exists()) {
                 const playersData = playersSnap.val();
@@ -1019,13 +991,11 @@ export default function GameRoomPage() {
                     if (onlinePlayersCount > 0) {
                         selectWordForNewRound();
                     } else {
-                        // No online players, end the game
                         await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
                         toast({title: "No Active Players", description: "Game ended as no players are online.", variant: "default"});
                     }
                 }
             } else {
-                 // Critical error if players node is missing, likely end game
                  await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
                  toast({title: "Game Error", description: "Cannot proceed, player data missing.", variant: "destructive"});
             }
@@ -1037,72 +1007,58 @@ export default function GameRoomPage() {
             setRoundEndCountdown(null);
         };
     } else if (room?.gameState !== 'round_end') {
-        setRoundEndCountdown(null); // Clear countdown if state changes away from round_end
+        setRoundEndCountdown(null);
     }
   }, [room?.gameState, room?.hostId, playerId, selectWordForNewRound, roomId, toast]);
 
 
-  // Effect for host to reveal hints progressively
   useEffect(() => {
-    // Clear any existing hint timers from previous renders or rounds
     hintTimerRef.current.forEach(clearTimeout);
     hintTimerRef.current = [];
 
     if (
         room?.gameState === 'drawing' &&
-        room.currentPattern && // Ensure there's a pattern to hint
-        playerId === room.hostId && // Only host manages hints
-        room.roundEndsAt && // Ensure round timer is active
-        room.config && // Ensure config is available
-        room.revealedPattern // Ensure revealedPattern array exists
+        room.currentPattern &&
+        playerId === room.hostId &&
+        room.roundEndsAt &&
+        room.config &&
+        room.revealedPattern
     ) {
         const currentPatternStr = room.currentPattern;
         const patternChars = currentPatternStr.split('');
         const currentPatternNonSpaceLength = patternChars.filter(char => char !== ' ').length;
 
-        // Calculate the number of hints to reveal.
-        // Rule: Min(Host's configured hint count, WordLength - 1), ensuring at least 0 hints if word is too short.
-        // This ensures we try to reveal what the host wants, but never 100% of the word.
         const hostConfiguredMaxHints = room.config.maxHintLetters;
+        // Rule: Math.min(configured hints, word.length - 1), ensuring at least 0 if word.length - 1 is negative
         const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
 
-
         if (finalHintCount === 0 || currentPatternNonSpaceLength === 0) {
-            return; // No hints to reveal or no word to hint
+            return;
         }
 
-        // Get indices of non-space characters that are currently underscores
         const nonSpaceUnderscoreIndices = patternChars
             .map((char, index) => (char !== ' ' && room.revealedPattern && room.revealedPattern[index] === '_' ? index : -1))
             .filter(index => index !== -1);
 
-        // Shuffle these indices and pick 'finalHintCount' of them to reveal
         const shuffledIndices = [...nonSpaceUnderscoreIndices].sort(() => 0.5 - Math.random());
         const indicesToRevealThisRound = shuffledIndices.slice(0, finalHintCount);
 
         const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
-        // Hints start revealing after 50% of round time
-        const startRevealTimeMs = roundDurationMs / 2; 
-        // Time window to reveal all hints (second half of the round)
-        const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs; 
-        // Delay between each hint reveal, spread evenly in the time window
-        const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0; 
+        const startRevealTimeMs = roundDurationMs / 2;
+        const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs;
+        const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0;
 
-        // Prepare the initial underscore pattern for the transaction, in case Firebase is missing it or it's malformed
         const initialUnderscorePatternForTransaction = currentPatternStr.split('').map(char => char === ' ' ? ' ' : '_');
 
 
         indicesToRevealThisRound.forEach((targetCharIndex, hintIteration) => {
-            // Calculate when this specific hint should be revealed
             const revealAtMs = startRevealTimeMs + (hintIteration * delayBetweenHintsMs);
 
             const timerId = setTimeout(async () => {
-                // Before updating, fetch the latest room state to ensure game is still in 'drawing' for this pattern
                 const latestRoomSnap = await get(ref(database, `rooms/${roomId}`));
                 if (!latestRoomSnap.exists()) return;
                 const latestRoomData = latestRoomSnap.val() as Room;
 
-                // If game state or pattern changed, or this hint was already revealed, abort
                 if (latestRoomData.gameState !== 'drawing' || latestRoomData.currentPattern !== currentPatternStr) {
                     return;
                 }
@@ -1110,24 +1066,20 @@ export default function GameRoomPage() {
                 const roomRevealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
                 try {
                     await runTransaction(roomRevealedPatternRef, (currentFirebaseRevealedPattern) => {
-                        // If currentFirebaseRevealedPattern is null or not an array, or wrong length, start fresh
                         let basePattern;
-                        if (currentFirebaseRevealedPattern && 
-                            Array.isArray(currentFirebaseRevealedPattern) && 
+                        if (currentFirebaseRevealedPattern &&
+                            Array.isArray(currentFirebaseRevealedPattern) &&
                             currentFirebaseRevealedPattern.length === patternChars.length) {
-                            // Firebase has a valid-looking pattern, use it
                             basePattern = [...currentFirebaseRevealedPattern];
                         } else {
-                            // Firebase pattern is missing, empty, or wrong length. Start from fresh underscores.
                             basePattern = [...initialUnderscorePatternForTransaction];
                         }
 
-                        // If the target char is valid and is currently an underscore, reveal it
                         if (patternChars[targetCharIndex] && basePattern[targetCharIndex] === '_') {
                             basePattern[targetCharIndex] = patternChars[targetCharIndex];
-                            return basePattern; // Return the modified pattern for Firebase to set
+                            return basePattern;
                         }
-                        return undefined; 
+                        return undefined;
                     });
                 } catch (error) {
                     // console.error("Transaction error revealing hint:", error);
@@ -1138,16 +1090,14 @@ export default function GameRoomPage() {
     }
 
     return () => {
-        // Cleanup: Clear all scheduled hint timeouts when component unmounts or dependencies change
         if (hintTimerRef.current && Array.isArray(hintTimerRef.current)) {
             hintTimerRef.current.forEach(clearTimeout);
         }
-        hintTimerRef.current = []; // Reset the ref
+        hintTimerRef.current = [];
     };
-  }, [room?.gameState, room?.currentPattern, room?.hostId, playerId, roomId, room?.config, room?.roundEndsAt, room?.revealedPattern]); 
+  }, [room?.gameState, room?.currentPattern, room?.hostId, playerId, roomId, room?.config, room?.roundEndsAt, room?.revealedPattern]);
 
 
-  // Effect for host to handle word selection timeout
   useEffect(() => {
     if (room?.gameState === 'word_selection' && room?.hostId === playerId && room?.wordSelectionEndsAt && !room?.currentPattern) {
       const now = Date.now();
@@ -1155,22 +1105,21 @@ export default function GameRoomPage() {
       let timer: NodeJS.Timeout | null = null;
 
       if (timeLeftMs <= 0) {
-        // Timer already expired, drawer didn't choose.
         get(ref(database, `rooms/${roomId}`)).then(snap => {
              if (snap.exists()) {
                  const latestRoomData = snap.val() as Room;
-                 if (latestRoomData.gameState === 'word_selection' && 
-                     latestRoomData.hostId === playerId && 
-                     !latestRoomData.currentPattern && 
-                     latestRoomData.wordSelectionEndsAt && Date.now() >= latestRoomData.wordSelectionEndsAt) { 
-                    
+                 if (latestRoomData.gameState === 'word_selection' &&
+                     latestRoomData.hostId === playerId &&
+                     !latestRoomData.currentPattern &&
+                     latestRoomData.wordSelectionEndsAt && Date.now() >= latestRoomData.wordSelectionEndsAt) {
+
                     const drawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
                     toast({
                         title: "Word Selection Timed Out",
                         description: `${drawerName} didn't choose a word. Moving to the next player...`,
                         variant: "default"
                     });
-                    selectWordForNewRound(); 
+                    selectWordForNewRound();
                  }
              }
           });
@@ -1179,19 +1128,19 @@ export default function GameRoomPage() {
            get(ref(database, `rooms/${roomId}`)).then(snap => {
              if (snap.exists()) {
                  const latestRoomData = snap.val() as Room;
-                 if (latestRoomData.gameState === 'word_selection' && 
-                     latestRoomData.hostId === playerId && 
-                     !latestRoomData.currentPattern && 
-                     latestRoomData.wordSelectionEndsAt && 
-                     Date.now() >= latestRoomData.wordSelectionEndsAt) { 
-                    
+                 if (latestRoomData.gameState === 'word_selection' &&
+                     latestRoomData.hostId === playerId &&
+                     !latestRoomData.currentPattern &&
+                     latestRoomData.wordSelectionEndsAt &&
+                     Date.now() >= latestRoomData.wordSelectionEndsAt) {
+
                     const currentDrawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
                     toast({
                         title: "Word Selection Timed Out",
                         description: `${currentDrawerName} didn't choose a word. Moving to the next player...`,
                         variant: "default"
                     });
-                    selectWordForNewRound(); 
+                    selectWordForNewRound();
                  }
              }
           });
@@ -1217,21 +1166,19 @@ export default function GameRoomPage() {
   const getStartButtonInfo = () => {
     if (room.gameState === 'waiting') return { text: 'Start Game', icon: <Play size={18} /> };
     if (room.gameState === 'game_over') return { text: 'Play Again', icon: <RotateCcw size={18} /> };
-    return null; // No button for other states as game progresses automatically
+    return null;
   };
   const startButtonInfo = getStartButtonInfo();
 
   const wordToDisplay = () => {
     if (!room.currentPattern) return "Choosing word...";
     if (isCurrentPlayerDrawing || (room.correctGuessersThisRound || []).includes(playerId)) {
-        return room.currentPattern; // Drawer and correct guessers see the full word
+        return room.currentPattern;
     }
     const currentWordChars = room.currentPattern.split('');
-    // Ensure revealedPattern is an array and has the same length as the current word.
-    // If not, default to all underscores. This guards against stale or malformed revealedPattern.
-    const patternToShow = Array.isArray(room.revealedPattern) && room.revealedPattern.length === currentWordChars.length 
-                          ? room.revealedPattern 
-                          : currentWordChars.map((char) => char === ' ' ? ' ' : '_'); 
+    const patternToShow = Array.isArray(room.revealedPattern) && room.revealedPattern.length === currentWordChars.length
+                          ? room.revealedPattern
+                          : currentWordChars.map((char) => char === ' ' ? ' ' : '_');
     return patternToShow.join(' ');
   };
 
@@ -1239,7 +1186,6 @@ export default function GameRoomPage() {
   return (
     <TooltipProvider>
     <div className="container mx-auto p-2 md:p-4 h-full flex flex-col gap-4 animate-in fade-in duration-300">
-      {/* Room Info Card */}
       <Card className="shadow-lg border-border/80">
         <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4">
             <CardTitle className="text-lg sm:text-xl md:text-2xl font-semibold">
@@ -1249,24 +1195,24 @@ export default function GameRoomPage() {
             variant="ghost"
             size="icon"
             onClick={() => setIsRoomInfoMinimized(!isRoomInfoMinimized)}
-            className="md:hidden" 
+            className="md:hidden"
             aria-label={isRoomInfoMinimized ? "Expand room info" : "Minimize room info"}
             >
             {isRoomInfoMinimized ? <ChevronDown className="h-5 w-5" /> : <ChevronUp className="h-5 w-5" />}
             </Button>
         </CardHeader>
-        
+
         <div
             className={cn(
             "transition-all duration-300 ease-in-out overflow-hidden",
             {
-                "max-h-0 opacity-0": isRoomInfoMinimized, 
-                "max-h-[500px] opacity-100": !isRoomInfoMinimized, 
+                "max-h-0 opacity-0": isRoomInfoMinimized,
+                "max-h-[500px] opacity-100": !isRoomInfoMinimized,
             },
-            "md:max-h-none md:opacity-100" 
+            "md:max-h-none md:opacity-100"
             )}
         >
-            <div className="px-3 sm:px-4 pb-2 md:px-6 md:pb-4 pt-0"> 
+            <div className="px-3 sm:px-4 pb-2 md:px-6 md:pb-4 pt-0">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                 <CardDescription className="mt-1 sm:mt-0">
                     Round {room.currentRoundNumber || 0}/{room.config.totalRounds || 'N/A'} | Status: <span className="font-semibold text-primary capitalize">{room.gameState.replace('_', ' ')}</span>
@@ -1282,7 +1228,7 @@ export default function GameRoomPage() {
             </div>
 
             {isHost && startButtonInfo && (room.gameState === 'waiting' || room.gameState === 'game_over') && (
-            <CardFooter className="pt-3 sm:pt-4 border-t"> 
+            <CardFooter className="pt-3 sm:pt-4 border-t">
                 <Button
                     onClick={manageGameStart}
                     className="w-full md:w-auto"
@@ -1295,9 +1241,8 @@ export default function GameRoomPage() {
         </div>
         </Card>
 
-      {/* Word Selection Dialog for Drawer */}
       {room.gameState === 'word_selection' && isCurrentPlayerDrawing && (
-        <Dialog open={true} onOpenChange={() => { /* Prevent closing */ }}>
+        <Dialog open={true} onOpenChange={() => { }}>
           <DialogContent className="sm:max-w-[480px] shadow-xl border-border/80">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-2xl"><Lightbulb className="text-yellow-400"/> Choose a word to draw</DialogTitle>
@@ -1312,7 +1257,7 @@ export default function GameRoomPage() {
                   <Button
                     key={word}
                     variant="secondary"
-                    className="text-lg px-6 py-3" 
+                    className="text-lg px-6 py-3"
                     onClick={() => confirmWordAndStartDrawing(word)}
                     disabled={isSubmittingWord}
                   >
@@ -1341,7 +1286,7 @@ export default function GameRoomPage() {
                 </div>
               </form>
             </div>
-            {room.wordSelectionEndsAt && ( 
+            {room.wordSelectionEndsAt && (
                 <div className="text-center mt-2 text-sm">
                     <TimerDisplay targetTime={room.wordSelectionEndsAt} gameState="word_selection" defaultSeconds={15} label="" />
                 </div>
@@ -1350,14 +1295,13 @@ export default function GameRoomPage() {
         </Dialog>
       )}
 
-      {/* Message for Guessers during Word Selection */}
       {room.gameState === 'word_selection' && !isCurrentPlayerDrawing && (
           <Card className="p-4 text-center bg-muted/80 shadow animate-in fade-in">
               <div className="text-lg font-semibold flex items-center justify-center gap-2">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   {currentDrawerName || "The drawer"} is choosing a word... Get ready to guess!
               </div>
-              {room.wordSelectionEndsAt && 
+              {room.wordSelectionEndsAt &&
                 <div className="text-sm text-muted-foreground mt-1">
                     Time to choose: <TimerDisplay targetTime={room.wordSelectionEndsAt} gameState="word_selection" defaultSeconds={15} label="" />
                 </div>
@@ -1365,23 +1309,22 @@ export default function GameRoomPage() {
           </Card>
       )}
 
-      {/* Current Word Display / Hint Area */}
       {room.gameState === 'drawing' && room.currentPattern && (
         <div className="p-3 text-center bg-accent/10 border-accent shadow rounded-md">
-          <div className="text-sm text-card-foreground flex items-center justify-center"> 
+          <div className="text-card-foreground flex items-center justify-center">
             <span>
-                {isCurrentPlayerDrawing 
-                    ? "Your word to draw is: " 
-                    : (room.correctGuessersThisRound || []).includes(playerId) 
-                    ? "You guessed it! The word is: " 
+                {isCurrentPlayerDrawing
+                    ? "Your word to draw is: "
+                    : (room.correctGuessersThisRound || []).includes(playerId)
+                    ? "You guessed it! The word is: "
                     : "Guess the word!"}
                 {!isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId) && room.currentPattern && room.gameState === 'drawing' && (
                     <span className="ml-1 text-muted-foreground">({room.currentPattern.replace(/\s/g, '').length} letters)</span>
                 )}
             </span>
-            <strong 
-                key={room.revealedPattern?.join('')} 
-                className="text-xl ml-2 font-mono tracking-wider text-accent animate-in fade-in duration-300" 
+            <strong
+                key={room.revealedPattern?.join('')}
+                className="text-xl ml-2 font-mono tracking-wider text-accent animate-in fade-in duration-300"
             >
                 {wordToDisplay()}
             </strong>
@@ -1400,7 +1343,6 @@ export default function GameRoomPage() {
         </div>
       )}
 
-      {/* Round End Display */}
       {room.gameState === 'round_end' && (
         <Card className="p-4 shadow-lg bg-green-500/10 border-green-500/30 animate-in fade-in">
             <CardTitle className="text-xl mb-2 text-green-700">Round Over!</CardTitle>
@@ -1418,7 +1360,6 @@ export default function GameRoomPage() {
         </Card>
       )}
 
-      {/* Game Over Display */}
       {room.gameState === 'game_over' && (
         <Card className="p-6 shadow-xl bg-primary/10 border-primary/30 animate-in fade-in">
             <CardTitle className="text-2xl mb-4 text-center text-primary flex items-center justify-center gap-2"><Trophy /> Game Over! <Trophy /></CardTitle>
@@ -1435,11 +1376,9 @@ export default function GameRoomPage() {
       )}
 
 
-      {/* Main Game Layout */}
-      <div className="flex-grow flex flex-col md:flex-row gap-4 min-h-0"> 
+      <div className="flex-grow flex flex-col md:flex-row gap-4 min-h-0">
 
-          {/* Drawing Canvas */}
-          <div className="order-1 w-full md:w-2/3 flex flex-col h-[60vh] md:h-auto md:flex-grow-[2] md:min-h-[300px]"> 
+          <div className="order-1 w-full md:w-2/3 flex flex-col h-[60vh] md:h-auto md:flex-grow-[2] md:min-h-[300px]">
             <DrawingCanvas
               drawingData={room.drawingData || []}
               onDraw={handleDraw}
@@ -1452,9 +1391,7 @@ export default function GameRoomPage() {
             />
           </div>
 
-          {/* Mobile Layout: PlayerList on left, ChatArea + GuessInput on right */}
           <div className="order-2 flex-grow flex flex-row gap-4 min-h-0 md:hidden">
-            {/* Left Column: PlayerList */}
             <div className="w-1/2 h-full flex flex-col">
               <PlayerList
                 players={playersArray}
@@ -1464,32 +1401,35 @@ export default function GameRoomPage() {
                 setIsMinimized={setIsPlayerListMinimized}
               />
             </div>
-            {/* Right Column: ChatArea and GuessInput */}
-            <div className="w-1/2 h-full flex flex-col gap-2">
-              <ChatArea guesses={room.guesses || []} room={room} />
-              <div className="p-2 border-t bg-background">
-                <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
-              </div>
+            <div className="w-1/2 h-full flex flex-col">
+              <ChatArea
+                guesses={room.guesses || []}
+                room={room}
+                onGuessSubmit={handleGuessSubmit}
+                disabled={!canGuess}
+              />
             </div>
           </div>
 
 
-          {/* Desktop Layout: Stacked Chat, PlayerList, GuessInput */}
-          <div className="order-3 hidden md:flex md:flex-col md:w-1/3 md:gap-4 md:flex-grow-[1] md:min-h-0"> 
-            <ChatArea guesses={room.guesses || []} room={room} />
-            <PlayerList 
-                players={playersArray} 
-                currentPlayerId={room.currentDrawerId} 
+          <div className="order-3 hidden md:flex md:flex-col md:w-1/3 md:gap-4 md:flex-grow-[1] md:min-h-0">
+            <ChatArea
+                guesses={room.guesses || []}
+                room={room}
+                onGuessSubmit={handleGuessSubmit}
+                disabled={!canGuess}
+            />
+            <PlayerList
+                players={playersArray}
+                currentPlayerId={room.currentDrawerId}
                 hostId={room.hostId}
                 isMinimized={isPlayerListMinimized}
                 setIsMinimized={setIsPlayerListMinimized}
             />
-            <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
+            {/* GuessInput is now part of ChatArea, so no separate instance here */}
           </div>
         </div>
     </div>
     </TooltipProvider>
   );
 }
-
-
