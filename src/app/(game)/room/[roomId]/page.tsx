@@ -933,7 +933,7 @@ export default function GameRoomPage() {
         if (roundTimer) clearTimeout(roundTimer);
       };
     }
-  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room.currentDrawerId, room?.correctGuessersThisRound, roomId]);
+  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room?.currentDrawerId, room?.correctGuessersThisRound, roomId]);
 
 
   // Effect for host to automatically start next round after round_end
@@ -1185,9 +1185,10 @@ export default function GameRoomPage() {
     }
     
     const currentWordChars = room.currentPattern.split('');
+    // Fallback to underscores if revealedPattern is not yet populated or mismatched length
     const patternToShow = Array.isArray(room.revealedPattern) && room.revealedPattern.length === currentWordChars.length
                           ? room.revealedPattern 
-                          : currentWordChars.map((char) => char === ' ' ? ' ' : '_'); // Fallback to all underscores
+                          : currentWordChars.map((char) => char === ' ' ? ' ' : '_'); 
     return patternToShow.join(' ');
   };
 
@@ -1408,3 +1409,4 @@ export default function GameRoomPage() {
     </TooltipProvider>
   );
 }
+
