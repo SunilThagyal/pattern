@@ -22,14 +22,16 @@ const DrawingCanvas = ({
   currentDrawerId, 
   playerId, 
   isDrawingEnabled, 
-  clearCanvas 
+  clearCanvas,
+  currentDrawerName
 }: { 
   drawingData: DrawingPoint[], 
   onDraw: (point: DrawingPoint) => void, 
   currentDrawerId?: string | null, 
   playerId: string, 
   isDrawingEnabled: boolean, 
-  clearCanvas: () => void 
+  clearCanvas: () => void,
+  currentDrawerName?: string | null
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -247,7 +249,7 @@ const DrawingCanvas = ({
             </Button>
           </div>
         )}
-        {!isDrawingEnabled && currentDrawerId && <p className="text-sm text-muted-foreground">It's {room?.players[currentDrawerId]?.name || 'someone'}'s turn to draw.</p>}
+        {!isDrawingEnabled && currentDrawerId && <p className="text-sm text-muted-foreground">It's {currentDrawerName || 'someone'}'s turn to draw.</p>}
         {!currentDrawerId && <p className="text-sm text-muted-foreground">Waiting for drawer...</p>}
       </CardHeader>
       <CardContent className="flex-grow p-0 bg-slate-50 relative">
@@ -600,6 +602,8 @@ export default function GameRoomPage() {
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const canGuess = room.gameState === 'drawing' && !isCurrentPlayerDrawing;
   const isHost = room.hostId === playerId;
+  const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : null;
+
 
   return (
     <div className="container mx-auto p-2 md:p-4 h-full flex flex-col gap-4 animate-in fade-in duration-300">
@@ -642,6 +646,7 @@ export default function GameRoomPage() {
             playerId={playerId}
             isDrawingEnabled={isCurrentPlayerDrawing && room.gameState === 'drawing'}
             clearCanvas={handleClearCanvas}
+            currentDrawerName={currentDrawerName}
           />
         </div>
 
