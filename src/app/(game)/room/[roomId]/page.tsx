@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { useEffect, useState, useRef, type MouseEvent, type TouchEvent, useCallback } from 'react';
@@ -13,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, MessageSquare, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, HelpCircle, Lightbulb, Edit3, Info, ChevronUp, ChevronDown } from 'lucide-react';
+import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, MessageSquare, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, HelpCircle, Lightbulb, Edit3, Info, ChevronUp, ChevronDown, Brush } from 'lucide-react';
 import Link from 'next/link';
 import {
   Tooltip,
@@ -1061,6 +1062,7 @@ export default function GameRoomPage() {
 
         // Calculate the number of hints to reveal.
         // Rule: Min(Host's configured hint count, WordLength - 1), ensuring at least 0 hints if word is too short.
+        // This ensures we try to reveal what the host wants, but never 100% of the word.
         const hostConfiguredMaxHints = room.config.maxHintLetters;
         const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
 
@@ -1079,15 +1081,19 @@ export default function GameRoomPage() {
         const indicesToRevealThisRound = shuffledIndices.slice(0, finalHintCount);
 
         const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
-        const startRevealTimeMs = roundDurationMs / 2; // Start revealing hints after 50% of round time
-        const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs; // Time window to reveal all hints
-        const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0; // Delay between each hint reveal
+        // Hints start revealing after 50% of round time
+        const startRevealTimeMs = roundDurationMs / 2; 
+        // Time window to reveal all hints (second half of the round)
+        const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs; 
+        // Delay between each hint reveal, spread evenly in the time window
+        const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0; 
 
         // Prepare the initial underscore pattern for the transaction, in case Firebase is missing it or it's malformed
         const initialUnderscorePatternForTransaction = currentPatternStr.split('').map(char => char === ' ' ? ' ' : '_');
 
 
         indicesToRevealThisRound.forEach((targetCharIndex, hintIteration) => {
+            // Calculate when this specific hint should be revealed
             const revealAtMs = startRevealTimeMs + (hintIteration * delayBetweenHintsMs);
 
             const timerId = setTimeout(async () => {
@@ -1221,6 +1227,8 @@ export default function GameRoomPage() {
         return room.currentPattern; // Drawer and correct guessers see the full word
     }
     const currentWordChars = room.currentPattern.split('');
+    // Ensure revealedPattern is an array and has the same length as the current word.
+    // If not, default to all underscores. This guards against stale or malformed revealedPattern.
     const patternToShow = Array.isArray(room.revealedPattern) && room.revealedPattern.length === currentWordChars.length 
                           ? room.revealedPattern 
                           : currentWordChars.map((char) => char === ' ' ? ' ' : '_'); 
@@ -1444,27 +1452,24 @@ export default function GameRoomPage() {
             />
           </div>
 
-          {/* Mobile Layout: PlayerList, ChatArea (side-by-side), then GuessInput below */}
-          <div className="order-2 flex-grow flex flex-col gap-4 min-h-0 md:hidden"> 
-            <div className="flex flex-row gap-2 flex-grow min-h-0"> 
-              <div className="w-1/2 h-full flex flex-col">
-                <PlayerList 
-                    players={playersArray} 
-                    currentPlayerId={room.currentDrawerId} 
-                    hostId={room.hostId}
-                    isMinimized={isPlayerListMinimized}
-                    setIsMinimized={setIsPlayerListMinimized}
-                />
-              </div>
-              <div className="w-1/2 h-full flex flex-col">
-                <ChatArea 
-                    guesses={room.guesses || []} 
-                    room={room}
-                />
-              </div>
+          {/* Mobile Layout: PlayerList on left, ChatArea + GuessInput on right */}
+          <div className="order-2 flex-grow flex flex-row gap-4 min-h-0 md:hidden">
+            {/* Left Column: PlayerList */}
+            <div className="w-1/2 h-full flex flex-col">
+              <PlayerList
+                players={playersArray}
+                currentPlayerId={room.currentDrawerId}
+                hostId={room.hostId}
+                isMinimized={isPlayerListMinimized}
+                setIsMinimized={setIsPlayerListMinimized}
+              />
             </div>
-            <div className="p-2 border-t bg-background"> 
-                 <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
+            {/* Right Column: ChatArea and GuessInput */}
+            <div className="w-1/2 h-full flex flex-col gap-2">
+              <ChatArea guesses={room.guesses || []} room={room} />
+              <div className="p-2 border-t bg-background">
+                <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
+              </div>
             </div>
           </div>
 
@@ -1486,4 +1491,5 @@ export default function GameRoomPage() {
     </TooltipProvider>
   );
 }
+
 
