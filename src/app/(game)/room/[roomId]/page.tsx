@@ -1,8 +1,9 @@
+
 "use client";
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ref, onValue, off, update, serverTimestamp, onDisconnect, goOffline, goOnline, set, child } from 'firebase/database';
+import { ref, onValue, off, update, serverTimestamp, onDisconnect, goOffline, goOnline, set, child, get } from 'firebase/database';
 import { database } from '@/lib/firebase';
 import type { Room, Player, DrawingPoint, Guess } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
@@ -378,3 +379,4 @@ export default function GameRoomPage() {
     </div>
   );
 }
+
