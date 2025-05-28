@@ -38,6 +38,7 @@ export interface Room {
   currentDrawerId?: string | null;
   currentPattern?: string | null; // The word being drawn
   selectableWords?: string[]; // Words for the drawer to choose from
+  revealedPattern?: string[]; // For hint system, e.g., ['A', '_', '_']
   guesses: Guess[];
   drawingData: DrawingPoint[];
   gameState: 'waiting' | 'word_selection' | 'drawing' | 'round_end' | 'game_over';
@@ -47,4 +48,5 @@ export interface Room {
   createdAt: number;
 }
 
-export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameState' | 'createdAt' | 'config' | 'currentRoundNumber'> & { drawingData: DrawingPoint[]};
+export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameState' | 'createdAt' | 'config' | 'currentRoundNumber'> & { drawingData: DrawingPoint[], revealedPattern?: string[] };
+
