@@ -21,6 +21,7 @@ import {
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
+  AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
@@ -329,7 +330,7 @@ const PlayerList = ({
     </CardHeader>
     <div className={cn(
         "transition-all duration-300 ease-in-out overflow-hidden",
-        isMinimized ? "max-h-0 opacity-0" : "max-h-72 opacity-100" // max-h-72 allows good space for players
+        isMinimized ? "max-h-0 opacity-0" : "max-h-72 opacity-100" 
     )}>
         <CardContent className="h-full pt-3 sm:pt-4"> 
         <ScrollArea className="h-full pr-3">
@@ -1303,7 +1304,7 @@ export default function GameRoomPage() {
 
       {room.gameState === 'drawing' && room.currentPattern && (
         <div className="p-3 text-center bg-accent/10 border-accent shadow rounded-md">
-          <div className="text-card-foreground flex items-center justify-center">
+          <div className="text-sm text-card-foreground flex items-center justify-center">
             <span>
                 {isHost ? "Click letters below to reveal hints. " : ""}
                 {isCurrentPlayerDrawing 
