@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Timer, ListChecks, TextCursorInput } from 'lucide-react';
+import { Loader2, Timer, ListChecks, TextCursorInput, Info } from 'lucide-react';
 
 interface RoomFormProps {
   mode: 'create' | 'join';
@@ -29,6 +29,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   const [roundTimeoutSeconds, setRoundTimeoutSeconds] = useState(90);
   const [totalRounds, setTotalRounds] = useState(5);
   const [maxWordLength, setMaxWordLength] = useState(20);
+  const [maxHintLetters, setMaxHintLetters] = useState(2);
 
 
   useEffect(() => {
@@ -63,9 +64,10 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
     if (mode === 'create' && (
         Number.isNaN(roundTimeoutSeconds) || roundTimeoutSeconds < 30 ||
         Number.isNaN(totalRounds) || totalRounds < 1 ||
-        Number.isNaN(maxWordLength) || maxWordLength < 3
+        Number.isNaN(maxWordLength) || maxWordLength < 3 ||
+        Number.isNaN(maxHintLetters) || maxHintLetters < 1 || maxHintLetters > 3
     )) {
-        toast({ title: "Invalid Config", description: "Please check room settings. Values must be valid numbers (min timeout 30s, min 1 round, min word length 3).", variant: "destructive" });
+        toast({ title: "Invalid Config", description: "Please check room settings. Ensure all values are valid numbers (min timeout 30s, min 1 round, min word length 3, hint letters 1-3).", variant: "destructive" });
         setIsLoading(false);
         return;
     }
@@ -79,9 +81,10 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       const player: Player = { id: playerId, name: playerName, score: 0, isOnline: true, isHost: true };
       
       const roomConfig: RoomConfig = {
-        roundTimeoutSeconds: roundTimeoutSeconds, // Will be valid numbers due to check above
+        roundTimeoutSeconds: roundTimeoutSeconds,
         totalRounds: totalRounds,
         maxWordLength: maxWordLength,
+        maxHintLetters: maxHintLetters,
       };
       
       const roomData: RoomCreationData = {
@@ -92,7 +95,11 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         createdAt: serverTimestamp() as unknown as number,
         drawingData: [],
         config: roomConfig,
-        currentRoundNumber: 0, // Will be set to 1 when game starts
+        currentRoundNumber: 0, 
+        usedWords: [],
+        revealedPattern: [],
+        selectableWords: [],
+        wordSelectionEndsAt: null,
       };
 
       try {
@@ -185,7 +192,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   id="roundTimeout" 
                   type="number" 
                   value={Number.isNaN(roundTimeoutSeconds) ? '' : roundTimeoutSeconds} 
-                  onChange={e => setRoundTimeoutSeconds(Math.max(30, parseInt(e.target.value)))} 
+                  onChange={e => setRoundTimeoutSeconds(parseInt(e.target.value))} 
                   min="30" 
                   className="text-base py-3"
                 />
@@ -197,7 +204,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   id="totalRounds" 
                   type="number" 
                   value={Number.isNaN(totalRounds) ? '' : totalRounds} 
-                  onChange={e => setTotalRounds(Math.max(1, parseInt(e.target.value)))} 
+                  onChange={e => setTotalRounds(parseInt(e.target.value))} 
                   min="1" 
                   className="text-base py-3"
                 />
@@ -209,11 +216,24 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   id="maxWordLength" 
                   type="number" 
                   value={Number.isNaN(maxWordLength) ? '' : maxWordLength} 
-                  onChange={e => setMaxWordLength(Math.max(3, parseInt(e.target.value)))} 
+                  onChange={e => setMaxWordLength(parseInt(e.target.value))} 
                   min="3" 
                   className="text-base py-3"
                 />
                 <p className="text-xs text-muted-foreground">Maximum character length for words to be drawn (min 3).</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="maxHintLetters" className="flex items-center"><Info size={16} className="mr-2 text-muted-foreground"/> Max Hint Letters Revealed</Label>
+                <Input 
+                  id="maxHintLetters" 
+                  type="number" 
+                  value={Number.isNaN(maxHintLetters) ? '' : maxHintLetters} 
+                  onChange={e => setMaxHintLetters(parseInt(e.target.value))} 
+                  min="1" 
+                  max="3"
+                  className="text-base py-3"
+                />
+                <p className="text-xs text-muted-foreground">Max letters revealed as hints (1-3). Cannot exceed 50% of word length.</p>
               </div>
             </>
           )}
