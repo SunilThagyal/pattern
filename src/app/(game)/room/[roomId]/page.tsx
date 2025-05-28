@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, MessageSquare, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, HelpCircle, Lightbulb, Edit3 } from 'lucide-react';
@@ -20,7 +21,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { suggestWords, type SuggestWordsInput } from '@/ai/flows/suggest-words-flow';
+import { suggestWords, type SuggestWordsInput, type SuggestWordsOutput } from '@/ai/flows/suggest-words-flow';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 
@@ -843,7 +844,7 @@ export default function GameRoomPage() {
     } else if (room?.gameState !== 'round_end') { 
         setRoundEndCountdown(null);
     }
-  }, [room?.gameState, room?.hostId, playerId, selectWordForNewRound]);
+  }, [room?.gameState, room?.hostId, playerId, selectWordForNewRound, roomId]);
 
 
   // Effect for host to reveal hints
