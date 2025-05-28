@@ -406,155 +406,6 @@ export default function GameRoomPage() {
     setPlayerName(pName);
   }, [roomId, router, toast]);
 
-  // Firebase Listeners
-  useEffect(() => {
-    if (!roomId || !playerId) return;
-
-    const roomRef = ref(database, `rooms/${roomId}`);
-    const playerStatusRef = ref(database, `rooms/${roomId}/players/${playerId}/isOnline`);
-    const playerConnectionsRef = ref(database, '.info/connected');
-
-    const onRoomValueChange = onValue(roomRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const roomData = snapshot.val() as Room;
-        if (!roomData.drawingData) roomData.drawingData = [];
-        if (!roomData.guesses) roomData.guesses = [];
-        if (!roomData.players) roomData.players = {};
-        if (!roomData.correctGuessersThisRound) roomData.correctGuessersThisRound = [];
-        if (!roomData.revealedPattern) roomData.revealedPattern = roomData.currentPattern ? roomData.currentPattern.split('').map(() => '_') : [];
-        setRoom(roomData);
-        setError(null);
-      } else {
-        setError("Room not found or has been deleted.");
-        setRoom(null);
-        toast({ title: "Room Error", description: "This room no longer exists.", variant: "destructive" });
-        router.push('/');
-      }
-      setIsLoading(false);
-    }, (err) => {
-      console.error(err);
-      setError("Failed to load room data.");
-      setIsLoading(false);
-      toast({ title: "Connection Error", description: "Could not connect to the room.", variant: "destructive" });
-    });
-    
-    const onConnectedChange = onValue(playerConnectionsRef, (snap) => {
-      if (snap.val() === true && playerId) {
-        const playerRefForOnline = ref(database, `rooms/${roomId}/players/${playerId}`);
-        get(playerRefForOnline).then(playerSnap => {
-            if (playerSnap.exists()) {
-                 set(playerStatusRef, true);
-                 onDisconnect(playerStatusRef).set(false).catch(err => console.error("onDisconnect error for status", err));
-            }
-        });
-      }
-    });
-
-    get(child(roomRef, `players/${playerId}`)).then(playerSnap => {
-      if (playerSnap.exists()) {
-        update(child(roomRef, `players/${playerId}`), { isOnline: true });
-      } else {
-        if (!isLoading && !error) { 
-            toast({ title: "Access Denied", description: "You are not part of this room. Please join properly.", variant: "destructive" });
-            router.push(`/join/${roomId}`);
-        }
-      }
-    });
-
-    return () => {
-      off(roomRef, 'value', onRoomValueChange);
-      off(playerConnectionsRef, 'value', onConnectedChange);
-      hintTimersRef.current.forEach(clearTimeout); 
-    };
-  }, [roomId, playerId, router, toast, isLoading, error]);
-
-  // Timer effect for ending round by host
-  useEffect(() => {
-    if (room?.gameState === 'drawing' && room.roundEndsAt && playerId === room.hostId) {
-      const now = Date.now();
-      const timeLeftMs = room.roundEndsAt - now;
-      if (timeLeftMs <= 0) {
-        endCurrentRound("Timer ran out!");
-      } else {
-        const timer = setTimeout(() => {
-          endCurrentRound("Timer ran out!");
-        }, timeLeftMs);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, room?.id, room?.currentPattern]);
-
-
-  // Effect for host to manage automatic round progression
-  useEffect(() => {
-    if (room?.gameState === 'round_end' && playerId === room.hostId) {
-        const NEXT_ROUND_DELAY_SECONDS = 5;
-        setRoundEndCountdown(NEXT_ROUND_DELAY_SECONDS);
-
-        const countdownInterval = setInterval(() => {
-            setRoundEndCountdown(prev => (prev ? prev - 1 : null));
-        }, 1000);
-
-        const nextRoundTimer = setTimeout(() => {
-            clearInterval(countdownInterval);
-            setRoundEndCountdown(null);
-            selectWordForNewRound();
-        }, NEXT_ROUND_DELAY_SECONDS * 1000);
-
-        return () => {
-            clearTimeout(nextRoundTimer);
-            clearInterval(countdownInterval);
-            setRoundEndCountdown(null); // Clear countdown if component unmounts or state changes
-        };
-    } else if (room?.gameState !== 'round_end') { // Clear countdown if not in round_end state
-        setRoundEndCountdown(null);
-    }
-  }, [room?.gameState, room?.hostId, playerId, roomId, selectWordForNewRound]);
-
-
-  // Effect for host to reveal hints
-  useEffect(() => {
-    hintTimersRef.current.forEach(clearTimeout); // Clear previous timers
-    hintTimersRef.current = [];
-
-    if (room?.gameState === 'drawing' && room.currentPattern && playerId === room.hostId && room.roundEndsAt && room.config) {
-        const patternArray = room.currentPattern.split('');
-        
-        const scheduleHintReveal = (indexToReveal: number, delay: number) => {
-            const timer = setTimeout(async () => {
-                const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
-                if (currentRoomSnapshot.exists()) {
-                    const currentRoomData: Room = currentRoomSnapshot.val();
-                    if (currentRoomData.gameState === 'drawing' && currentRoomData.currentPattern === room.currentPattern) { // Ensure still in the same drawing round
-                        let currentDbRevealedPattern = [...(currentRoomData.revealedPattern || patternArray.map(() => '_'))];
-                        if (indexToReveal >= 0 && indexToReveal < patternArray.length && currentDbRevealedPattern[indexToReveal] === '_') {
-                            currentDbRevealedPattern[indexToReveal] = patternArray[indexToReveal];
-                            await update(ref(database, `rooms/${roomId}/revealedPattern`), currentDbRevealedPattern);
-                        }
-                    }
-                }
-            }, delay);
-            hintTimersRef.current.push(timer);
-        };
-
-        const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
-
-        // Hint 1: Reveal first letter (if not already revealed)
-        if (patternArray.length > 0 && (room.revealedPattern?.[0] === '_' || !room.revealedPattern)) {
-            scheduleHintReveal(0, roundDurationMs / 3);
-        }
-
-        // Hint 2: Reveal last letter (if not already revealed and different from first)
-        if (patternArray.length > 1 && (room.revealedPattern?.[patternArray.length - 1] === '_' || !room.revealedPattern)) {
-            scheduleHintReveal(patternArray.length - 1, roundDurationMs * 2 / 3);
-        }
-    }
-    return () => {
-        hintTimersRef.current.forEach(clearTimeout);
-    };
-  }, [room?.gameState, room?.currentPattern, room?.hostId, playerId, roomId, room?.config?.roundTimeoutSeconds, room?.roundEndsAt, room?.revealedPattern]);
-
-
   const handleLeaveRoom = async () => {
     if (playerId && room) {
       const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
@@ -714,13 +565,8 @@ export default function GameRoomPage() {
 
 
   const endCurrentRound = useCallback(async (reason: string = "Round ended.") => {
-    // This function should only be called by the host (timer expiration) or
-    // implicitly when gameState is set to 'round_end' by other logic (e.g., all guessed).
     if (!room || playerId !== room.hostId || room.gameState !== 'drawing') {
-      // If not host or not in drawing state, this specific call might be redundant if gameState is already changing.
-      // However, if it's a timer expiring, host needs to ensure the state change.
       if (room?.gameState === 'drawing' && playerId === room.hostId) {
-        // Proceed to update state if it's a timer expiration for the host.
       } else {
         return;
       }
@@ -735,7 +581,7 @@ export default function GameRoomPage() {
   }, [room, playerId, roomId, toast]);
 
 
-  const handleGuessSubmit = async (guessText: string) => {
+  const handleGuessSubmit = useCallback(async (guessText: string) => {
     if (!room || !playerId || !playerName || room.currentDrawerId === playerId || room.gameState !== 'drawing' || !room.currentPattern) return;
     
     if ((room.correctGuessersThisRound || []).includes(playerId)) {
@@ -783,32 +629,174 @@ export default function GameRoomPage() {
 
         updates.correctGuessersThisRound = [...(room.correctGuessersThisRound || []), playerId];
 
-        // Check for early round completion
-        const currentCorrectGuessers = updates.correctGuessersThisRound;
+        const currentCorrectGuessers = updates.correctGuessersThisRound || [];
         const onlineNonDrawingPlayers = Object.values(room.players).filter(p => p.isOnline && p.id !== room.currentDrawerId);
         
         const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => currentCorrectGuessers.includes(p.id));
 
         if (allGuessed) {
             updates.gameState = 'round_end';
-            // Toast can be triggered by observing gameState change to 'round_end' by all clients,
-            // or host can toast specifically. For now, the endCurrentRound toast will cover it.
         }
     }
     
     await update(ref(database, `rooms/${roomId}`), updates);
-  };
+  }, [room, playerId, playerName, roomId, toast]);
   
-  const manageGameProgression = useCallback(() => { // This is now only for initial Start Game or Play Again
+  const manageGameProgression = useCallback(() => { 
     if (!room || !playerId || room.hostId !== playerId) return;
 
     if (room.gameState === 'waiting' || room.gameState === 'game_over') {
         prepareNewGameSession().then(() => {
-            // After resetting (which sets to 'waiting'), call selectWordForNewRound to start the first round.
             selectWordForNewRound();
         });
     }
-  }, [room, playerId, room?.hostId, prepareNewGameSession, selectWordForNewRound]);
+  }, [room, playerId, prepareNewGameSession, selectWordForNewRound]);
+
+  // Firebase Listeners
+  useEffect(() => {
+    if (!roomId || !playerId) return;
+
+    const roomRef = ref(database, `rooms/${roomId}`);
+    const playerStatusRef = ref(database, `rooms/${roomId}/players/${playerId}/isOnline`);
+    const playerConnectionsRef = ref(database, '.info/connected');
+
+    const onRoomValueChange = onValue(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const roomData = snapshot.val() as Room;
+        if (!roomData.drawingData) roomData.drawingData = [];
+        if (!roomData.guesses) roomData.guesses = [];
+        if (!roomData.players) roomData.players = {};
+        if (!roomData.correctGuessersThisRound) roomData.correctGuessersThisRound = [];
+        if (!roomData.revealedPattern) roomData.revealedPattern = roomData.currentPattern ? roomData.currentPattern.split('').map(() => '_') : [];
+        setRoom(roomData);
+        setError(null);
+      } else {
+        setError("Room not found or has been deleted.");
+        setRoom(null);
+        toast({ title: "Room Error", description: "This room no longer exists.", variant: "destructive" });
+        router.push('/');
+      }
+      setIsLoading(false);
+    }, (err) => {
+      console.error(err);
+      setError("Failed to load room data.");
+      setIsLoading(false);
+      toast({ title: "Connection Error", description: "Could not connect to the room.", variant: "destructive" });
+    });
+    
+    const onConnectedChange = onValue(playerConnectionsRef, (snap) => {
+      if (snap.val() === true && playerId) {
+        const playerRefForOnline = ref(database, `rooms/${roomId}/players/${playerId}`);
+        get(playerRefForOnline).then(playerSnap => {
+            if (playerSnap.exists()) {
+                 set(playerStatusRef, true);
+                 onDisconnect(playerStatusRef).set(false).catch(err => console.error("onDisconnect error for status", err));
+            }
+        });
+      }
+    });
+
+    get(child(ref(database, `rooms/${roomId}`), `players/${playerId}`)).then(playerSnap => {
+      if (playerSnap.exists()) {
+        update(child(ref(database, `rooms/${roomId}`), `players/${playerId}`), { isOnline: true });
+      } else {
+        if (!isLoading && !error) { 
+            toast({ title: "Access Denied", description: "You are not part of this room. Please join properly.", variant: "destructive" });
+            router.push(`/join/${roomId}`);
+        }
+      }
+    });
+
+    return () => {
+      off(roomRef, 'value', onRoomValueChange);
+      off(playerConnectionsRef, 'value', onConnectedChange);
+      hintTimersRef.current.forEach(clearTimeout); 
+    };
+  }, [roomId, playerId, router, toast, isLoading, error]);
+
+  // Timer effect for ending round by host
+  useEffect(() => {
+    if (room?.gameState === 'drawing' && room.roundEndsAt && playerId === room.hostId) {
+      const now = Date.now();
+      const timeLeftMs = room.roundEndsAt - now;
+      if (timeLeftMs <= 0) {
+        endCurrentRound("Timer ran out!");
+      } else {
+        const timer = setTimeout(() => {
+          endCurrentRound("Timer ran out!");
+        }, timeLeftMs);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, room?.id, room?.currentPattern, endCurrentRound]);
+
+
+  // Effect for host to manage automatic round progression
+  useEffect(() => {
+    if (room?.gameState === 'round_end' && playerId === room.hostId) {
+        const NEXT_ROUND_DELAY_SECONDS = 5;
+        setRoundEndCountdown(NEXT_ROUND_DELAY_SECONDS);
+
+        const countdownInterval = setInterval(() => {
+            setRoundEndCountdown(prev => (prev ? prev - 1 : null));
+        }, 1000);
+
+        const nextRoundTimer = setTimeout(() => {
+            clearInterval(countdownInterval);
+            setRoundEndCountdown(null);
+            selectWordForNewRound();
+        }, NEXT_ROUND_DELAY_SECONDS * 1000);
+
+        return () => {
+            clearTimeout(nextRoundTimer);
+            clearInterval(countdownInterval);
+            setRoundEndCountdown(null); 
+        };
+    } else if (room?.gameState !== 'round_end') { 
+        setRoundEndCountdown(null);
+    }
+  }, [room?.gameState, room?.hostId, playerId, selectWordForNewRound]);
+
+
+  // Effect for host to reveal hints
+  useEffect(() => {
+    hintTimersRef.current.forEach(clearTimeout); 
+    hintTimersRef.current = [];
+
+    if (room?.gameState === 'drawing' && room.currentPattern && playerId === room.hostId && room.roundEndsAt && room.config) {
+        const patternArray = room.currentPattern.split('');
+        
+        const scheduleHintReveal = (indexToReveal: number, delay: number) => {
+            const timer = setTimeout(async () => {
+                const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
+                if (currentRoomSnapshot.exists()) {
+                    const currentRoomData: Room = currentRoomSnapshot.val();
+                    if (currentRoomData.gameState === 'drawing' && currentRoomData.currentPattern === room.currentPattern) { 
+                        let currentDbRevealedPattern = [...(currentRoomData.revealedPattern || patternArray.map(() => '_'))];
+                        if (indexToReveal >= 0 && indexToReveal < patternArray.length && currentDbRevealedPattern[indexToReveal] === '_') {
+                            currentDbRevealedPattern[indexToReveal] = patternArray[indexToReveal];
+                            await update(ref(database, `rooms/${roomId}/revealedPattern`), currentDbRevealedPattern);
+                        }
+                    }
+                }
+            }, delay);
+            hintTimersRef.current.push(timer);
+        };
+
+        const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
+
+        if (patternArray.length > 0 && (room.revealedPattern?.[0] === '_' || !room.revealedPattern)) {
+            scheduleHintReveal(0, roundDurationMs / 3);
+        }
+
+        if (patternArray.length > 1 && (room.revealedPattern?.[patternArray.length - 1] === '_' || !room.revealedPattern)) {
+            scheduleHintReveal(patternArray.length - 1, roundDurationMs * 2 / 3);
+        }
+    }
+    return () => {
+        hintTimersRef.current.forEach(clearTimeout);
+    };
+  }, [room?.gameState, room?.currentPattern, room?.hostId, playerId, roomId, room?.config?.roundTimeoutSeconds, room?.roundEndsAt, room?.revealedPattern]);
 
 
   if (isLoading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl">Loading Room...</span></div>;
