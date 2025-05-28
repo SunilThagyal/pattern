@@ -326,7 +326,7 @@ const PlayerList = ({
     </CardHeader>
     <div className={cn(
         "transition-all duration-300 ease-in-out overflow-hidden",
-        isMinimized ? "max-h-0 opacity-0" : "max-h-72 opacity-100"
+        isMinimized ? "max-h-0 opacity-0" : "max-h-72 opacity-100" // max-h-72 allows good space for players
     )}>
         <CardContent className="h-full pt-3 sm:pt-4"> 
         <ScrollArea className="h-full pr-3">
@@ -373,7 +373,7 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
           onChange={e => setGuess(e.target.value)}
           placeholder="Type your guess..."
           disabled={disabled}
-          className="pr-12 sm:pr-16" // Adjusted padding for letter count
+          className="pr-12 sm:pr-16" 
         />
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
           {letterCount}
@@ -397,11 +397,11 @@ const ChatArea = ({
     onGuessSubmit: (guess: string) => void,
     disabled: boolean
 }) => (
- <Card className="shadow-lg flex-grow flex flex-col min-h-0">
+ <Card className="shadow-lg flex flex-col h-full md:h-96">
     <CardHeader className="p-3 sm:p-4 border-b">
       <CardTitle className="flex items-center gap-2 text-base sm:text-lg"><MessageSquare /> Guesses & Chat</CardTitle>
     </CardHeader>
-    <CardContent className="flex-grow min-h-0 max-h-96 pt-3 sm:pt-4 pb-0 pr-0">
+    <CardContent className="flex-grow min-h-0 pt-3 sm:pt-4 pb-0 pr-0">
       <ScrollArea className="h-full pr-3">
         <ul className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
           {guesses.map((g, i) => (
@@ -1119,8 +1119,6 @@ export default function GameRoomPage() {
 
         if (currentPatternNonSpaceLength === 0) return; // No hints for empty/space-only words
 
-        // Calculate the number of hints to reveal based on host config and word length
-        // Max hints is host's setting, but no more than (word_length - 1)
         const hostConfiguredMaxHints = room.config.maxHintLetters;
         const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
         
@@ -1550,7 +1548,7 @@ export default function GameRoomPage() {
             </div>
           </div>
 
-          {/* Desktop Sidebar: ChatArea (top, grows), PlayerList (middle, collapsible) */}
+          {/* Desktop Sidebar: ChatArea (top, fixed height), PlayerList (middle, collapsible) */}
           <div className="order-3 hidden md:flex md:flex-col md:w-1/3 md:gap-4 md:flex-grow-[1] md:min-h-0"> 
             <ChatArea
                 guesses={room.guesses || []}
