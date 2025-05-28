@@ -317,7 +317,7 @@ const PlayerList = ({
     isMinimized: boolean,
     setIsMinimized: (isMinimized: boolean) => void
 }) => (
-  <Card className="shadow-lg h-full flex flex-col">
+  <Card className="shadow-lg flex flex-col"> {/* Removed h-full for desktop sidebar context */}
     <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 border-b">
         <CardTitle className="flex items-center gap-2 text-base sm:text-lg"><Users /> Players ({players.length})</CardTitle>
         <Button variant="ghost" size="icon" onClick={() => setIsMinimized(!isMinimized)} aria-label={isMinimized ? "Expand player list" : "Collapse player list"}>
@@ -325,11 +325,11 @@ const PlayerList = ({
         </Button>
     </CardHeader>
     <div className={cn(
-        "transition-all duration-300 ease-in-out overflow-hidden",
-        isMinimized ? "max-h-0 opacity-0" : "max-h-72 opacity-100 flex-grow"
+        "transition-all duration-300 ease-in-out overflow-hidden", // This div handles the collapse
+        isMinimized ? "max-h-0 opacity-0" : "max-h-72 opacity-100" // Controls height of scrollable area
     )}>
-        <CardContent className="flex-grow min-h-0 pt-3 sm:pt-4">
-        <ScrollArea className="h-full pr-3">
+        <CardContent className="h-full pt-3 sm:pt-4"> {/* CardContent takes full height of its parent (the max-h-72 div) */}
+        <ScrollArea className="h-full pr-3"> {/* ScrollArea takes full height of CardContent */}
             <ul className="space-y-1.5 sm:space-y-2">
             {players.map(player => (
                 <li key={player.id} className={`flex items-center justify-between p-1.5 sm:p-2 rounded-md ${player.id === currentPlayerId ? 'bg-primary/10' : ''}`}>
@@ -373,7 +373,7 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
           onChange={e => setGuess(e.target.value)}
           placeholder="Type your guess..."
           disabled={disabled}
-          className="pr-12 sm:pr-16" // Adjusted padding for letter count
+          className="pr-12 sm:pr-16"
         />
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
           {letterCount}
@@ -578,9 +578,8 @@ export default function GameRoomPage() {
                         }
                     }
                  }
-                 // Ensure exactly 3 words, even if it means repetition from a small default pool if filtering is too aggressive
-                 while(wordsForSelection.length < 3 && wordsForSelection.length > 0) wordsForSelection.push(wordsForSelection[0]); // simple fallback
-                 while(wordsForSelection.length < 3) wordsForSelection.push("Ball"); // absolute fallback
+                 while(wordsForSelection.length < 3 && wordsForSelection.length > 0) wordsForSelection.push(wordsForSelection[0]); 
+                 while(wordsForSelection.length < 3) wordsForSelection.push("Ball"); 
             }
 
         } catch (aiError) {
@@ -1039,7 +1038,8 @@ export default function GameRoomPage() {
 
         if (currentPatternNonSpaceLength === 0) return;
 
-        const finalHintCount = Math.min(room.config.maxHintLetters, Math.max(0, currentPatternNonSpaceLength - 1));
+        const hostConfiguredMaxHints = room.config.maxHintLetters;
+        const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
         
         if (finalHintCount === 0) {
             return; 
@@ -1425,7 +1425,7 @@ export default function GameRoomPage() {
             </div>
           </div>
 
-          {/* Desktop Sidebar: ChatArea (top, grows), PlayerList (middle, collapsible), GuessInput (bottom, via ChatArea) */}
+          {/* Desktop Sidebar: ChatArea (top, grows), PlayerList (middle, collapsible) */}
           <div className="order-3 hidden md:flex md:flex-col md:w-1/3 md:gap-4 md:flex-grow-[1] md:min-h-0"> 
             <ChatArea
                 guesses={room.guesses || []}
@@ -1440,7 +1440,6 @@ export default function GameRoomPage() {
                 isMinimized={isPlayerListMinimized}
                 setIsMinimized={setIsPlayerListMinimized}
             />
-            {/* GuessInput is now part of ChatArea */}
           </div>
         </div>
     </div>
