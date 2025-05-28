@@ -18,6 +18,11 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // experimental: {
+  //   fontLoaders: [ // This is for pages router, app router handles fonts differently.
+  //     { loader: 'next/font/google', options: { subsets: ['latin'] } },
+  //   ],
+  // },
 };
 
 export default nextConfig;
