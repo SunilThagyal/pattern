@@ -61,15 +61,22 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
 
     setIsLoading(true);
 
-    if (mode === 'create' && (
-        Number.isNaN(roundTimeoutSeconds) || roundTimeoutSeconds < 30 ||
-        Number.isNaN(totalRounds) || totalRounds < 1 ||
-        Number.isNaN(maxWordLength) || maxWordLength < 3 ||
-        Number.isNaN(maxHintLetters) || maxHintLetters < 1 || maxHintLetters > 3
-    )) {
-        toast({ title: "Invalid Config", description: "Please check room settings. Ensure all values are valid numbers (min timeout 30s, min 1 round, min word length 3, hint letters 1-3).", variant: "destructive" });
-        setIsLoading(false);
-        return;
+    if (mode === 'create') {
+        if (
+            Number.isNaN(roundTimeoutSeconds) || roundTimeoutSeconds < 30 ||
+            Number.isNaN(totalRounds) || totalRounds < 1 ||
+            Number.isNaN(maxWordLength) || maxWordLength < 3 ||
+            Number.isNaN(maxHintLetters) || maxHintLetters < 1 || maxHintLetters > 3
+        ) {
+            toast({ title: "Invalid Config", description: "Please check room settings. Ensure all values are valid numbers (min timeout 30s, min 1 round, min word length 3, hint letters 1-3).", variant: "destructive" });
+            setIsLoading(false);
+            return;
+        }
+        if (maxHintLetters >= maxWordLength) {
+            toast({ title: "Invalid Hint Config", description: "Max hint letters must be less than max word length to ensure words are not fully revealed by hints.", variant: "destructive" });
+            setIsLoading(false);
+            return;
+        }
     }
 
 
@@ -120,6 +127,10 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
           const room: Room = snapshot.val();
           if (room.players[playerId]) { 
              await set(child(roomRef, `players/${playerId}/isOnline`), true);
+             // Optionally update name if changed, though current logic doesn't explicitly support name changes on rejoin
+             if (room.players[playerId].name !== playerName) {
+                await set(child(roomRef, `players/${playerId}/name`), playerName);
+             }
           } else { 
             if (Object.keys(room.players || {}).length >= 10) { // Max 10 players
                 toast({ title: "Room Full", description: "This room has reached its maximum player limit.", variant: "destructive" });
@@ -220,7 +231,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   min="3" 
                   className="text-base py-3"
                 />
-                <p className="text-xs text-muted-foreground">Maximum character length for words to be drawn (min 3).</p>
+                <p className="text-xs text-muted-foreground">Maximum character length for words to be drawn (min 3 chars).</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="maxHintLetters" className="flex items-center"><Info size={16} className="mr-2 text-muted-foreground"/> Max Hint Letters Revealed</Label>
@@ -230,10 +241,10 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   value={Number.isNaN(maxHintLetters) ? '' : maxHintLetters} 
                   onChange={e => setMaxHintLetters(parseInt(e.target.value))} 
                   min="1" 
-                  max="3"
+                  max="3" // Host can pick 1, 2, or 3. Runtime logic will cap it by word.length-1.
                   className="text-base py-3"
                 />
-                <p className="text-xs text-muted-foreground">Max letters revealed as hints (1-3). Cannot exceed 50% of word length.</p>
+                <p className="text-xs text-muted-foreground">Max letters revealed as hints (1-3). Must be less than Max Word Length.</p>
               </div>
             </>
           )}
@@ -248,3 +259,4 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
     </Card>
   );
 }
+
