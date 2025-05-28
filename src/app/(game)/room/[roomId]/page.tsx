@@ -22,7 +22,8 @@ const DrawingCanvas = ({
   playerId, 
   isDrawingEnabled, 
   clearCanvas,
-  currentDrawerName
+  currentDrawerName,
+  gameState
 }: { 
   drawingData: DrawingPoint[], 
   onDraw: (point: DrawingPoint) => void, 
@@ -30,7 +31,8 @@ const DrawingCanvas = ({
   playerId: string, 
   isDrawingEnabled: boolean, 
   clearCanvas: () => void,
-  currentDrawerName?: string | null
+  currentDrawerName?: string | null,
+  gameState: Room['gameState'] | undefined
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -253,8 +255,8 @@ const DrawingCanvas = ({
           onTouchMove={paint}
           onTouchEnd={exitPaint}
         />
-        {!isDrawingEnabled && currentDrawerId !== playerId && room?.gameState === 'drawing' && <p className="absolute top-2 left-2 text-xs bg-primary/20 text-primary-foreground p-1 rounded">You are guessing!</p>}
-        {isDrawingEnabled && currentDrawerId === playerId && room?.gameState === 'drawing' && <p className="absolute top-2 left-2 text-xs bg-accent/20 text-accent-foreground p-1 rounded">Your turn to draw!</p>}
+        {!isDrawingEnabled && currentDrawerId !== playerId && gameState === 'drawing' && <p className="absolute top-2 left-2 text-xs bg-primary/20 text-primary-foreground p-1 rounded">You are guessing!</p>}
+        {isDrawingEnabled && currentDrawerId === playerId && gameState === 'drawing' && <p className="absolute top-2 left-2 text-xs bg-accent/20 text-accent-foreground p-1 rounded">Your turn to draw!</p>}
       </CardContent>
     </Card>
   );
@@ -432,6 +434,7 @@ export default function GameRoomPage() {
         get(playerRefForOnline).then(playerSnap => {
             if (playerSnap.exists()) {
                  set(playerStatusRef, true);
+                 // @ts-ignore TODO: Fix onDisconnect type
                  onDisconnect(playerStatusRef).set(false).catch(err => console.error("onDisconnect error for status", err));
             }
         });
@@ -859,6 +862,7 @@ export default function GameRoomPage() {
             isDrawingEnabled={isCurrentPlayerDrawing && room.gameState === 'drawing'}
             clearCanvas={handleClearCanvas}
             currentDrawerName={currentDrawerName}
+            gameState={room.gameState}
           />
         </div>
 
