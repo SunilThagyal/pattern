@@ -284,7 +284,7 @@ const PlayerList = ({ players, currentPlayerId, hostId }: { players: Player[], c
             <li key={player.id} className={`flex items-center justify-between p-2 rounded-md ${player.id === currentPlayerId ? 'bg-primary/10' : ''}`}>
               <div className="flex items-center gap-2">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src={`https://placehold.co/40x40.png?text=${player.name.substring(0,1)}`} data-ai-hint="profile avatar" />
+                  <AvatarImage src={`https://placehold.co/40x40.png?text=${player.name.substring(0,1)}`} data-ai-hint="profile avatar"/>
                   <AvatarFallback>{player.name.substring(0, 2).toUpperCase()}</AvatarFallback>
                 </Avatar>
                 <span className={`font-medium ${!player.isOnline ? 'text-muted-foreground line-through' : ''}`}>{player.name} {player.id === hostId ? '(Host)' : ''}</span>
@@ -729,11 +729,6 @@ export default function GameRoomPage() {
         if (!roomData.config) {
             roomData.config = { roundTimeoutSeconds: 90, totalRounds: 5, maxWordLength: 20, maxHintLetters: 2 };
         }
-        // Safer handling for revealedPattern initialization:
-        // If revealedPattern is absolutely missing from Firebase data, treat it as an empty array.
-        // The actual content (underscores or revealed letters) is managed by confirmWordAndStartDrawing (initial underscores)
-        // and the host's hint effect (revealing letters).
-        // This client-side code should not try to "correct" it beyond ensuring it's a valid array.
         if (roomData.revealedPattern === undefined) {
             roomData.revealedPattern = [];
         }
@@ -871,51 +866,43 @@ export default function GameRoomPage() {
     if (room?.gameState === 'drawing' && room.currentPattern && playerId === room.hostId && room.roundEndsAt && room.config) {
         const currentPattern = room.currentPattern;
         const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
-        const hostConfiguredMaxHints = room.config.maxHintLetters; // e.g., 1, 2, or 3 from host settings
-
-        const numLettersInWord = currentPattern.replace(/\s/g, '').length;
-
-        // Determine the actual number of hints to reveal based on game rules:
-        // 1. It cannot exceed the host's configured maximum (hostConfiguredMaxHints).
-        // 2. It cannot exceed 50% of the word's non-space length, rounded down.
-        //    (e.g., 6-letter word -> max 3 hints; 5-letter word -> max 2 hints; 3-letter word -> max 1 hint)
-        const maxHintsByWordLength = Math.floor(numLettersInWord / 2);
-        const actualHintsToReveal = Math.min(hostConfiguredMaxHints, maxHintsByWordLength);
         
-        // If actualHintsToReveal is 0 (e.g., for a 1-letter word, or if hostConfiguredMaxHints is 0 somehow, though form validates 1-3),
-        // no hints will be scheduled. This is correct as we can't hint a 1-letter word without giving it away,
-        // and 0 hints means no action.
+        // Calculate number of hints based on 50% of word length (non-space characters)
+        const numLettersInWord = currentPattern.replace(/\s/g, '').length;
+        let actualHintsToReveal = 0;
+        if (numLettersInWord >= 2) { // Only reveal hints for words with 2 or more letters
+            actualHintsToReveal = Math.floor(numLettersInWord / 2);
+        }
+        // actualHintsToReveal will be 0 for 1-letter words, 1 for 2/3-letter, 2 for 4/5-letter etc.
+        // This ensures "atleast reveal around 40% - 50% word hint" is prioritized.
+
         if (actualHintsToReveal === 0) {
-          hintTimersRef.current.forEach(clearTimeout); // Clear any previous timers from a prior effect run
+          hintTimersRef.current.forEach(clearTimeout); 
           hintTimersRef.current = [];
-          return; // No hints to reveal for this word/config
+          return; 
         }
 
         // Hints start revealing after half the round time has passed
         // And are spread across the second half of the round duration
-        const hintPhaseStartTime = roundDurationMs / 2; // Start revealing hints from this point
-        const timeSlotPerHint = (roundDurationMs / 2) / actualHintsToReveal; // Time available for revealing hints / num hints
+        const hintPhaseStartTime = roundDurationMs / 2; 
+        const timeSlotPerHint = (roundDurationMs / 2) / actualHintsToReveal; 
 
         for (let i = 0; i < actualHintsToReveal; i++) {
-          // Calculate when this specific hint should be revealed
-          // The first hint at hintPhaseStartTime, the next ones spread out
           const revealTimeOffset = hintPhaseStartTime + (i * timeSlotPerHint);
 
           const timer = setTimeout(async () => {
-            // Fetch the latest room data to ensure gameState and pattern haven't changed
             const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
             if (!currentRoomSnapshot.exists()) return;
             const currentRoomData: Room = currentRoomSnapshot.val();
 
-            // Only proceed if still in drawing state and for the same word
             if (currentRoomData.gameState === 'drawing' &&
                 currentRoomData.currentPattern === currentPattern &&
-                currentRoomData.revealedPattern) { // Ensure revealedPattern exists
+                currentRoomData.revealedPattern) { 
 
               let newRevealedPattern = [...currentRoomData.revealedPattern];
               const unrevealedIndices = newRevealedPattern
                 .map((char, index) => (char === '_' ? index : -1))
-                .filter(idx => idx !== -1 && currentPattern[idx] && currentPattern[idx] !== ' '); // Exclude spaces
+                .filter(idx => idx !== -1 && currentPattern[idx] && currentPattern[idx] !== ' '); 
 
               if (unrevealedIndices.length > 0) {
                 const randomIndexToReveal = unrevealedIndices[Math.floor(Math.random() * unrevealedIndices.length)];
@@ -927,7 +914,7 @@ export default function GameRoomPage() {
           hintTimersRef.current.push(timer);
         }
     }
-    return () => { // Cleanup: clear any pending timers if component unmounts or dependencies change
+    return () => { 
         hintTimersRef.current.forEach(clearTimeout);
     };
   }, [room?.gameState, room?.currentPattern, room?.hostId, playerId, roomId, room?.config, room?.roundEndsAt]);
@@ -940,25 +927,23 @@ export default function GameRoomPage() {
       const timeLeftMs = room.wordSelectionEndsAt - now;
 
       if (timeLeftMs <= 0) {
-        // Timeout occurred before this effect could set a timer
         const drawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : "The drawer";
         toast({
           title: "Word Selection Timed Out",
           description: `${drawerName} didn't choose a word. Moving to the next player...`,
           variant: "default"
         });
-        selectWordForNewRound(); // Host initiates next round/player
+        selectWordForNewRound(); 
       } else {
         const timer = setTimeout(() => {
-          // Re-fetch room state to ensure it's still appropriate to timeout
           get(ref(database, `rooms/${roomId}`)).then(snap => {
              if (snap.exists()) {
                  const latestRoomData = snap.val() as Room;
                  if (latestRoomData.gameState === 'word_selection' &&
-                     latestRoomData.hostId === playerId && // Still this host's responsibility
-                     !latestRoomData.currentPattern && // Word still not chosen
-                     latestRoomData.wordSelectionEndsAt && // Timeout is still relevant
-                     Date.now() >= latestRoomData.wordSelectionEndsAt) { // Time has passed
+                     latestRoomData.hostId === playerId && 
+                     !latestRoomData.currentPattern && 
+                     latestRoomData.wordSelectionEndsAt && 
+                     Date.now() >= latestRoomData.wordSelectionEndsAt) { 
 
                     const currentDrawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
                     toast({
@@ -966,7 +951,7 @@ export default function GameRoomPage() {
                         description: `${currentDrawerName} didn't choose a word. Moving to the next player...`,
                         variant: "default"
                     });
-                    selectWordForNewRound(); // Host initiates next round/player
+                    selectWordForNewRound(); 
                  }
              }
           });
@@ -1003,7 +988,6 @@ export default function GameRoomPage() {
     if ((room.correctGuessersThisRound || []).includes(playerId)) {
         return room.currentPattern;
     }
-    // Ensure revealedPattern is an array before trying to join
     const patternToShow = Array.isArray(room.revealedPattern) ? room.revealedPattern : (room.currentPattern?.split('') || []).map(() => '_');
     return patternToShow.join(' ');
   };
@@ -1120,7 +1104,7 @@ export default function GameRoomPage() {
                     </TooltipTrigger>
                     <TooltipContent>
                         <p>Hints (random letters) will be revealed after half the round time!</p>
-                         <p className="text-xs">Max {room.config.maxHintLetters} {room.config.maxHintLetters === 1 ? 'letter' : 'letters'}, up to 50% of word length.</p>
+                         <p className="text-xs">Up to 50% of word length revealed.</p>
                     </TooltipContent>
                 </Tooltip>
             )}
