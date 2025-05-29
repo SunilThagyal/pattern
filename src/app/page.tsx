@@ -8,7 +8,7 @@ export default function HomePage() {
   return (
     <div className="flex flex-col items-center justify-center text-center w-full max-w-3xl animate-in fade-in duration-500">
       <Image 
-        src="https://placehold.co/300x200.png" 
+        src="/placehold.jpg" 
         alt="Pattern Party game banner" 
         width={300} 
         height={200} 
