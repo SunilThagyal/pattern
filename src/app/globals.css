@@ -3,9 +3,10 @@
 @tailwind utilities;
 
 /* Apply to prevent main page scroll and ensure app fits viewport */
+/* Removed global overflow: hidden and height: 100% to allow other pages to scroll */
 html, body {
-  overflow: hidden;
-  height: 100%; /* Ensure body also takes full height for h-screen to work reliably on main container */
+  /* overflow: hidden; */ /* Removed */
+  /* height: 100%; */ /* Removed */
 }
 
 body {

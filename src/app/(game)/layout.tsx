@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 
 export default function GameLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="w-full h-full flex-grow flex flex-col">
+    <div className="w-full h-full flex-grow flex flex-col overflow-hidden">
       {children}
     </div>
   );
