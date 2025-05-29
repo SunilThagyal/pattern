@@ -111,3 +111,26 @@ body {
     @apply antialiased;
   }
 }
+
+/* Custom scrollbar for chat and player list */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2); /* Using a Tailwind color might be better if theme changes */
+  border-radius: 3px;
+}
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.2) transparent; /* For Firefox */
+}
+
+@keyframes pulse-bg-once {
+  0%, 100% { background-color: transparent; } /* Or default item background */
+  50% { background-color: hsl(var(--primary) / 0.15); }
+}
+
+.animate-pulse-bg-once {
+  animation: pulse-bg-once 0.8s ease-in-out;
+}
