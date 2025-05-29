@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState, useRef, type MouseEvent, type TouchEvent, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ref, onValue, off, update, serverTimestamp, set, child, get, onDisconnect, runTransaction } from 'firebase/database';
 import { database } from '@/lib/firebase';
@@ -10,27 +10,48 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, MessageSquare, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings } from 'lucide-react';
+import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings } from 'lucide-react';
 import Link from 'next/link';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
-import { suggestWords, type SuggestWordsInput, type SuggestWordsOutput } from '@/ai/flows/suggest-words-flow';
+import dynamic from 'next/dynamic';
 
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { APP_NAME } from '@/lib/config';
+import { suggestWords, type SuggestWordsInput, type SuggestWordsOutput } from '@/ai/flows/suggest-words-flow';
+
+// Lazy load modals and dialogs
+const WordSelectionDialog = dynamic(() => import('@/components/game/WordSelectionDialog').then(mod => mod.WordSelectionDialog), {
+  loading: () => <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-30"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>,
+  ssr: false
+});
+
+const GameStateModals = dynamic(() => import('@/components/game/GameStateModals').then(mod => mod.GameStateModals), {
+  loading: () => null, // Or a minimal loader if preferred for these overlay-style modals
+  ssr: false
+});
+
+const SettingsDialogContent = dynamic(() => import('@/components/game/SettingsDialogContent').then(mod => mod.SettingsDialogContent), {
+  ssr: false
+});
+
+const RevealConfirmDialogContent = dynamic(() => import('@/components/game/RevealConfirmDialogContent').then(mod => mod.RevealConfirmDialogContent), {
+  ssr: false
+});
+
+import {
+  AlertDialog,
+  AlertDialogTrigger, // Keep AlertDialogTrigger if it wraps a visible element
+  AlertDialogContent,
+  AlertDialogCancel,
+  AlertDialogAction,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 
 
-const DrawingCanvas = ({
+const DrawingCanvas = React.memo(({
   drawingData,
   onDraw,
   currentDrawerId,
@@ -141,7 +162,7 @@ const DrawingCanvas = ({
   }, [drawingData]);
 
 
-  const getCoordinates = (event: MouseEvent<HTMLCanvasElement> | TouchEvent<HTMLCanvasElement>): { x: number; y: number } | null => {
+  const getCoordinates = (event: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): { x: number; y: number } | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
 
@@ -162,7 +183,7 @@ const DrawingCanvas = ({
     };
   };
 
-  const startPaint = (event: MouseEvent<HTMLCanvasElement> | TouchEvent<HTMLCanvasElement>) => {
+  const startPaint = (event: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDrawingEnabled || (event.nativeEvent instanceof MouseEvent && event.nativeEvent.button !== 0)) return;
     event.preventDefault();
     const coords = getCoordinates(event);
@@ -182,7 +203,7 @@ const DrawingCanvas = ({
     }
   };
 
-  const paint = (event: MouseEvent<HTMLCanvasElement> | TouchEvent<HTMLCanvasElement>) => {
+  const paint = (event: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isPainting || !isDrawingEnabled) return;
     event.preventDefault();
     const coords = getCoordinates(event);
@@ -208,7 +229,7 @@ const DrawingCanvas = ({
     }
   };
 
-  const exitPaint = (event: MouseEvent<HTMLCanvasElement> | TouchEvent<HTMLCanvasElement>) => {
+  const exitPaint = (event: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isPainting || !isDrawingEnabled) return;
     let coords = getCoordinates(event);
 
@@ -239,7 +260,7 @@ const DrawingCanvas = ({
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-muted/10 overflow-hidden border border-black">
+    <div className="w-full h-full flex flex-col bg-muted/10 border border-black overflow-hidden">
       <div className="p-1 border-b border-border/30">
         <div className="flex flex-row items-center justify-between">
           <div className="text-xs text-muted-foreground">
@@ -305,9 +326,11 @@ const DrawingCanvas = ({
       </div>
     </div>
   );
-};
+});
+DrawingCanvas.displayName = 'DrawingCanvas';
 
-const PlayerList = ({
+
+const PlayerList = React.memo(({
     players,
     currentPlayerId,
     playerId,
@@ -324,7 +347,7 @@ const PlayerList = ({
     isMinimized: boolean,
     setIsMinimized: (isMinimized: boolean) => void,
 }) => {
-    const sortedPlayers = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const sortedPlayers = useMemo(() => [...players].sort((a, b) => (b.score || 0) - (a.score || 0)), [players]);
 
     return (
     <div className="w-full h-full flex flex-col border border-black bg-gray-50">
@@ -336,7 +359,7 @@ const PlayerList = ({
         </div>
         <div className={cn(
             "flex-grow overflow-y-auto scrollbar-thin min-h-0 transition-all duration-300 ease-in-out",
-            isMinimized ? "max-h-0 opacity-0" : "opacity-100 flex-1" 
+            isMinimized ? "max-h-0 opacity-0" : "opacity-100 flex-1"
         )}>
             {sortedPlayers.map((player, index) => (
             <div
@@ -370,9 +393,10 @@ const PlayerList = ({
         </div>
     </div>
     );
-};
+});
+PlayerList.displayName = 'PlayerList';
 
-const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string) => void, disabled: boolean }) => {
+const GuessInput = React.memo(({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string) => void, disabled: boolean }) => {
   const [guess, setGuess] = useState('');
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -401,15 +425,16 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
       </Button>
     </form>
   );
-};
+});
+GuessInput.displayName = 'GuessInput';
 
-const ChatArea = ({
+const ChatArea = React.memo(({
     guesses,
-    room,
+    gameState,
     playerId,
 }: {
     guesses: Guess[],
-    room: Room | null,
+    gameState: Room['gameState'] | undefined,
     playerId: string,
 }) => {
     const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -460,21 +485,21 @@ const ChatArea = ({
             }
 
             return (
-                <div key={i} className={messageClasses}>
+                <div key={`${g.timestamp}-${i}`} className={messageClasses}> {/* Ensure unique key */}
                 {messageContent}
                 </div>
             );
             })}
             {guesses.length === 0 && <p className="text-gray-500 text-center italic p-4">
-                {room?.gameState === 'drawing' ? "No guesses yet. Be the first!" : "Chat messages will appear here."}
+                {gameState === 'drawing' ? "No guesses yet. Be the first!" : "Chat messages will appear here."}
             </p>}
         </div>
     </div>
     );
-};
+});
+ChatArea.displayName = 'ChatArea';
 
-
-const TimerDisplay = ({ targetTime, defaultSeconds, compact }: { targetTime?: number | null, defaultSeconds: number, compact?: boolean }) => {
+const TimerDisplay = React.memo(({ targetTime, defaultSeconds, compact }: { targetTime?: number | null, defaultSeconds: number, compact?: boolean }) => {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   useEffect(() => {
@@ -504,7 +529,119 @@ const TimerDisplay = ({ targetTime, defaultSeconds, compact }: { targetTime?: nu
       {timeLeft}
     </div>
   );
-};
+});
+TimerDisplay.displayName = 'TimerDisplay';
+
+
+// New WordDisplay component
+const WordDisplay = React.memo(({
+  gameState,
+  currentPattern,
+  revealedPattern,
+  isCurrentPlayerDrawing,
+  hasPlayerGuessedCorrectly,
+  onLetterClick,
+}: {
+  gameState: Room['gameState'] | undefined;
+  currentPattern: string | null | undefined;
+  revealedPattern: string[] | null | undefined;
+  isCurrentPlayerDrawing: boolean;
+  hasPlayerGuessedCorrectly: boolean;
+  onLetterClick: (char: string, index: number) => void;
+}) => {
+  const wordToDisplayElements = useMemo(() => {
+    const elements = [];
+    if (!currentPattern) {
+      elements.push(
+        <span key="placeholder-no-pattern" className="text-muted-foreground">
+          {gameState === 'word_selection' ? `Choosing...` : "Waiting..."}
+        </span>
+      );
+      return elements;
+    }
+
+    const patternChars = currentPattern.split('');
+    const currentRevealedToGuessersPattern = (revealedPattern && revealedPattern.length === patternChars.length)
+      ? revealedPattern
+      : patternChars.map(c => c === ' ' ? ' ' : '_');
+
+    if (isCurrentPlayerDrawing && gameState === 'drawing') {
+      patternChars.forEach((char, index) => {
+        if (char === ' ') {
+          elements.push(<span key={`drawer-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
+        } else {
+          const isLetterRevealedToOthers = currentRevealedToGuessersPattern[index] !== '_' && currentRevealedToGuessersPattern[index] !== ' ';
+          if (isLetterRevealedToOthers) {
+            elements.push(
+              <span key={`drawer-revealed-${index}`} className="font-bold text-green-600 cursor-default">
+                {char}
+              </span>
+            );
+          } else {
+            elements.push(
+              <button
+                key={`drawer-clickable-${index}`}
+                onClick={() => onLetterClick(char, index)}
+                className="font-bold text-primary hover:text-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={`Reveal letter ${char}`}
+                title={`Click to reveal this letter: ${char}`}
+              >
+                {char}
+              </button>
+            );
+          }
+        }
+      });
+    } else if ((!isCurrentPlayerDrawing && hasPlayerGuessedCorrectly) || gameState === 'round_end' || gameState === 'game_over') {
+      patternChars.forEach((char, index) => {
+        elements.push(
+          <span key={`guesser-correct-char-${index}`} className="font-bold text-foreground">
+            {char === ' ' ? '\u00A0\u00A0' : char}
+          </span>
+        );
+      });
+    } else if (!isCurrentPlayerDrawing && gameState === 'drawing') {
+      currentRevealedToGuessersPattern.forEach((char, index) => {
+        elements.push(
+          <span key={`guesser-revealed-char-${index}`} className={cn("font-bold", char === '_' || char === ' ' ? 'text-muted-foreground' : 'text-foreground')}>
+            {char === ' ' ? '\u00A0\u00A0' : char}
+          </span>
+        );
+      });
+    } else {
+       elements.push(
+        <span key="placeholder-state" className="text-muted-foreground">
+          {gameState === 'word_selection' ? `Choosing...` : "Waiting..."}
+        </span>
+       );
+    }
+    return elements;
+  }, [gameState, currentPattern, revealedPattern, isCurrentPlayerDrawing, hasPlayerGuessedCorrectly, onLetterClick]);
+
+  const wordDisplayKey = useMemo(() => {
+    return `${gameState}-${currentPattern}-${revealedPattern?.join('')}-${isCurrentPlayerDrawing}-${hasPlayerGuessedCorrectly}`;
+  }, [gameState, currentPattern, revealedPattern, isCurrentPlayerDrawing, hasPlayerGuessedCorrectly]);
+
+
+  return (
+    <div
+      key={wordDisplayKey}
+      className={cn(
+        "text-[20px] font-mono font-normal tracking-widest select-text flex items-center justify-center gap-0.5 animate-in fade-in duration-300",
+        isCurrentPlayerDrawing && gameState === 'drawing' ? "text-primary" : "text-foreground"
+      )} style={{ letterSpacing: '0.2em' }}
+    >
+      {wordToDisplayElements}
+      {(gameState === 'drawing' && currentPattern && !isCurrentPlayerDrawing && !hasPlayerGuessedCorrectly) && (
+        <sup className="text-[10px] font-normal text-gray-500 self-start ml-0.5">
+          {currentPattern.replace(/\s/g, '').length}
+        </sup>
+      )}
+    </div>
+  );
+});
+WordDisplay.displayName = 'WordDisplay';
+
 
 export default function GameRoomPage() {
   const params = useParams();
@@ -518,18 +655,13 @@ export default function GameRoomPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [customWordInput, setCustomWordInput] = useState('');
   const [isSubmittingWord, setIsSubmittingWord] = useState(false);
-
   const [roundEndCountdown, setRoundEndCountdown] = useState<number | null>(null);
 
   const [isRevealConfirmDialogOpen, setIsRevealConfirmDialogOpen] = useState(false);
   const [letterToRevealInfo, setLetterToRevealInfo] = useState<{ char: string; index: number } | null>(null);
-  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(true); 
+  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(true);
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
-
-
-  // const hintTimerRef = useRef<NodeJS.Timeout[]>([]); // Kept for potential future use, not currently used for host-manual reveal
 
   const addSystemMessage = useCallback(async (text: string, nameOverride?: string) => {
     if (!roomId || !playerId || !playerName) return;
@@ -545,7 +677,6 @@ export default function GameRoomPage() {
     const currentGuesses = currentGuessesSnap.exists() ? currentGuessesSnap.val() : [];
     await set(guessesRef, [...currentGuesses, systemGuess]);
   }, [roomId, playerId, playerName]);
-
 
   const prepareNewGameSession = useCallback(async () => {
     const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
@@ -704,7 +835,7 @@ export default function GameRoomPage() {
         wordSelectionEndsAt: Date.now() + 15 * 1000,
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
-        guesses: currentRoomData.guesses || [], 
+        guesses: currentRoomData.guesses || [],
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection,
         revealedPattern: [],
@@ -718,7 +849,6 @@ export default function GameRoomPage() {
         toast({title:"Error", description: "Could not start new round.", variant: "destructive"});
     }
   }, [playerId, roomId, toast, addSystemMessage]);
-
 
   const confirmWordAndStartDrawing = useCallback(async (word: string) => {
     const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
@@ -742,12 +872,11 @@ export default function GameRoomPage() {
         guesses: currentRoomData.guesses || [],
         correctGuessersThisRound: [],
         usedWords: newUsedWords,
-        revealedPattern: initialRevealedPattern, // Ensure revealedPattern is set here
+        // revealedPattern: initialRevealedPattern, // Will be set explicitly
     };
     try {
-        // Explicitly clear drawing data and set revealed pattern first if needed, or bundle in main update
         await set(ref(database, `rooms/${roomId}/drawingData`), [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }]);
-        // Revealed pattern is now part of the main 'updates' object
+        await set(ref(database, `rooms/${roomId}/revealedPattern`), initialRevealedPattern);
         await update(ref(database, `rooms/${roomId}`), updates);
 
         toast({title: "Drawing Started!", description: `The word has been chosen. Time to draw!`});
@@ -756,7 +885,6 @@ export default function GameRoomPage() {
         toast({title: "Error", description: "Could not start drawing phase.", variant: "destructive"});
     } finally {
         setIsSubmittingWord(false);
-        setCustomWordInput('');
     }
   }, [playerId, roomId, toast]);
 
@@ -785,7 +913,6 @@ export default function GameRoomPage() {
         }
     }
   }, [playerId, roomId, toast, addSystemMessage]);
-
 
   const handleGuessSubmit = useCallback(async (guessText: string) => {
     const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
@@ -850,6 +977,7 @@ export default function GameRoomPage() {
 
     await update(ref(database, `rooms/${roomId}`), updates);
 
+    // Check if all non-drawing online players have guessed
     const updatedRoomSnapForEndRound = await get(ref(database, `rooms/${roomId}`));
     if (!updatedRoomSnapForEndRound.exists()) return;
     const updatedRoomDataForEndRound: Room = updatedRoomSnapForEndRound.val();
@@ -857,14 +985,13 @@ export default function GameRoomPage() {
     const onlineNonDrawingPlayers = Object.values(updatedRoomDataForEndRound.players || {}).filter(p => p.isOnline && p.id !== updatedRoomDataForEndRound.currentDrawerId);
     const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (updatedRoomDataForEndRound.correctGuessersThisRound || []).includes(p.id));
 
-    if (isCorrect && updatedRoomDataForEndRound.hostId === playerId && updatedRoomDataForEndRound.gameState === 'drawing') {
-        if (allGuessed) {
-           endCurrentRound("All players guessed correctly!");
-        }
-    } else if (updatedRoomDataForEndRound.hostId === playerId && allGuessed && updatedRoomDataForEndRound.gameState === 'drawing') {
+    if (updatedRoomDataForEndRound.hostId === playerId && updatedRoomDataForEndRound.gameState === 'drawing') {
+      if(allGuessed){
         endCurrentRound("All players guessed correctly!");
+      }
     }
   }, [playerId, playerName, roomId, toast, endCurrentRound]);
+
 
   const manageGameStart = useCallback(async () => {
     const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
@@ -881,7 +1008,7 @@ export default function GameRoomPage() {
     }
   }, [playerId, roomId, prepareNewGameSession, selectWordForNewRound]);
 
-  const handleDrawerLetterClick = (char: string, index: number) => {
+  const handleDrawerLetterClick = useCallback((char: string, index: number) => {
     if (!room || !room.currentPattern || !room.revealedPattern || room.currentDrawerId !== playerId) return;
     
     const currentRevealedPattern = (room.revealedPattern && room.revealedPattern.length === room.currentPattern.length)
@@ -889,29 +1016,35 @@ export default function GameRoomPage() {
                                  : room.currentPattern.split('').map(c => c === ' ' ? ' ' : '_');
 
     if (char === ' ' || (currentRevealedPattern[index] && currentRevealedPattern[index] !== '_')) {
-      // Letter already revealed or is a space
       return; 
     }
     setLetterToRevealInfo({ char: room.currentPattern[index], index });
     setIsRevealConfirmDialogOpen(true);
-  };
+  }, [room, playerId]);
 
-  const handleConfirmLetterRevealByDrawer = async () => {
+  const handleConfirmLetterRevealByDrawer = useCallback(async () => {
     if (!room || !letterToRevealInfo || !room.currentPattern || room.currentDrawerId !== playerId) return;
 
     const revealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
+    const patternChars = room.currentPattern.split('');
     
     try {
         await runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
-            if (!currentFirebaseRevealedPattern) {
-                // Initialize if it doesn't exist, though confirmWordAndStartDrawing should handle this
-                const initialPattern = room.currentPattern!.split('').map(c => c === ' ' ? ' ' : '_');
-                initialPattern[letterToRevealInfo.index] = room.currentPattern![letterToRevealInfo.index];
-                return initialPattern;
+            let basePattern: string[];
+            const initialUnderscorePatternForTransaction = patternChars.map(c => (c === ' ' ? ' ' : '_'));
+
+            if (currentFirebaseRevealedPattern && 
+                Array.isArray(currentFirebaseRevealedPattern) && 
+                currentFirebaseRevealedPattern.length === patternChars.length) {
+                basePattern = [...currentFirebaseRevealedPattern];
+            } else {
+                basePattern = [...initialUnderscorePatternForTransaction];
             }
-            const newRevealedPattern = [...currentFirebaseRevealedPattern];
-            newRevealedPattern[letterToRevealInfo.index] = room.currentPattern![letterToRevealInfo.index];
-            return newRevealedPattern;
+            
+            if(letterToRevealInfo && basePattern[letterToRevealInfo.index] === '_') {
+                basePattern[letterToRevealInfo.index] = patternChars[letterToRevealInfo.index];
+            }
+            return basePattern;
         });
 
       toast({ title: "Hint Revealed!", description: `Letter "${room.currentPattern[letterToRevealInfo.index]}" is now visible to guessers.` });
@@ -922,8 +1055,7 @@ export default function GameRoomPage() {
       setIsRevealConfirmDialogOpen(false);
       setLetterToRevealInfo(null);
     }
-  };
-
+  }, [room, letterToRevealInfo, playerId, roomId, toast]);
 
   useEffect(() => {
     const pId = localStorage.getItem('patternPartyPlayerId');
@@ -937,7 +1069,7 @@ export default function GameRoomPage() {
     setPlayerName(pName);
   }, [roomId, router, toast]);
 
-  const handleLeaveRoom = async () => {
+  const handleLeaveRoom = useCallback(async () => {
     if (playerId && room) {
       const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
       try {
@@ -953,47 +1085,26 @@ export default function GameRoomPage() {
     } else {
       router.push('/');
     }
-  };
+  }, [playerId, room, playerName, router, toast, addSystemMessage]);
 
-  const handleCopyLink = () => {
+  const handleCopyLink = useCallback(() => {
     const link = `${window.location.origin}/join/${roomId}`;
     navigator.clipboard.writeText(link)
       .then(() => toast({ title: "Link Copied!", description: "Room link copied to clipboard." }))
       .catch(() => toast({ title: "Error", description: "Could not copy link.", variant: "destructive" }));
-  };
+  }, [roomId, toast]);
 
-  const handleDraw = (point: DrawingPoint) => {
+  const handleDraw = useCallback((point: DrawingPoint) => {
     if (!room || !playerId || room.currentDrawerId !== playerId || room.gameState !== 'drawing') return;
     const newDrawingData = [...(room.drawingData || []), point];
     set(ref(database, `rooms/${roomId}/drawingData`), newDrawingData);
-  };
+  }, [room, playerId, roomId]);
 
-  const handleClearCanvas = () => {
+  const handleClearCanvas = useCallback(() => {
     if (!room || !playerId || room.currentDrawerId !== playerId || room.gameState !== 'drawing') return;
     const clearPoint: DrawingPoint = { type: 'clear', x:0, y:0, color:'', lineWidth:0 };
     set(ref(database, `rooms/${roomId}/drawingData`), [clearPoint]);
-  };
-
-  const handleCustomWordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
-    if (!currentRoomSnapshot.exists()) return;
-    const currentRoomData: Room = currentRoomSnapshot.val();
-
-    if (!currentRoomData || !customWordInput.trim() || !playerId || currentRoomData.currentDrawerId !== playerId || currentRoomData.gameState !== 'word_selection' || !currentRoomData.config) return;
-
-    const word = customWordInput.trim();
-    if (word.length > currentRoomData.config.maxWordLength ) {
-        toast({ title: "Word too long!", description: `Max length is ${currentRoomData.config.maxWordLength} chars.`, variant: "destructive"});
-        return;
-    }
-    if ((currentRoomData.usedWords || []).map(w => w.toLowerCase()).includes(word.toLowerCase())) {
-        toast({ title: "Word Used!", description: "This word has already been drawn.", variant: "destructive"});
-        return;
-    }
-    await confirmWordAndStartDrawing(word);
-  };
-
+  },[room, playerId, roomId]);
 
   useEffect(() => {
     if (!roomId || !playerId) return;
@@ -1016,7 +1127,6 @@ export default function GameRoomPage() {
             roomData.config = { roundTimeoutSeconds: 90, totalRounds: 5, maxWordLength: 20 };
         }
         if (roomData.revealedPattern === undefined) {
-             // Initialized by confirmWordAndStartDrawing, or host hint effect for safety
              roomData.revealedPattern = roomData.currentPattern ? roomData.currentPattern.split('').map(c => c === ' ' ? ' ' : '_') : [];
         }
 
@@ -1047,7 +1157,7 @@ export default function GameRoomPage() {
                  onDisconnect(playerStatusRef).set(false).catch(err => console.error("onDisconnect error for player status", err));
 
                  const currentPlayerData = playerSnap.val();
-                 if (!currentPlayerData.isOnline) {
+                 if (!currentPlayerData.isOnline) { // Only add join message if they were previously offline
                      addSystemMessage(`[[SYSTEM_JOINED]]`, playerName || "A player");
                  }
             }
@@ -1070,7 +1180,7 @@ export default function GameRoomPage() {
   }, [roomId, playerId, router, toast, isLoading, addSystemMessage, playerName]);
 
 
-  useEffect(() => {
+  useEffect(() => { // Host: Manages round end by timer
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt) {
       let roundTimer: NodeJS.Timeout | null = null;
 
@@ -1078,7 +1188,7 @@ export default function GameRoomPage() {
       const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (room.correctGuessersThisRound || []).includes(p.id));
 
       if (allGuessed) {
-        setTimeout(() => {
+        setTimeout(() => { // Small delay to allow final guess UI to update
             get(ref(database, `rooms/${roomId}`)).then(snap => {
                 if (snap.exists()) {
                     const currentRoomData = snap.val() as Room;
@@ -1095,13 +1205,13 @@ export default function GameRoomPage() {
         const timeLeftMs = room.roundEndsAt - now;
         if (timeLeftMs <= 0) {
           get(ref(database, `rooms/${roomId}/gameState`)).then(snap => {
-            if (snap.exists() && snap.val() === 'drawing') {
+            if (snap.exists() && snap.val() === 'drawing') { // Ensure still in drawing phase
                endCurrentRound("Timer ran out!");
             }
           });
         } else {
           roundTimer = setTimeout(() => {
-            get(ref(database, `rooms/${roomId}`)).then(snap => {
+            get(ref(database, `rooms/${roomId}`)).then(snap => { // Re-fetch to ensure latest state
               if (snap.exists()) {
                 const currentRoomData = snap.val() as Room;
                 if (currentRoomData.gameState === 'drawing' &&
@@ -1122,7 +1232,7 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room?.currentDrawerId, room?.correctGuessersThisRound, roomId]);
 
 
-  useEffect(() => {
+  useEffect(() => { // Host: Manages auto-start of next round
     if (room?.gameState === 'round_end' && playerId === room?.hostId) {
         const NEXT_ROUND_DELAY_SECONDS = 5;
         setRoundEndCountdown(NEXT_ROUND_DELAY_SECONDS);
@@ -1135,23 +1245,23 @@ export default function GameRoomPage() {
             clearInterval(countdownInterval);
             setRoundEndCountdown(null);
 
-            const playersSnap = await get(ref(database, `rooms/${roomId}/players`));
-            if (playersSnap.exists()) {
-                const playersData = playersSnap.val();
-                const onlinePlayersCount = Object.values(playersData || {}).filter((p: any) => p.isOnline).length;
-
-                const currentRoomStateSnap = await get(ref(database, `rooms/${roomId}/gameState`));
-                if (currentRoomStateSnap.exists() && currentRoomStateSnap.val() === 'round_end') {
+            // Check current game state again before proceeding
+            const currentRoomStateSnap = await get(ref(database, `rooms/${roomId}/gameState`));
+            if (currentRoomStateSnap.exists() && currentRoomStateSnap.val() === 'round_end') {
+                const playersSnap = await get(ref(database, `rooms/${roomId}/players`));
+                if (playersSnap.exists()) {
+                    const playersData = playersSnap.val();
+                    const onlinePlayersCount = Object.values(playersData || {}).filter((p: any) => p.isOnline).length;
                     if (onlinePlayersCount > 0) {
                         selectWordForNewRound();
                     } else {
                         await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
                         toast({title: "No Active Players", description: "Game ended as no players are online.", variant: "default"});
                     }
+                } else {
+                    await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
+                    toast({title: "Game Error", description: "Cannot proceed, player data missing.", variant: "destructive"});
                 }
-            } else {
-                 await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
-                 toast({title: "Game Error", description: "Cannot proceed, player data missing.", variant: "destructive"});
             }
         }, NEXT_ROUND_DELAY_SECONDS * 1000);
 
@@ -1166,7 +1276,7 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.hostId, playerId, selectWordForNewRound, roomId, toast]);
 
 
-  useEffect(() => {
+  useEffect(() => { // Host: Manages word selection timeout
     if (room?.gameState === 'word_selection' && room?.hostId === playerId && room?.wordSelectionEndsAt && !room?.currentPattern) {
       const now = Date.now();
       const timeLeftMs = room.wordSelectionEndsAt - now;
@@ -1178,7 +1288,7 @@ export default function GameRoomPage() {
                  const latestRoomData = snap.val() as Room;
                  if (latestRoomData.gameState === 'word_selection' &&
                      latestRoomData.hostId === playerId &&
-                     !latestRoomData.currentPattern &&
+                     !latestRoomData.currentPattern && // Check if word STILL not chosen
                      latestRoomData.wordSelectionEndsAt && Date.now() >= latestRoomData.wordSelectionEndsAt) {
 
                     const drawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
@@ -1188,7 +1298,7 @@ export default function GameRoomPage() {
                         variant: "default"
                     });
                     addSystemMessage(`${drawerName} didn't choose. Next player!`);
-                    selectWordForNewRound();
+                    selectWordForNewRound(); // Skip and select new drawer/words
                  }
              }
           });
@@ -1199,7 +1309,7 @@ export default function GameRoomPage() {
                  const latestRoomData = snap.val() as Room;
                  if (latestRoomData.gameState === 'word_selection' &&
                      latestRoomData.hostId === playerId &&
-                     !latestRoomData.currentPattern &&
+                     !latestRoomData.currentPattern && // Check if word STILL not chosen
                      latestRoomData.wordSelectionEndsAt &&
                      Date.now() >= latestRoomData.wordSelectionEndsAt) {
 
@@ -1210,7 +1320,7 @@ export default function GameRoomPage() {
                         variant: "default"
                     });
                     addSystemMessage(`${currentDrawerName} didn't choose. Next player!`);
-                    selectWordForNewRound();
+                    selectWordForNewRound(); // Skip and select new drawer/words
                  }
              }
           });
@@ -1227,100 +1337,30 @@ export default function GameRoomPage() {
   if (error) return <div className="text-center text-destructive p-8 bg-destructive/10 border border-destructive/20 rounded-md h-screen flex flex-col justify-center items-center"><AlertCircle className="mx-auto h-12 w-12 mb-4" /> <h2 className="text-2xl font-semibold mb-2">Error Loading Room</h2><p>{error}</p><Button onClick={() => router.push('/')} className="mt-4">Go Home</Button></div>;
   if (!room || !playerId || !playerName || !room.config) return <div className="text-center p-8 h-screen flex flex-col justify-center items-center">Room data is not available or incomplete. <Link href="/" className="text-primary hover:underline">Go Home</Link></div>;
 
-  const playersArray = Object.values(room.players || {});
+  const playersArray = useMemo(() => Object.values(room.players || {}), [room.players]);
+  const memoizedDrawingData = useMemo(() => room.drawingData || [], [room.drawingData]);
+  const memoizedGuesses = useMemo(() => room.guesses || [], [room.guesses]);
+
   const isHost = room.hostId === playerId;
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const canGuess = room.gameState === 'drawing' && !isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId);
   const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : "Someone";
   const hasPlayerGuessedCorrectly = (room.correctGuessersThisRound || []).includes(playerId);
 
-
   const getStartButtonInfo = () => {
-    if (room.gameState === 'waiting') return { text: 'Start Game', icon: <Play size={16} /> }; // Adjusted icon size
-    if (room.gameState === 'game_over') return { text: 'Play Again', icon: <RotateCcw size={16} /> }; // Adjusted icon size
+    if (room.gameState === 'waiting') return { text: 'Start Game', icon: <Play size={16} /> };
+    if (room.gameState === 'game_over') return { text: 'Play Again', icon: <RotateCcw size={16} /> };
     return null;
   };
   const startButtonInfo = getStartButtonInfo();
 
-  const wordToDisplayElements = [];
-  if (room.gameState === 'drawing' && room.currentPattern) {
-      const patternChars = room.currentPattern.split('');
-      const currentRevealedToGuessersPattern = (room.revealedPattern && room.revealedPattern.length === patternChars.length)
-          ? room.revealedPattern
-          : patternChars.map(c => c === ' ' ? ' ' : '_');
-
-      if (isCurrentPlayerDrawing) {
-          patternChars.forEach((char, index) => {
-              if (char === ' ') {
-                  wordToDisplayElements.push(<span key={`drawer-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
-              } else {
-                  const isLetterRevealedToOthers = currentRevealedToGuessersPattern[index] !== '_' && currentRevealedToGuessersPattern[index] !== ' ';
-                  if (isLetterRevealedToOthers) {
-                      wordToDisplayElements.push(
-                          <span key={`drawer-revealed-${index}`} className="font-bold text-green-600 cursor-default">
-                              {char}
-                          </span>
-                      );
-                  } else {
-                      wordToDisplayElements.push(
-                          <button
-                              key={`drawer-clickable-${index}`}
-                              onClick={() => handleDrawerLetterClick(char, index)}
-                              className="font-bold text-primary hover:text-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                              aria-label={`Reveal letter ${char}`}
-                              title={`Click to reveal this letter: ${char}`}
-                              disabled={isSubmittingWord || isRevealConfirmDialogOpen}
-                          >
-                              {char}
-                          </button>
-                      );
-                  }
-              }
-          });
-      } else { // Current player is NOT the drawer (is a guesser, OR host-spectator)
-          if (hasPlayerGuessedCorrectly) {
-              patternChars.forEach((char, index) => {
-                  wordToDisplayElements.push(
-                      <span key={`guesser-correct-char-${index}`} className="font-bold text-foreground">
-                          {char === ' ' ? '\u00A0\u00A0' : char}
-                      </span>
-                  );
-              });
-          } else { // Has not guessed correctly (this includes host-spectator as per new rules)
-              currentRevealedToGuessersPattern.forEach((char, index) => {
-                  wordToDisplayElements.push(
-                      <span key={`guesser-revealed-char-${index}`} className={cn("font-bold", char === '_' || char === ' ' ? 'text-muted-foreground' : 'text-foreground')}>
-                          {char === ' ' ? '\u00A0\u00A0' : char}
-                      </span>
-                  );
-              });
-          }
-      }
-  } else if (room.currentPattern && (room.gameState === 'round_end' || room.gameState === 'game_over') ) {
-    room.currentPattern.split('').forEach((char, index) => {
-      wordToDisplayElements.push(
-        <span key={`ended-char-${index}`} className="font-bold text-foreground">
-          {char === ' ' ? '\u00A0\u00A0' : char}
-        </span>
-      );
-    });
-  } else {
-     wordToDisplayElements.push(
-      <span key="placeholder-state" className="text-muted-foreground">
-        {room.gameState === 'word_selection' ? `${currentDrawerName || 'Someone'} is choosing...` : "Waiting..."}
-      </span>
-     );
-  }
-
 
   return (
     <>
-    {/* Main Game Container: Full viewport height, max-width for "app" feel, flex column */}
     <div className="max-w-md mx-auto border border-black flex flex-col select-none" style={{ height: '100vh', maxHeight: '900px', minHeight: '700px' }}>
-        {/* Top bar: Fixed height, contains timer, word, actions */}
+        {/* Top bar */}
         <div className="flex items-center justify-between border-b border-blue-900 px-1 py-0.5" style={{ borderWidth: "2px"}}>
-            {/* Left: Timer & Round */}
-            <div className="flex flex-col items-center justify-center w-16 relative">
+            <div className="flex flex-col items-center justify-center p-1 w-16 relative">
                 <TimerDisplay
                     targetTime={room.gameState === 'drawing' ? room.roundEndsAt : (room.gameState === 'word_selection' ? room.wordSelectionEndsAt : null)}
                     defaultSeconds={room.gameState === 'drawing' ? room.config.roundTimeoutSeconds : (room.gameState === 'word_selection' ? 15 : 0)}
@@ -1334,9 +1374,9 @@ export default function GameRoomPage() {
                  {isHost && startButtonInfo && (room.gameState === 'waiting' || room.gameState === 'game_over') && (
                     <Button
                         onClick={manageGameStart}
-                        size="icon" // Changed to icon size
+                        size="icon"
                         variant="outline"
-                        className="mt-1 w-8 h-8 text-primary hover:bg-primary/10" // Adjusted styling for icon button
+                        className="mt-1 w-8 h-8 text-primary hover:bg-primary/10"
                         aria-label={startButtonInfo.text}
                         disabled={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter(p=>p.isOnline).length < 1}
                     >
@@ -1345,62 +1385,43 @@ export default function GameRoomPage() {
                  )}
             </div>
 
-            {/* Center: Guess This and word */}
             <div className="flex flex-col items-center justify-center py-1 text-center">
                  <div className={cn(
                     "text-[11px] font-semibold tracking-wide",
                     isCurrentPlayerDrawing ? "text-accent" : "text-muted-foreground"
                  )}>
                     {isCurrentPlayerDrawing ? "DRAW THIS" : "GUESS THIS"}
+                     {!isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId) && room.currentPattern && room.gameState === 'drawing' && (
+                         <span className="ml-1 text-muted-foreground">({room.currentPattern.replace(/\s/g, '').length} letters)</span>
+                     )}
                 </div>
-                <div
-                    key={room.revealedPattern?.join('') + room.currentPattern + room.gameState}
-                    className={cn(
-                        "text-[20px] font-mono font-normal tracking-widest select-text flex items-center justify-center gap-0.5 animate-in fade-in duration-300",
-                        isCurrentPlayerDrawing && room.gameState === 'drawing' ? "text-primary" : "text-foreground"
-                    )} style={{ letterSpacing: '0.2em' }}
-                >
-                    {wordToDisplayElements}
-                    {(room.gameState === 'drawing' && room.currentPattern && !isCurrentPlayerDrawing && !hasPlayerGuessedCorrectly) && (
-                        <sup className="text-[10px] font-normal text-gray-500 self-start ml-0.5">
-                            {room.currentPattern.replace(/\s/g, '').length}
-                        </sup>
-                    )}
-                </div>
+                <WordDisplay
+                  gameState={room.gameState}
+                  currentPattern={room.currentPattern}
+                  revealedPattern={room.revealedPattern}
+                  isCurrentPlayerDrawing={isCurrentPlayerDrawing}
+                  hasPlayerGuessedCorrectly={hasPlayerGuessedCorrectly}
+                  onLetterClick={handleDrawerLetterClick}
+                />
                  {isCurrentPlayerDrawing && room.gameState === 'drawing' && (
                      <div className="text-[9px] text-blue-600 mt-0.5">(Click letters to reveal hints)</div>
                  )}
             </div>
 
-            {/* Right: Actions - Share and Settings */}
             <div className="w-16 flex justify-end items-center gap-1">
                 <Button variant="ghost" size="icon" className="w-8 h-8 text-gray-600 hover:bg-gray-200" onClick={handleCopyLink} aria-label="Copy room link"><Share2 size={18} /></Button>
                 <Dialog open={isSettingsDialogOpen} onOpenChange={setIsSettingsDialogOpen}>
                     <DialogTrigger asChild>
                         <Button variant="ghost" size="icon" className="w-8 h-8 text-gray-600 hover:bg-gray-200" aria-label="Room Settings"><Settings size={18} /></Button>
                     </DialogTrigger>
-                    <DialogContent className="sm:max-w-[425px]">
-                        <DialogHeader>
-                        <DialogTitle>Room Settings</DialogTitle>
-                        <DialogDescription>Manage your room preferences here.</DialogDescription>
-                        </DialogHeader>
-                        <div className="grid gap-4 py-4">
-                            <Button variant="outline" onClick={handleCopyLink} className="w-full justify-start">
-                                <Share2 className="mr-2 h-4 w-4" /> Share Room Link
-                            </Button>
-                            <Button variant="destructive" onClick={handleLeaveRoom} className="w-full justify-start">
-                                <LogOut className="mr-2 h-4 w-4" /> Leave Room
-                            </Button>
-                        </div>
-                    </DialogContent>
+                    <SettingsDialogContent onCopyLink={handleCopyLink} onLeaveRoom={handleLeaveRoom} />
                 </Dialog>
             </div>
         </div>
 
-        {/* Drawing area: Fixed height percentage, contains canvas */}
         <div className="relative border border-black m-1 rounded" style={{ height: '40vh', minHeight: '220px' }}>
              <DrawingCanvas
-                drawingData={room.drawingData || []}
+                drawingData={memoizedDrawingData}
                 onDraw={handleDraw}
                 currentDrawerId={room.currentDrawerId}
                 playerId={playerId}
@@ -1411,9 +1432,7 @@ export default function GameRoomPage() {
             />
         </div>
 
-        {/* Bottom section: Players and chat, side-by-side, takes remaining height */}
-        <div className="flex-grow flex flex-row gap-1 min-h-0 w-full" style={{ height: 'calc(100% - 40vh - 2px - 42px - 52px)'}}> {/* Approx height accounting for borders and input box */}
-            {/* Players list */}
+        <div className="flex-grow flex flex-row gap-1 min-h-0 w-full" style={{ height: 'calc(100% - 40vh - 2px - 42px - 52px)'}}>
             <div className="w-1/2 h-full">
                 <PlayerList
                     players={playersArray}
@@ -1425,142 +1444,54 @@ export default function GameRoomPage() {
                     setIsMinimized={setIsPlayerListMinimized}
                 />
             </div>
-            {/* Chat area */}
             <div className="w-1/2 h-full">
                 <ChatArea
-                    guesses={room.guesses || []}
-                    room={room}
+                    guesses={memoizedGuesses}
+                    gameState={room.gameState}
                     playerId={playerId}
                 />
             </div>
         </div>
         
-        {/* Guess Input Bar (Sticky at the bottom of the main game container) */}
         <div className="p-1 border-t border-black bg-background w-full flex-shrink-0 sticky bottom-0 z-20">
             <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
         </div>
-
     </div>
 
-      {/* Word Selection Dialog */}
-      {room.gameState === 'word_selection' && isCurrentPlayerDrawing && (
-        <Dialog open={true} onOpenChange={() => { /* Controlled dialog */ }}>
-          <DialogContent className="sm:max-w-[480px] shadow-xl border-border/80 bg-background">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-xl sm:text-2xl"><Lightbulb className="text-yellow-400"/> Choose a word to draw</DialogTitle>
-              <DialogDescription>
-                Select one of the suggested words or enter your own custom word below. Max word length: {room.config.maxWordLength} chars. You have 15 seconds!
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-4">
-                {(room.selectableWords || []).map(word => (
-                  <Button
-                    key={word}
-                    variant="secondary"
-                    className="text-base sm:text-lg px-4 py-2 sm:px-6 sm:py-3"
-                    onClick={() => confirmWordAndStartDrawing(word)}
-                    disabled={isSubmittingWord}
-                  >
-                    {word}
-                  </Button>
-                ))}
-                {(!room.selectableWords || room.selectableWords.length === 0) && <p className="text-muted-foreground flex items-center gap-2"><Loader2 className="animate-spin"/>Loading AI suggestions...</p>}
-              </div>
-              <form onSubmit={handleCustomWordSubmit} className="space-y-3">
-                <label htmlFor="customWord" className="text-base sm:text-md font-medium text-foreground">Or enter your custom word:</label>
-                <div className="flex gap-2">
-                    <Input
-                    id="customWord"
-                    type="text"
-                    value={customWordInput}
-                    onChange={(e) => setCustomWordInput(e.target.value)}
-                    placeholder={`Max ${room.config.maxWordLength} chars`}
-                    maxLength={room.config.maxWordLength}
-                    className="flex-grow"
-                    disabled={isSubmittingWord}
-                    />
-                    <Button type="submit" disabled={isSubmittingWord || !customWordInput.trim()}>
-                        {isSubmittingWord && customWordInput ? <Loader2 className="animate-spin mr-2"/> : <Edit3 className="mr-2 h-4 w-4" />}
-                        Draw This
-                    </Button>
-                </div>
-              </form>
-            </div>
-            {room.wordSelectionEndsAt && (
-                <div className="text-center mt-2 text-sm">
-                    <TimerDisplay targetTime={room.wordSelectionEndsAt} defaultSeconds={15} compact={true}/>
-                </div>
-            )}
-          </DialogContent>
-        </Dialog>
-      )}
+    {room.gameState === 'word_selection' && isCurrentPlayerDrawing && (
+        <WordSelectionDialog
+            isOpen={true}
+            maxWordLength={room.config.maxWordLength}
+            selectableWords={room.selectableWords || []}
+            onConfirmWord={confirmWordAndStartDrawing}
+            isSubmittingWord={isSubmittingWord}
+            wordSelectionEndsAt={room.wordSelectionEndsAt}
+        />
+    )}
 
-      {/* Round End / Game Over Modals/Info */}
-      {(room.gameState === 'round_end' || room.gameState === 'game_over') && (
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-20 p-4">
-            <div className="bg-background p-6 rounded-lg shadow-xl max-w-md w-full">
-            {room.gameState === 'round_end' && (
-                <>
-                    <div className="text-2xl mb-3 text-green-700 font-bold text-center">Round Over!</div>
-                    <p className="text-md mb-2 text-center text-foreground">The word was: <strong className="font-mono text-primary">{room.currentPattern || "N/A"}</strong></p>
-                    <p className="text-md mb-3 text-center text-foreground">Drawer: {currentDrawerName || 'N/A'}</p>
-                    <h4 className="font-semibold mt-3 mb-1 text-center text-foreground">Correct Guesses:</h4>
-                    {room.guesses.filter(g => g.isCorrect).length > 0 ? (
-                        <ul className="list-disc list-inside text-sm text-center max-h-32 overflow-y-auto text-muted-foreground">
-                            {room.guesses.filter(g => g.isCorrect).map(g => (
-                                <li key={g.playerId + "_" + g.timestamp}>{g.playerName} {g.isFirstCorrect ? <span className="font-bold text-accent">(First!)</span> : ''}</li>
-                            ))}
-                        </ul>
-                    ) : <p className="text-sm italic text-center text-muted-foreground">No one guessed it right this time!</p>}
-                    {roundEndCountdown !== null && <p className="mt-4 text-center text-lg font-semibold text-primary animate-pulse">Next round in {roundEndCountdown}s...</p>}
-                </>
-            )}
-            {room.gameState === 'game_over' && (
-                <>
-                    <div className="text-3xl mb-4 text-center text-primary flex items-center justify-center gap-2 font-bold"><Trophy className="text-yellow-500" /> Game Over! <Trophy className="text-yellow-500" /></div>
-                    <div className="text-center mb-3 text-lg text-foreground">Final Scores:</div>
-                    <ul className="space-y-1 max-h-48 overflow-y-auto mb-4">
-                        {playersArray.sort((a,b) => (b.score || 0) - (a.score || 0)).map((player, index) => (
-                            <li key={player.id} className={`flex justify-between items-center p-2 text-sm rounded-md ${index === 0 ? 'bg-yellow-100 font-bold text-yellow-800' : 'bg-muted'}`}>
-                                <span className="text-foreground">{index + 1}. {player.name}</span>
-                                <span className="font-semibold text-foreground">{player.score || 0} pts</span>
-                            </li>
-                        ))}
-                    </ul>
-                    {isHost && startButtonInfo && (
-                        <div className="mt-6 text-center">
-                            <Button
-                                onClick={manageGameStart}
-                                size="lg"
-                                variant="default"
-                                className="px-8 py-3 text-lg"
-                                disabled={Object.values(room.players).filter(p=>p.isOnline).length < 1}
-                            >
-                                {startButtonInfo.icon} {startButtonInfo.text}
-                            </Button>
-                        </div>
-                    )}
-                </>
-            )}
-            </div>
-        </div>
-      )}
-
+    {(room.gameState === 'round_end' || room.gameState === 'game_over') && (
+        <GameStateModals
+            gameState={room.gameState}
+            currentPattern={room.currentPattern}
+            currentDrawerName={currentDrawerName}
+            guesses={memoizedGuesses}
+            roundEndCountdown={roundEndCountdown}
+            players={playersArray}
+            isHost={isHost}
+            onPlayAgain={manageGameStart}
+            canPlayAgain={Object.values(room.players).filter(p=>p.isOnline).length >= 1}
+        />
+    )}
 
     <AlertDialog open={isRevealConfirmDialogOpen} onOpenChange={setIsRevealConfirmDialogOpen}>
-        <AlertDialogContent>
-            <AlertDialogHeader>
-            <AlertDialogTitle>Reveal Hint?</AlertDialogTitle>
-            <AlertDialogDescription>
-                Are you sure you want to reveal the letter "{letterToRevealInfo?.char}" to other players?
-            </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setLetterToRevealInfo(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmLetterRevealByDrawer}>Confirm</AlertDialogAction>
-            </AlertDialogFooter>
-        </AlertDialogContent>
+        <RevealConfirmDialogContent
+            letterChar={letterToRevealInfo?.char}
+            onCancel={() => {
+                setIsRevealConfirmDialogOpen(false);
+                setLetterToRevealInfo(null);
+            }}
+            onConfirm={handleConfirmLetterRevealByDrawer}
+        />
     </AlertDialog>
     </>
   );
