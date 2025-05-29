@@ -525,7 +525,7 @@ export default function GameRoomPage() {
 
   const [isRevealConfirmDialogOpen, setIsRevealConfirmDialogOpen] = useState(false);
   const [letterToRevealInfo, setLetterToRevealInfo] = useState<{ char: string; index: number } | null>(null);
-  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(false); // Player list not minimized by default
+  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(false); 
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
 
 
@@ -697,7 +697,7 @@ export default function GameRoomPage() {
         wordSelectionEndsAt: Date.now() + 15 * 1000,
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
-        guesses: currentRoomData.guesses || [],
+        guesses: currentRoomData.guesses || [], 
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection,
         revealedPattern: [],
@@ -879,7 +879,7 @@ export default function GameRoomPage() {
                                  : room.currentPattern.split('').map(c => c === ' ' ? ' ' : '_');
 
     if (char === ' ' || (currentRevealedPattern[index] && currentRevealedPattern[index] !== '_')) {
-      return; // Don't try to reveal spaces or already revealed letters
+      return; 
     }
     setLetterToRevealInfo({ char: room.currentPattern[index], index });
     setIsRevealConfirmDialogOpen(true);
@@ -922,7 +922,7 @@ export default function GameRoomPage() {
       try {
         addSystemMessage(`[[SYSTEM_LEFT]]`, playerName || "A player");
         await update(playerRef, { isOnline: false });
-        setIsSettingsDialogOpen(false); // Close dialog on leave
+        setIsSettingsDialogOpen(false); 
         toast({ title: "Left Room", description: "You have left the room." });
         router.push('/');
       } catch (err) {
@@ -995,11 +995,7 @@ export default function GameRoomPage() {
             roomData.config = { roundTimeoutSeconds: 90, totalRounds: 5, maxWordLength: 20 };
         }
         if (roomData.revealedPattern === undefined) {
-            if (roomData.gameState === 'drawing' && roomData.currentPattern) {
-                roomData.revealedPattern = roomData.currentPattern.split('').map(char => char === ' ' ? ' ' : '_');
-            } else {
-                roomData.revealedPattern = [];
-            }
+             roomData.revealedPattern = [];
         }
 
         setRoom(roomData);
@@ -1210,10 +1206,12 @@ export default function GameRoomPage() {
   if (!room || !playerId || !playerName || !room.config) return <div className="text-center p-8 h-screen flex flex-col justify-center items-center">Room data is not available or incomplete. <Link href="/" className="text-blue-600 hover:underline">Go Home</Link></div>;
 
   const playersArray = Object.values(room.players || {});
+  const isHost = room.hostId === playerId;
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const canGuess = room.gameState === 'drawing' && !isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId);
-  const isHost = room.hostId === playerId;
   const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : "Someone";
+  const hasPlayerGuessedCorrectly = (room.correctGuessersThisRound || []).includes(playerId);
+
 
   const getStartButtonInfo = () => {
     if (room.gameState === 'waiting') return { text: 'Start Game', icon: <Play size={18} /> };
@@ -1225,72 +1223,101 @@ export default function GameRoomPage() {
   const wordToDisplayElements = [];
   if (room.gameState === 'drawing' && room.currentPattern) {
     const patternChars = room.currentPattern.split('');
-    const currentRevealedPattern = (room.revealedPattern && room.revealedPattern.length === patternChars.length)
-                            ? room.revealedPattern
-                            : patternChars.map(c => c === ' ' ? ' ' : '_');
+    const currentRevealedToGuessersPattern = (room.revealedPattern && room.revealedPattern.length === patternChars.length)
+                                      ? room.revealedPattern
+                                      : patternChars.map(c => c === ' ' ? ' ' : '_');
 
-    if (isHost && room.gameState === 'drawing') {
+    if (isCurrentPlayerDrawing) { 
+      patternChars.forEach((char, index) => {
+        if (char === ' ') {
+          wordToDisplayElements.push(<span key={`drawer-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
+        } else if (isHost) { 
+          const isRevealedToOthers = currentRevealedToGuessersPattern[index] !== '_' && currentRevealedToGuessersPattern[index] !== ' ';
+          if (isRevealedToOthers) {
+            wordToDisplayElements.push(
+              <span key={`host-drawer-revealed-${index}`} className="font-bold text-green-600 cursor-default">
+                {char}
+              </span>
+            );
+          } else {
+            wordToDisplayElements.push(
+              <button
+                key={`host-drawer-clickable-${index}`}
+                onClick={() => handleHostLetterClick(char, index)}
+                className="font-bold text-foreground hover:text-primary focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-foreground"
+                aria-label={`Reveal letter ${char}`}
+                title={`Click to reveal this letter: ${char}`}
+                disabled={isSubmittingWord || isRevealConfirmDialogOpen}
+              >
+                {char}
+              </button>
+            );
+          }
+        } else { 
+          wordToDisplayElements.push(
+            <span key={`nonhost-drawer-char-${index}`} className="font-bold text-foreground">
+              {char}
+            </span>
+          );
+        }
+      });
+    } else if (isHost) { 
+      patternChars.forEach((char, index) => {
+        const isRevealedToOthers = currentRevealedToGuessersPattern[index] !== '_' && currentRevealedToGuessersPattern[index] !== ' ';
+        if (char === ' ') {
+          wordToDisplayElements.push(<span key={`host-spectator-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
+        } else if (isRevealedToOthers) {
+          wordToDisplayElements.push(
+            <span key={`host-spectator-revealed-${index}`} className="font-bold text-green-600">
+              {char} 
+            </span>
+          );
+        } else {
+          wordToDisplayElements.push(
+            <span key={`host-spectator-unrevealed-${index}`} className="font-bold text-foreground">
+              {char} 
+            </span>
+          );
+        }
+      });
+    } else { 
+      if (hasPlayerGuessedCorrectly) {
         patternChars.forEach((char, index) => {
-            const isAlreadyRevealedToOthers = currentRevealedPattern[index] !== '_' && currentRevealedPattern[index] !== ' ';
-            if (char === ' ') {
-                wordToDisplayElements.push(<span key={`host-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
-            } else if (isAlreadyRevealedToOthers) {
-                wordToDisplayElements.push(
-                    <span key={`host-revealed-${index}`} className="font-bold text-green-600 cursor-default">
-                        {char}
-                    </span>
-                );
-            } else {
-                wordToDisplayElements.push(
-                <button
-                    key={`host-clickable-${index}`}
-                    onClick={() => handleHostLetterClick(char, index)}
-                    className="font-bold text-gray-700 hover:text-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-gray-700"
-                    aria-label={`Reveal letter ${char}`}
-                    title={`Click to reveal this letter: ${char}`}
-                    disabled={isSubmittingWord || isRevealConfirmDialogOpen}
-                >
-                    {char}
-                </button>
-                );
-            }
+          wordToDisplayElements.push(
+            <span key={`guesser-correct-char-${index}`} className="font-bold text-foreground">
+              {char === ' ' ? '\u00A0\u00A0' : char}
+            </span>
+          );
         });
-    } else if (isCurrentPlayerDrawing || (room.correctGuessersThisRound || []).includes(playerId)) {
-         patternChars.forEach((char, index) => {
-            wordToDisplayElements.push(
-                <span key={`drawer-revealed-char-${index}`} className="font-bold text-gray-800">
-                    {char === ' ' ? '\u00A0\u00A0' : char}
-                </span>
-            );
+      } else {
+        currentRevealedToGuessersPattern.forEach((char, index) => {
+          wordToDisplayElements.push(
+            <span key={`guesser-revealed-char-${index}`} className={cn("font-bold", char === '_' || char === ' ' ? 'text-muted-foreground' : 'text-foreground')}>
+              {char === ' ' ? '\u00A0\u00A0' : char}
+            </span>
+          );
         });
-    } else {
-        currentRevealedPattern.forEach((char, index) => {
-            wordToDisplayElements.push(
-                <span key={`guesser-char-${index}`} className={cn("font-bold", char === '_' || char === ' ' ? 'text-gray-400' : 'text-gray-800')}>
-                    {char === ' ' ? '\u00A0\u00A0' : char}
-                </span>
-            );
-        });
+      }
     }
   } else if (room.currentPattern && (room.gameState === 'round_end' || room.gameState === 'game_over') ) {
-     room.currentPattern.split('').forEach((char, index) => {
-        wordToDisplayElements.push(
-            <span key={`ended-char-${index}`} className="font-bold text-gray-800">
-                {char === ' ' ? '\u00A0\u00A0' : char}
-            </span>
-        );
+    room.currentPattern.split('').forEach((char, index) => {
+      wordToDisplayElements.push(
+        <span key={`ended-char-${index}`} className="font-bold text-foreground">
+          {char === ' ' ? '\u00A0\u00A0' : char}
+        </span>
+      );
     });
   } else {
      wordToDisplayElements.push(
-        <span key="choosing-word" className="text-gray-500">
-           {room.gameState === 'word_selection' ? "Choosing word..." : "Waiting..."}
-        </span>
+      <span key="placeholder-state" className="text-muted-foreground">
+        {room.gameState === 'word_selection' ? `${currentDrawerName || 'Someone'} is choosing...` : "Waiting..."}
+      </span>
      );
   }
 
+
   return (
     <>
-    {/* Main container mimicking skribbl.io with fixed dimensions */}
     <div className="max-w-md mx-auto border border-black flex flex-col select-none" style={{ height: '100vh', maxHeight: '900px', minHeight: '700px' }}>
         {/* Top bar */}
         <div className="flex items-center justify-between border-b border-blue-900 px-1 py-0.5" style={{ borderWidth: "2px"}}>
@@ -1323,20 +1350,20 @@ export default function GameRoomPage() {
             {/* Center: Guess This and word */}
             <div className="flex flex-col items-center justify-center py-1 text-center">
                 <div className="text-[11px] font-semibold tracking-wide text-gray-600">
-                    {isCurrentPlayerDrawing && room.gameState === 'drawing' ? "DRAW THIS" : "GUESS THIS"}
+                    {isCurrentPlayerDrawing ? "DRAW THIS" : "GUESS THIS"}
                 </div>
                 <div
                     key={room.revealedPattern?.join('')}
                     className="text-[20px] font-mono font-normal tracking-widest select-text flex items-center gap-0.5 animate-in fade-in duration-300" style={{ letterSpacing: '0.2em' }}
                 >
                     {wordToDisplayElements}
-                    {(room.gameState === 'drawing' && room.currentPattern && !isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId)) && (
+                    {(room.gameState === 'drawing' && room.currentPattern && !isCurrentPlayerDrawing && !hasPlayerGuessedCorrectly) && (
                         <sup className="text-[10px] font-normal text-gray-500 self-start ml-0.5">
                             {room.currentPattern.replace(/\s/g, '').length}
                         </sup>
                     )}
                 </div>
-                 {isHost && room.gameState === 'drawing' && (
+                 {isHost && isCurrentPlayerDrawing && room.gameState === 'drawing' && (
                      <div className="text-[9px] text-blue-600 mt-0.5">(Click letters above to reveal hints)</div>
                  )}
             </div>
@@ -1534,3 +1561,4 @@ export default function GameRoomPage() {
     </>
   );
 }
+
