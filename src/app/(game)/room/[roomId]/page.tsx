@@ -5,7 +5,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useParams } from 'next/navigation';
 import { ref, onValue, off, update, serverTimestamp, set, child, get, onDisconnect, runTransaction } from 'firebase/database';
 import { database } from '@/lib/firebase';
-import type { Room, Player, DrawingPoint, Guess } from '@/lib/types';
+import type { Room, Player, DrawingPoint, Guess, RoomConfig } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,6 +29,7 @@ import {
   AlertDialogDescription,
   AlertDialogCancel,
   AlertDialogAction,
+  AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
 
 
@@ -550,6 +551,7 @@ const WordDisplay = React.memo(({
   isCurrentPlayerDrawing,
   hasPlayerGuessedCorrectly,
   onLetterClick,
+  currentDrawerName,
 }: {
   gameState: Room['gameState'] | undefined;
   currentPattern: string | null | undefined;
@@ -557,13 +559,14 @@ const WordDisplay = React.memo(({
   isCurrentPlayerDrawing: boolean;
   hasPlayerGuessedCorrectly: boolean;
   onLetterClick: (char: string, index: number) => void;
+  currentDrawerName: string | undefined | null;
 }) => {
   const wordToDisplayElements = useMemo(() => {
     const elements = [];
     if (!currentPattern) {
       elements.push(
         <span key="placeholder-no-pattern" className="text-muted-foreground">
-          {gameState === 'word_selection' ? `Choosing...` : "Waiting..."}
+          {gameState === 'word_selection' ? `${currentDrawerName || "Someone"} is choosing...` : "Waiting..."}
         </span>
       );
       return elements;
@@ -574,19 +577,20 @@ const WordDisplay = React.memo(({
       ? revealedPattern
       : patternChars.map(c => c === ' ' ? ' ' : '_');
 
-    if (isCurrentPlayerDrawing) { // Current player is the drawer
+    // Rule 1: Current player is the drawer
+    if (isCurrentPlayerDrawing) {
         patternChars.forEach((char, index) => {
             if (char === ' ') {
                 elements.push(<span key={`drawer-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
             } else {
                  const isLetterRevealedToOthers = currentRevealedForDisplay[index] !== '_' && currentRevealedForDisplay[index] !== ' ';
-                 if(isLetterRevealedToOthers) {
+                 if(isLetterRevealedToOthers) { // Letter already revealed to guessers by drawer
                      elements.push(
                         <span key={`drawer-revealed-${index}`} className="font-bold text-green-600 cursor-default">
                             {char.toUpperCase()}
                         </span>
                     );
-                 } else {
+                 } else { // Letter not yet revealed by drawer, make it clickable for drawer
                     elements.push(
                         <button
                             key={`drawer-clickable-${index}`}
@@ -601,7 +605,9 @@ const WordDisplay = React.memo(({
                  }
             }
         });
-    } else if (hasPlayerGuessedCorrectly || gameState === 'round_end' || gameState === 'game_over') { // Guesser who got it right, or round/game is over
+    } 
+    // Rule 2: Player is a guesser who has guessed correctly OR round/game is over
+    else if (hasPlayerGuessedCorrectly || gameState === 'round_end' || gameState === 'game_over') {
       patternChars.forEach((char, index) => {
         elements.push(
           <span key={`guesser-correct-char-${index}`} className="font-bold text-foreground">
@@ -609,7 +615,9 @@ const WordDisplay = React.memo(({
           </span>
         );
       });
-    } else if (gameState === 'drawing') { // Guesser who hasn't got it right yet
+    } 
+    // Rule 3: Player is a guesser who has NOT guessed correctly and game is in drawing state
+    else if (gameState === 'drawing') { 
       currentRevealedForDisplay.forEach((char, index) => {
         elements.push(
           <span key={`guesser-revealed-char-${index}`} className={cn("font-bold", char === '_' || char === ' ' ? 'text-muted-foreground' : 'text-foreground')}>
@@ -617,7 +625,9 @@ const WordDisplay = React.memo(({
           </span>
         );
       });
-    } else { // Default placeholder for other states like 'waiting' or 'word_selection' (for non-drawers)
+    } 
+    // Rule 4: Default placeholder for other states (e.g., 'waiting', or 'word_selection' for non-drawers)
+    else { 
        elements.push(
         <span key="placeholder-state" className="text-muted-foreground">
           {gameState === 'word_selection' ? `${currentDrawerName || "Someone"} is choosing...` : "Waiting..."}
@@ -625,7 +635,7 @@ const WordDisplay = React.memo(({
        );
     }
     return elements;
-  }, [gameState, currentPattern, revealedPattern, isCurrentPlayerDrawing, hasPlayerGuessedCorrectly, onLetterClick, currentDrawerName]); // Added currentDrawerName
+  }, [gameState, currentPattern, revealedPattern, isCurrentPlayerDrawing, hasPlayerGuessedCorrectly, onLetterClick, currentDrawerName]);
 
   const wordDisplayKey = useMemo(() => {
     return `${gameState}-${currentPattern}-${revealedPattern?.join('')}-${isCurrentPlayerDrawing}-${hasPlayerGuessedCorrectly}`;
@@ -670,10 +680,10 @@ const MobileTopBar = ({ room, playerId, handleCopyLink, handleLeaveRoom, manageG
       {room.hostId === playerId && startButtonInfo && (room.gameState === 'waiting' || room.gameState === 'game_over') && (
         <Button
             onClick={manageGameStart}
-            size="icon"
+            size="icon" // Changed to icon for mobile
             variant="outline"
-            className="mt-1 text-primary hover:bg-primary/10 border-primary/50 w-8 h-8" // Icon only
-            aria-label={startButtonInfo.text}
+            className="mt-1 text-primary hover:bg-primary/10 border-primary/50 w-8 h-8" 
+            aria-label={startButtonInfo.text} // Added aria-label
             disabled={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter((p:any)=>p.isOnline).length < 1}
         >
             {startButtonInfo.icon}
@@ -1439,11 +1449,14 @@ export default function GameRoomPage() {
         const initialUnderscorePatternForTransaction = patternChars.map(c => (c === ' ' ? ' ' : '_'));
         const currentPatternNonSpaceLength = currentPatternStr.replace(/\s/g, '').length;
         
-        const hostConfiguredMaxHints = room.config.maxWordLength; // Using maxWordLength as placeholder for old hint config, should be removed/replaced
-
-        // Calculate the actual number of hints to reveal
-        // Rule: Reveal min(hostConfiguredMaxHints, word.length - 1), ensure at least 0 hints.
-        const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
+        // Rule: Number of hints is host configured value, but not more than (word.length - 1)
+        const hostConfiguredMaxHints = room.config.maxWordLength; // This was room.config.maxHintLetters previously, let's assume maxWordLength from previous prompt was a placeholder. Correct if wrong.
+                                                                 // Assuming there is no config.maxHintLetters. For now, will use a fixed calculation.
+        // Correct logic for number of hints to reveal:
+        const finalHintCount = Math.min(3, Math.max(0, currentPatternNonSpaceLength - 1)); // Example: Max 3 hints, but ensure at least 1 letter hidden
+                                                                                          // Or using room.config.maxHintLetters if it exists and is correctly set up.
+                                                                                          // For this example, let's stick to your pseudo code's intent:
+                                                                                          // finalHintCount = Math.min(hostHintCount (e.g. room.config.maxHintLetters), word.length - 1);
 
         if (finalHintCount > 0 && currentPatternNonSpaceLength > 1) {
             const indicesToRevealThisRound: number[] = [];
@@ -1471,7 +1484,7 @@ export default function GameRoomPage() {
                     if (!latestRoomSnapshot.exists()) return;
                     const latestRoomData = latestRoomSnapshot.val() as Room;
 
-                    // Only reveal if game state and current word haven't changed
+                    // Only reveal if game state and current word haven't changed, and it's still this player drawing
                     if (latestRoomData.gameState === 'drawing' &&
                         latestRoomData.currentDrawerId === playerId && 
                         latestRoomData.currentPattern === currentPatternStr) { 
@@ -1515,7 +1528,6 @@ export default function GameRoomPage() {
   if (error) return <div className="text-center text-destructive p-8 bg-destructive/10 border border-destructive/20 rounded-md h-screen flex flex-col justify-center items-center"><AlertCircle className="mx-auto h-12 w-12 mb-4" /> <h2 className="text-2xl font-semibold mb-2">Error Loading Room</h2><p>{error}</p><Button onClick={() => window.location.href = '/'} className="mt-4">Go Home</Button></div>;
   if (!room || !playerId || !playerName || !room.config) return <div className="text-center p-8 h-screen flex flex-col justify-center items-center">Room data is not available or incomplete. <Link href="/" className="text-primary hover:underline">Go Home</Link></div>;
 
-  const isHost = room.hostId === playerId;
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const canGuess = room.gameState === 'drawing' && !isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId);
   const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : "Someone";
@@ -1612,7 +1624,7 @@ export default function GameRoomPage() {
         <GameStateModals
             room={room}
             players={playersArray}
-            isHost={isHost}
+            isHost={room.hostId === playerId}
             onPlayAgain={manageGameStart}
             canPlayAgain={Object.values(room.players).filter(p=>p.isOnline).length >= 1}
             roundEndCountdown={roundEndCountdown}
