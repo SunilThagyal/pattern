@@ -8,9 +8,7 @@ import { database } from '@/lib/firebase';
 import type { Room, Player, DrawingPoint, Guess } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, MessageSquare, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings } from 'lucide-react';
@@ -29,6 +27,7 @@ import { suggestWords, type SuggestWordsInput, type SuggestWordsOutput } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { Label } from '@/components/ui/label';
 
 
 const DrawingCanvas = ({
@@ -240,8 +239,8 @@ const DrawingCanvas = ({
   };
 
   return (
-    <Card className="w-full h-full flex flex-col shadow-md overflow-hidden rounded-sm">
-      <CardHeader className="p-2 border-b bg-muted/30">
+    <div className="w-full h-full flex flex-col bg-muted/10 overflow-hidden">
+      <div className="p-2 border-b border-border/30">
         <div className="flex flex-row items-center justify-between">
           <div className="text-xs text-muted-foreground">
             {isDrawingEnabled
@@ -288,11 +287,11 @@ const DrawingCanvas = ({
             </div>
           )}
         </div>
-      </CardHeader>
-      <CardContent className="flex-grow p-0 bg-slate-50 relative min-h-0">
+      </div>
+      <div className="flex-grow p-0 bg-white relative min-h-0"> {/* Canvas background */}
         <canvas
           ref={canvasRef}
-          className="w-full h-full bg-white touch-none"
+          className="w-full h-full touch-none" // Removed bg-white here, parent has it
           onMouseDown={startPaint}
           onMouseMove={paint}
           onMouseUp={exitPaint}
@@ -303,8 +302,8 @@ const DrawingCanvas = ({
         />
         {!isDrawingEnabled && currentDrawerId !== playerId && gameState === 'drawing' && <p className="absolute top-2 left-2 text-xs bg-primary/20 text-primary-foreground p-1 rounded">You are guessing!</p>}
         {isDrawingEnabled && currentDrawerId === playerId && gameState === 'drawing' && <p className="absolute top-2 left-2 text-xs bg-accent/20 text-accent-foreground p-1 rounded">Your turn to draw!</p>}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 };
 
@@ -321,40 +320,40 @@ const PlayerList = ({
     isMinimized: boolean,
     setIsMinimized: (isMinimized: boolean) => void,
 }) => (
-  <Card className="shadow-md flex flex-col w-full h-full rounded-sm">
-    <CardHeader className="flex flex-row items-center justify-between p-2 sm:p-3 border-b">
-        <CardTitle className="flex items-center gap-2 text-sm sm:text-base"><Users /> Players ({players.length})</CardTitle>
+  <div className="flex flex-col w-full h-full bg-background">
+    <div className="flex flex-row items-center justify-between p-2 text-sm sm:text-base font-semibold border-b border-border/30">
+        <div className="flex items-center gap-2"><Users size={18} /> Players ({players.length})</div>
         <Button variant="ghost" size="icon" onClick={() => setIsMinimized(!isMinimized)} aria-label={isMinimized ? "Expand player list" : "Collapse player list"}>
             {isMinimized ? <ChevronDown className="h-5 w-5"/> : <ChevronUp className="h-5 w-5"/>}
         </Button>
-    </CardHeader>
+    </div>
     <div className={cn(
         "transition-all duration-300 ease-in-out overflow-hidden flex-grow min-h-0",
         isMinimized ? "max-h-0 opacity-0" : "opacity-100 flex-grow" 
     )}>
-        <CardContent className="h-full pt-2 sm:pt-3"> 
-        <ScrollArea className="h-full pr-2 sm:pr-3">
-            <ul className="space-y-1.5 sm:space-y-2">
-            {players.map(player => (
-                <li key={player.id} className={`flex items-center justify-between p-1.5 sm:p-2 rounded-md ${player.id === currentPlayerId ? 'bg-primary/10' : ''}`}>
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                    <Avatar className="h-6 w-6 sm:h-8 sm:w-8">
-                    <AvatarImage src={`https://placehold.co/40x40.png?text=${player.name.substring(0,1)}`} data-ai-hint="profile avatar"/>
-                    <AvatarFallback>{player.name.substring(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <span className={`text-xs sm:text-sm font-medium ${!player.isOnline ? 'text-muted-foreground line-through' : ''}`}>{player.name} {player.id === hostId ? <span className="text-xs">(Host)</span> : ''}</span>
-                </div>
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                    {player.id === currentPlayerId && <Palette className="text-primary animate-pulse h-4 w-4 sm:h-[1.125rem] sm:w-[1.125rem]" title="Drawing" />}
-                    <span className="text-xs sm:text-sm font-bold text-accent">{player.score || 0} pts</span>
-                </div>
-                </li>
-            ))}
-            </ul>
-        </ScrollArea>
-        </CardContent>
+        <div className="h-full pt-2"> 
+            <ScrollArea className="h-full pr-2 sm:pr-3">
+                <ul className="space-y-1.5 sm:space-y-2">
+                {players.map(player => (
+                    <li key={player.id} className={`flex items-center justify-between p-1.5 sm:p-2 rounded-md ${player.id === currentPlayerId ? 'bg-primary/10' : ''}`}>
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                        <Avatar className="h-6 w-6 sm:h-8 sm:w-8">
+                        <AvatarImage src={`https://placehold.co/40x40.png?text=${player.name.substring(0,1)}`} data-ai-hint="profile avatar"/>
+                        <AvatarFallback>{player.name.substring(0, 2).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                        <span className={`text-xs sm:text-sm font-medium ${!player.isOnline ? 'text-muted-foreground line-through' : ''}`}>{player.name} {player.id === hostId ? <span className="text-xs">(Host)</span> : ''}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                        {player.id === currentPlayerId && <Palette className="text-primary animate-pulse h-4 w-4 sm:h-[1.125rem] sm:w-[1.125rem]" title="Drawing" />}
+                        <span className="text-xs sm:text-sm font-bold text-accent">{player.score || 0} pts</span>
+                    </div>
+                    </li>
+                ))}
+                </ul>
+            </ScrollArea>
+        </div>
     </div>
-  </Card>
+  </div>
 );
 
 const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string) => void, disabled: boolean }) => {
@@ -393,19 +392,15 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
 const ChatArea = ({
     guesses,
     room,
-    onGuessSubmit,
-    disabled
 }: {
     guesses: Guess[],
     room: Room | null,
-    onGuessSubmit: (guess: string) => void,
-    disabled: boolean
 }) => (
- <Card className="shadow-md flex flex-col w-full h-full md:h-96 rounded-sm">
-    <CardHeader className="p-2 sm:p-3 border-b">
-      <CardTitle className="flex items-center gap-2 text-sm sm:text-base"><MessageSquare /> Guesses & Chat</CardTitle>
-    </CardHeader>
-    <CardContent className="flex-grow min-h-0 md:max-h-96 pt-3 sm:pt-4 pb-0 pr-0">
+ <div className="flex flex-col w-full h-full bg-background">
+    <div className="p-2 text-sm sm:text-base font-semibold flex items-center gap-2 border-b border-border/30">
+      <MessageSquare size={18} /> Guesses & Chat
+    </div>
+    <div className="flex-grow min-h-0 pt-2 pb-0 pr-0"> {/* Removed CardContent */}
       <ScrollArea className="h-full pr-2 sm:pr-3">
         <ul className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
           {guesses.map((g, i) => (
@@ -420,11 +415,9 @@ const ChatArea = ({
             </p>}
         </ul>
       </ScrollArea>
-    </CardContent>
-    <CardFooter className="p-2 border-t">
-        <GuessInput onGuessSubmit={onGuessSubmit} disabled={disabled} />
-    </CardFooter>
-  </Card>
+    </div>
+    {/* GuessInput removed from here, will be rendered separately */}
+  </div>
 );
 
 const TimerDisplay = ({ targetTime, gameState, defaultSeconds, label, compact }: { targetTime?: number | null, gameState: Room['gameState'], defaultSeconds: number, label: string, compact?: boolean }) => {
@@ -785,13 +778,19 @@ export default function GameRoomPage() {
     if (!updatedRoomSnapForEndRound.exists()) return;
     const updatedRoomDataForEndRound: Room = updatedRoomSnapForEndRound.val();
 
-    if (isCorrect && updatedRoomDataForEndRound.hostId === playerId && updatedRoomDataForEndRound.gameState === 'drawing') {
-        const onlineNonDrawingPlayers = Object.values(updatedRoomDataForEndRound.players || {}).filter(p => p.isOnline && p.id !== updatedRoomDataForEndRound.currentDrawerId);
-        const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (updatedRoomDataForEndRound.correctGuessersThisRound || []).includes(p.id));
+    // Check if this guess (if correct) should end the round by the host
+    const onlineNonDrawingPlayers = Object.values(updatedRoomDataForEndRound.players || {}).filter(p => p.isOnline && p.id !== updatedRoomDataForEndRound.currentDrawerId);
+    const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (updatedRoomDataForEndRound.correctGuessersThisRound || []).includes(p.id));
+    
+    if (isCorrect && updatedRoomDataForEndRound.hostId === playerId && updatedRoomDataForEndRound.gameState === 'drawing') { // If host made a correct guess (should not happen if host is drawer)
+        // This logic might be redundant if host cannot guess while drawing, but as a safeguard
         if (allGuessed) {
            endCurrentRound("All players guessed correctly!");
         }
+    } else if (updatedRoomDataForEndRound.hostId === playerId && allGuessed && updatedRoomDataForEndRound.gameState === 'drawing') { // If host is observing and all others guessed
+        endCurrentRound("All players guessed correctly!");
     }
+
 
   }, [playerId, playerName, roomId, toast, endCurrentRound]); 
 
@@ -1024,7 +1023,7 @@ export default function GameRoomPage() {
         if (roundTimer) clearTimeout(roundTimer);
       };
     }
-  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room?.currentDrawerId, room?.correctGuessersThisRound, roomId]);
+  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room.currentDrawerId, room?.correctGuessersThisRound, roomId]);
 
 
   useEffect(() => {
@@ -1135,9 +1134,8 @@ export default function GameRoomPage() {
       const patternChars = currentPatternStr.split('');
       const currentPatternNonSpaceLength = currentPatternStr.replace(/\s/g, '').length;
       
-      const hostConfiguredMaxHints = room.config.maxWordLength; // Re-using maxWordLength temporarily, ideally this should be its own config for # of hints from host.
-      const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
-
+      const finalHintCount = Math.min(room.config.maxWordLength, Math.max(0, currentPatternNonSpaceLength - 1)); // Using maxWordLength as host config for hints temporarily
+      // const finalHintCount = Math.min(room.config.maxHintLetters, Math.max(0, currentPatternNonSpaceLength - 1)); // Correct one once maxHintLetters is in config
 
       if (finalHintCount > 0) {
         const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
@@ -1152,7 +1150,6 @@ export default function GameRoomPage() {
         
         const initialUnderscorePatternForTransaction = patternChars.map(char => char === ' ' ? ' ' : '_');
 
-        // Select random indices to reveal
         while (indicesToRevealThisRound.length < finalHintCount && availableIndices.length > 0) {
           const randomIndex = Math.floor(Math.random() * availableIndices.length);
           indicesToRevealThisRound.push(availableIndices.splice(randomIndex, 1)[0]);
@@ -1174,8 +1171,8 @@ export default function GameRoomPage() {
 
                 const revealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
                 await runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
-                    if (currentFirebaseRevealedPattern === null && hintIteration > 0) {
-                        return; // Abort if pattern becomes null mid-way through hints for some reason (shouldn't happen)
+                    if (currentFirebaseRevealedPattern === null && hintIteration > 0) { // Should not happen if initialized
+                        return; 
                     }
 
                     let basePattern;
@@ -1184,12 +1181,10 @@ export default function GameRoomPage() {
                         currentFirebaseRevealedPattern.length === patternChars.length) {
                         basePattern = [...currentFirebaseRevealedPattern];
                     } else {
-                        // Fallback: if Firebase pattern is missing or wrong length, start from fresh underscores.
-                        // This is critical to ensure the transaction can correctly apply the hint.
                         basePattern = [...initialUnderscorePatternForTransaction];
                     }
 
-                    if (basePattern[targetCharIndex] === '_') { // Only reveal if it's still an underscore
+                    if (basePattern[targetCharIndex] === '_') { 
                         basePattern[targetCharIndex] = patternChars[targetCharIndex];
                     }
                     return basePattern;
@@ -1250,7 +1245,7 @@ export default function GameRoomPage() {
             wordDisplayElements.push(<span key={`host-space-${index}`} className="mx-0.5"> </span>);
         } else if (revealedChars[index] !== '_' && revealedChars[index] !== ' ') { 
             wordDisplayElements.push(
-                <span key={`host-revealed-${index}`} className="text-accent font-semibold cursor-default">
+                <span key={`host-revealed-${index}`} className="text-card-foreground font-semibold cursor-default">
                     {char}
                 </span>
             );
@@ -1276,7 +1271,7 @@ export default function GameRoomPage() {
         if (char === ' ') {
             wordDisplayElements.push(<span key={`guesser-space-${index}`} className="mx-0.5"> </span>);
         } else {
-            wordDisplayElements.push(<span key={`guesser-char-${index}`} className="text-accent font-semibold">{char}</span>);
+            wordDisplayElements.push(<span key={`guesser-char-${index}`} className="text-card-foreground font-semibold">{char}</span>);
         }
         });
     }
@@ -1300,7 +1295,7 @@ export default function GameRoomPage() {
 
   return (
     <>
-      {/* Mobile Only Top Bar */}
+      {/* Mobile Only Top Bar - Replaces old Room Info card on mobile */}
       <div className="p-2 border-b bg-background shadow-sm sticky top-0 z-20 flex justify-between items-center text-sm flex-shrink-0 md:hidden">
           <div className="flex items-center gap-2">
             <TimerDisplay 
@@ -1311,18 +1306,7 @@ export default function GameRoomPage() {
                 compact={true} 
             />
             <span className="text-xs text-muted-foreground">Round {room.currentRoundNumber || 0}/{room.config.totalRounds || 'N/A'}</span>
-          </div>
-          
-          <div className="text-center font-semibold text-base mx-2 flex-shrink min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-            {room.gameState === 'drawing' || room.gameState === 'word_selection' ? (
-                 <span className={cn("font-mono tracking-wider", (isCurrentPlayerDrawing || (room.correctGuessersThisRound || []).includes(playerId)) ? "text-accent" : "text-primary")}>
-                    {mobileWordToDisplay()}
-                 </span>
-            ) : <span className="capitalize text-muted-foreground">{room.gameState.replace('_', ' ')}</span>}
-          </div>
-
-          <div className="flex items-center gap-1">
-              {isHost && startButtonInfo && (room.gameState === 'waiting' || room.gameState === 'game_over') && (
+             {isHost && startButtonInfo && (room.gameState === 'waiting' || room.gameState === 'game_over') && (
                   <Button
                       onClick={manageGameStart}
                       size="icon" 
@@ -1334,14 +1318,25 @@ export default function GameRoomPage() {
                       {startButtonInfo.icon}
                   </Button>
               )}
+          </div>
+          
+          <div className="text-center font-semibold text-base mx-2 flex-shrink min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+            {room.gameState === 'drawing' || room.gameState === 'word_selection' ? (
+                 <span className={cn("font-mono tracking-wider", (isCurrentPlayerDrawing || (room.correctGuessersThisRound || []).includes(playerId)) ? "text-accent" : "text-primary")}>
+                    {mobileWordToDisplay()}
+                 </span>
+            ) : <span className="capitalize text-muted-foreground">{room.gameState.replace('_', ' ')}</span>}
+          </div>
+
+          <div className="flex items-center gap-1">
               <Button variant="ghost" size="icon" onClick={handleCopyLink} aria-label="Copy room link"><Share2 size={18} /></Button>
               <Button variant="ghost" size="icon" onClick={handleLeaveRoom} aria-label="Leave room"><LogOut size={18} /></Button>
           </div>
       </div>
       
-      {/* Desktop Only Word Display Card - Hidden on mobile */}
+      {/* Desktop Only Word Display - this is fine as is for desktop */}
       {room.gameState === 'drawing' && room.currentPattern && (
-        <div className="p-3 text-center bg-accent/10 border-accent shadow rounded-md hidden md:block">
+        <div className="p-3 text-center bg-accent/10 shadow hidden md:block"> {/* Removed border-accent for cleaner look */}
           <div className="text-sm text-card-foreground flex items-center justify-center">
             <span>
                 {isHost && playerId !== room.currentDrawerId ? "Click letters below to reveal hints. " : ""}
@@ -1420,7 +1415,7 @@ export default function GameRoomPage() {
       )}
 
       {room.gameState === 'word_selection' && !isCurrentPlayerDrawing && (
-          <Card className="p-3 text-center bg-muted/80 shadow-sm rounded-sm hidden md:block">
+          <div className="p-3 text-center bg-muted/80 hidden md:block"> {/* Removed shadow and rounded for cleaner look */}
               <div className="text-base sm:text-lg font-semibold flex items-center justify-center gap-2">
                   <Loader2 className="h-5 w-5 animate-spin" />
                   {currentDrawerName || "The drawer"} is choosing a word... Get ready to guess!
@@ -1430,12 +1425,12 @@ export default function GameRoomPage() {
                     Time to choose: <TimerDisplay targetTime={room.wordSelectionEndsAt} gameState="word_selection" defaultSeconds={15} label="" compact={true} />
                 </div>
               }
-          </Card>
+          </div>
       )}
       
       {room.gameState === 'round_end' && (
-        <Card className="p-3 sm:p-4 shadow-lg bg-green-500/10 border-green-500/30 rounded-sm animate-in fade-in">
-            <CardTitle className="text-lg sm:text-xl mb-2 text-green-700">Round Over!</CardTitle>
+        <div className="p-3 sm:p-4 bg-green-500/10 border-green-500/30 animate-in fade-in"> {/* Removed shadow and rounded */}
+            <div className="text-lg sm:text-xl mb-2 text-green-700 font-semibold">Round Over!</div>
             <p className="text-sm sm:text-md mb-1">The word was: <strong className="font-mono text-green-800">{room.currentPattern || "N/A"}</strong></p>
             <p className="text-sm sm:text-md">Drawer: {currentDrawerName || 'N/A'}</p>
             <h4 className="font-semibold mt-2 sm:mt-3 mb-1 text-sm sm:text-base">Correct Guesses:</h4>
@@ -1447,28 +1442,41 @@ export default function GameRoomPage() {
                 </ul>
             ) : <p className="text-xs sm:text-sm italic">No one guessed it right this time!</p>}
             {roundEndCountdown !== null && <p className="mt-3 text-center text-base sm:text-lg font-semibold text-primary animate-pulse">Next round starting in {roundEndCountdown}s...</p>}
-        </Card>
+        </div>
       )}
 
       {room.gameState === 'game_over' && (
-        <Card className="p-4 sm:p-6 shadow-xl bg-primary/10 border-primary/30 rounded-sm animate-in fade-in">
-            <CardTitle className="text-xl sm:text-2xl mb-4 text-center text-primary flex items-center justify-center gap-2"><Trophy /> Game Over! <Trophy /></CardTitle>
-            <CardDescription className="text-center mb-4 text-base sm:text-lg">Final Scores:</CardDescription>
+        <div className="p-4 sm:p-6 bg-primary/10 border-primary/30 animate-in fade-in"> {/* Removed shadow and rounded */}
+            <div className="text-xl sm:text-2xl mb-4 text-center text-primary flex items-center justify-center gap-2 font-bold"><Trophy /> Game Over! <Trophy /></div>
+            <div className="text-center mb-4 text-base sm:text-lg">Final Scores:</div>
             <ul className="space-y-2">
                 {playersArray.sort((a,b) => (b.score || 0) - (a.score || 0)).map((player, index) => (
-                    <li key={player.id} className={`flex justify-between items-center p-2 sm:p-3 rounded-md text-sm sm:text-lg ${index === 0 ? 'bg-accent/20 font-bold text-accent-foreground' : 'bg-card'}`}>
+                    <li key={player.id} className={`flex justify-between items-center p-2 sm:p-3 text-sm sm:text-lg ${index === 0 ? 'bg-accent/20 font-bold text-accent-foreground' : 'bg-background'}`}>
                         <span>{index + 1}. {player.name}</span>
                         <span className="font-semibold">{player.score || 0} pts</span>
                     </li>
                 ))}
             </ul>
-        </Card>
+             {isHost && startButtonInfo && (
+                <div className="mt-6 text-center">
+                    <Button
+                        onClick={manageGameStart}
+                        size="lg" 
+                        variant="default"
+                        className="px-8 py-3 text-lg"
+                        disabled={Object.values(room.players).filter(p=>p.isOnline).length < 1}
+                    >
+                        {startButtonInfo.icon} {startButtonInfo.text}
+                    </Button>
+                </div>
+            )}
+        </div>
       )}
 
-    {/* Main Game Area: Canvas + (Players & Chat) + GuessInput */}
-    <div className="flex-grow flex flex-col gap-1 p-1 min-h-0 w-full">
+    {/* Main Game Area: Canvas + (Chat & Players) + GuessInput */}
+    <div className="flex-grow flex flex-col min-h-0 w-full"> {/* Parent flex column, no p-1, no gap-1 */}
         {/* Drawing Area */}
-        <div className="h-[55vh] w-full"> {/* Approx 55% of viewport height */}
+        <div className="h-[50vh] w-full"> {/* Takes top 50% of viewport height */}
             <DrawingCanvas
                 drawingData={room.drawingData || []}
                 onDraw={handleDraw}
@@ -1481,30 +1489,32 @@ export default function GameRoomPage() {
             />
         </div>
         
-        {/* Player List & Chat Area Row */}
-        <div className="flex-grow flex flex-row gap-1 min-h-0 w-full">
-            <div className="w-1/2 h-full">
-                <PlayerList
-                    players={playersArray}
-                    currentPlayerId={room.currentDrawerId}
-                    hostId={room.hostId}
-                    isMinimized={isPlayerListMinimized}
-                    setIsMinimized={setIsPlayerListMinimized}
-                />
-            </div>
-            <div className="w-1/2 h-full">
-                <ChatArea
-                    guesses={room.guesses || []}
-                    room={room}
-                    onGuessSubmit={handleGuessSubmit}
-                    disabled={!canGuess}
-                />
-            </div>
+        {/* Middle Row: Chat (Left) & Player List (Right) */}
+        <div className="flex-grow flex flex-col md:flex-row min-h-0 w-full"> {/* This row takes remaining space, no gap */}
+          {/* Chat Area (Left on Desktop, First in Mobile Column) */}
+          <div className="w-full md:w-1/2 h-full flex flex-col md:border-r border-border/20"> {/* Added subtle border for desktop separation */}
+            <ChatArea
+                guesses={room.guesses || []}
+                room={room}
+            />
+          </div>
+
+          {/* Player List Area (Right on Desktop, Second in Mobile Column) */}
+          <div className="w-full md:w-1/2 h-full flex flex-col">
+            <PlayerList
+                players={playersArray}
+                currentPlayerId={room.currentDrawerId}
+                hostId={room.hostId}
+                isMinimized={isPlayerListMinimized}
+                setIsMinimized={setIsPlayerListMinimized}
+            />
+          </div>
         </div>
         
-        {/* Guess Input (This one is part of the main layout flow, not embedded in ChatArea directly if ChatArea needs fixed height) */}
-        {/* It will be effectively covered by ChatArea's CardFooter in the unified ChatArea component */}
-        {/* This separate GuessInput is no longer needed if ChatArea handles its own input */}
+        {/* Guess Input (Bottom, full width) */}
+        <div className="border-t border-border/20 w-full flex-shrink-0"> {/* No p-2, GuessInput has its own */}
+            <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
+        </div>
     </div>
 
     <AlertDialog open={isRevealConfirmDialogOpen} onOpenChange={setIsRevealConfirmDialogOpen}>
@@ -1524,4 +1534,6 @@ export default function GameRoomPage() {
     </>
   );
 }
+    
+
     
