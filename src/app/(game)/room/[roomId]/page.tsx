@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useParams } from 'next/navigation';
 import { ref, onValue, off, update, serverTimestamp, set, child, get, runTransaction } from 'firebase/database';
 import { database } from '@/lib/firebase';
-import type { Room, Player, DrawingPoint, Guess, RoomConfig } from '@/lib/types';
+import type { Room, Player, DrawingPoint, Guess } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -421,7 +421,7 @@ const PlayerList = React.memo(({
                 {isMinimized ? <ChevronDown className="h-4 w-4"/> : <ChevronUp className="h-4 w-4"/>}
             </Button>
         </div>
-        <div className={cn("transition-all duration-300 ease-in-out flex-grow min-h-0", isMinimized ? "max-h-0 opacity-0" : "opacity-100 max-h-48")}>
+        <div className={cn("transition-all duration-300 ease-in-out flex-grow min-h-0", isMinimized ? "max-h-0 opacity-0" : "max-h-48 opacity-100")}>
              <ScrollArea className="h-full">
                 <ul className="divide-y divide-gray-200 px-2 py-1.5 sm:px-3 sm:py-2">
                     {sortedPlayers.map((player, index) => (
@@ -499,16 +499,12 @@ const ChatArea = React.memo(({
     playerId,
     currentDrawerId,
     correctGuessersThisRound,
-    onGuessSubmit,
-    guessInputDisabled
 }: {
     guesses: Guess[],
     gameState: Room['gameState'] | undefined,
     playerId: string,
     currentDrawerId?: string | null,
     correctGuessersThisRound?: string[],
-    onGuessSubmit: (guess: string) => void,
-    guessInputDisabled: boolean,
 }) => {
     const internalChatScrollRef = useRef<HTMLDivElement>(null);
 
@@ -573,15 +569,13 @@ const ChatArea = React.memo(({
                 </div>
             </ScrollArea>
         </div>
-         <div className="p-1 border-t border-gray-300 bg-gray-100">
-            <GuessInput onGuessSubmit={onGuessSubmit} disabled={guessInputDisabled} />
-        </div>
+         {/* GuessInput removed from here, will be placed outside ChatArea */}
     </div>
     );
 });
 ChatArea.displayName = 'ChatArea';
 
-const TimerDisplay = React.memo(({ targetTime, defaultSeconds, compact }: { targetTime?: number | null, defaultSeconds: number, compact?: boolean }) => {
+const TimerDisplay = React.memo(({ targetTime, defaultSeconds, compact, gameState }: { targetTime?: number | null, defaultSeconds: number, compact?: boolean, gameState?: Room['gameState'] }) => {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   useEffect(() => {
@@ -602,8 +596,12 @@ const TimerDisplay = React.memo(({ targetTime, defaultSeconds, compact }: { targ
   }, [targetTime, defaultSeconds]);
 
 
-  if (timeLeft === null) {
+  if (timeLeft === null && (gameState === 'drawing' || gameState === 'word_selection')) {
       return <div className={cn("font-bold", compact ? "text-xs" : "text-base")}>...</div>;
+  }
+  
+  if (timeLeft === null) { // For states like 'waiting', 'game_over' where defaultSeconds is 0 or not timed
+      return <div className={cn("font-bold text-xs", compact ? "text-[9px]" : "text-xs")}>--</div>;
   }
 
   return (
@@ -650,29 +648,27 @@ const WordDisplay = React.memo(({
 
     if (isCurrentPlayerDrawing) { 
         patternChars.forEach((char, index) => {
+            const isLetterRevealedToOthers = currentRevealedForDisplay[index] !== '_' && currentRevealedForDisplay[index] !== ' ';
             if (char === ' ') {
                 elements.push(<span key={`drawer-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
+            } else if(isLetterRevealedToOthers) {
+                 elements.push(
+                    <span key={`drawer-revealed-${index}`} className="font-bold text-green-600 cursor-default">
+                        {char.toUpperCase()}
+                    </span>
+                );
             } else {
-                 const isLetterRevealedToOthers = currentRevealedForDisplay[index] !== '_' && currentRevealedForDisplay[index] !== ' ';
-                 if(isLetterRevealedToOthers) {
-                     elements.push(
-                        <span key={`drawer-revealed-${index}`} className="font-bold text-green-600 cursor-default">
-                            {char.toUpperCase()}
-                        </span>
-                    );
-                 } else {
-                    elements.push(
-                        <button
-                            key={`drawer-clickable-${index}`}
-                            onClick={() => onDrawerLetterClick(char, index)}
-                            className="font-bold text-primary hover:text-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                            aria-label={`Reveal letter ${char}`}
-                            title={`Click to reveal this letter: ${char.toUpperCase()}`}
-                        >
-                            {char.toUpperCase()}
-                        </button>
-                    );
-                 }
+                elements.push(
+                    <button
+                        key={`drawer-clickable-${index}`}
+                        onClick={() => onDrawerLetterClick(char, index)}
+                        className="font-bold text-primary hover:text-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label={`Reveal letter ${char}`}
+                        title={`Click to reveal this letter: ${char.toUpperCase()}`}
+                    >
+                        {char.toUpperCase()}
+                    </button>
+                );
             }
         });
     }
@@ -745,13 +741,58 @@ const MobileTopBar = React.memo(({
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const hasPlayerGuessedCorrectly = (room.correctGuessersThisRound || []).includes(playerId);
   const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : "Someone";
+  const { toast } = useToast(); 
+  const params = useParams();
+  const roomId = params.roomId as string;
+
+
+  const handleLeaveRoom = useCallback(async () => {
+    if (!playerId || !room || !playerName) { // playerName might be an issue here
+        window.location.href = '/';
+        return;
+    }
+    const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
+    try {
+        // Attempt to get playerName from room.players or fallback
+        const currentPlayerName = room.players[playerId]?.name || 'A player';
+        const systemGuess: Guess = {
+            playerId: 'system',
+            playerName: APP_NAME,
+            text: `[[SYSTEM_LEFT]]`,
+            isCorrect: false,
+            timestamp: serverTimestamp() as any,
+        };
+        const guessesRef = ref(database, `rooms/${roomId}/guesses`);
+        const currentGuessesSnap = await get(guessesRef);
+        const currentGuesses = currentGuessesSnap.exists() ? currentGuessesSnap.val() : [];
+        await set(guessesRef, [...currentGuesses, { ...systemGuess, playerName: currentPlayerName }]);
+
+
+        await update(playerRef, { isOnline: false });
+        setIsSettingsDialogOpen(false);
+        toast({ title: "Left Room", description: "You have left the room." });
+        window.location.href = '/';
+    } catch (err) {
+        toast({ title: "Error", description: "Could not leave room cleanly.", variant: "destructive" });
+        window.location.href = '/';
+    }
+  }, [playerId, room, toast, setIsSettingsDialogOpen, roomId]);
+
+  const handleCopyLink = useCallback(() => {
+    const link = `${window.location.origin}/join/${roomId}`;
+    navigator.clipboard.writeText(link)
+      .then(() => toast({ title: "Link Copied!", description: "Room link copied to clipboard." }))
+      .catch(() => toast({ title: "Error", description: "Could not copy link.", variant: "destructive" }));
+    setIsSettingsDialogOpen(false);
+  }, [roomId, toast, setIsSettingsDialogOpen]);
+
 
   // For drawer letter click, this needs to be passed down if WordDisplay is used here for the drawer
   const onDrawerLetterClick = (char: string, index: number) => {
     // This function needs to be defined in GameRoomPage and passed to MobileTopBar
     // if the drawer hint revealing is initiated from here.
     // For now, assuming this function is available or not needed if WordDisplay is only for guessers here.
-    console.log("Drawer letter click in MobileTopBar (needs prop):", char, index);
+    console.log("Drawer letter click in MobileTopBar (needs prop from GameRoomPage):", char, index);
   };
 
   return (
@@ -761,6 +802,7 @@ const MobileTopBar = React.memo(({
           targetTime={room.gameState === 'drawing' ? room.roundEndsAt : (room.gameState === 'word_selection' ? room.wordSelectionEndsAt : null)}
           defaultSeconds={room.gameState === 'drawing' ? room.config.roundTimeoutSeconds : (room.gameState === 'word_selection' ? 15 : 0)}
           compact={true}
+          gameState={room.gameState}
         />
         {(room.gameState === 'drawing' || room.gameState === 'word_selection' || room.gameState === 'round_end') &&
           <div className="text-[9px] font-bold leading-none mt-0.5 text-gray-700">
@@ -789,7 +831,7 @@ const MobileTopBar = React.memo(({
           revealedPattern={room.revealedPattern}
           isCurrentPlayerDrawing={isCurrentPlayerDrawing}
           hasPlayerGuessedCorrectly={hasPlayerGuessedCorrectly}
-          onDrawerLetterClick={onDrawerLetterClick} // This needs to be correctly passed if used by drawer here
+          onDrawerLetterClick={onDrawerLetterClick} 
           currentDrawerName={currentDrawerName}
         />
       </div>
@@ -798,6 +840,7 @@ const MobileTopBar = React.memo(({
          <DialogTrigger asChild>
              <Button variant="ghost" size="icon" className="text-gray-600 hover:bg-gray-200 w-7 h-7" aria-label="Room Settings" onClick={() => setIsSettingsDialogOpen(true)}><Settings size={18} /></Button>
          </DialogTrigger>
+         {/* SettingsDialogContent is rendered by GameRoomPage, not directly here */}
       </div>
     </div>
   );
@@ -829,7 +872,6 @@ export default function GameRoomPage() {
   const toastIdCounter = useRef(0);
   const toastTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
 
-
   const playersArray = useMemo(() => {
     return room ? Object.values(room.players || {}) : [];
   }, [room?.players]);
@@ -844,7 +886,7 @@ export default function GameRoomPage() {
 
 
   const addSystemMessage = useCallback(async (text: string, nameOverride?: string) => {
-    if (!roomId || !playerId || !playerName) return;
+    if (!roomId || !playerId || !playerName) return; // Ensure playerName is available
     const systemGuess: Guess = {
         playerId: 'system',
         playerName: nameOverride || APP_NAME,
@@ -1043,7 +1085,7 @@ export default function GameRoomPage() {
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
         aiSketchDataUri: null,
-        guesses: currentRoomData.guesses || [],
+        guesses: currentRoomData.guesses || [], // Ensure guesses is an array
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection,
         revealedPattern: [],
@@ -1070,7 +1112,7 @@ export default function GameRoomPage() {
     setIsSubmittingWord(true);
 
     const initialRevealedPattern = word.split('').map(char => char === ' ' ? ' ' : '_');
-    const newUsedWords = Array.from(new Set([...(currentRoomData.usedWords || []).map(w => w.toLowerCase()), word.toLowerCase()]));
+    const newUsedWords = Array.from(new Set([...(currentRoomData.usedWords || []).map(w => w.toLowerCase()), word.toLowerCase()()]));
 
     const updatesForDrawingStart: Partial<Room> = {
         currentPattern: word,
@@ -1177,10 +1219,10 @@ export default function GameRoomPage() {
 
         const guesserPosition = newCorrectGuessers.length - 1; 
         let pointsAwardedToGuesser = 0;
-        if (guesserPosition === 0) pointsAwardedToGuesser = 100;
-        else if (guesserPosition === 1) pointsAwardedToGuesser = 80;
-        else if (guesserPosition === 2) pointsAwardedToGuesser = 60;
-        else pointsAwardedToGuesser = 50; 
+        if (guesserPosition === 0) pointsAwardedToGuesser = 100; // First correct guesser
+        else if (guesserPosition === 1) pointsAwardedToGuesser = 80; // Second
+        else if (guesserPosition === 2) pointsAwardedToGuesser = 60; // Third
+        else pointsAwardedToGuesser = 50; // Fourth and beyond
 
         const playerRef = ref(database, `rooms/${roomId}/players/${playerId}`);
         const currentPlayerData = currentRoom.players[playerId];
@@ -1242,12 +1284,11 @@ export default function GameRoomPage() {
     const currentPatternStr = room.currentPattern;
     const patternChars = currentPatternStr.split('');
     const { index: targetIndex } = letterToRevealInfo; 
+    const initialUnderscorePatternForTransaction = patternChars.map(c => (c === ' ' ? ' ' : '_'));
   
     try {
       await runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
         let basePattern;
-        const initialUnderscorePatternForTransaction = patternChars.map(c => (c === ' ' ? ' ' : '_'));
-
         if (currentFirebaseRevealedPattern && 
             Array.isArray(currentFirebaseRevealedPattern) && 
             currentFirebaseRevealedPattern.length === patternChars.length) {
@@ -1274,13 +1315,13 @@ export default function GameRoomPage() {
   
 
   const handleLeaveRoom = useCallback(async () => {
-    if (!playerId || !room || !playerName) {
+    if (!playerId || !room || !playerName) { // Ensure playerName is available for system message
         window.location.href = '/';
         return;
     }
     const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
     try {
-        addSystemMessage(`[[SYSTEM_LEFT]]`, playerName);
+        addSystemMessage(`[[SYSTEM_LEFT]]`, playerName); // Uses playerName state
         await update(playerRef, { isOnline: false });
         setIsSettingsDialogOpenLocal(false);
         toast({ title: "Left Room", description: "You have left the room." });
@@ -1289,7 +1330,7 @@ export default function GameRoomPage() {
         toast({ title: "Error", description: "Could not leave room cleanly.", variant: "destructive" });
         window.location.href = '/';
     }
-  }, [playerId, room, playerName, toast, addSystemMessage]);
+  }, [playerId, room, playerName, toast, addSystemMessage, setIsSettingsDialogOpenLocal]);
 
   const handleCopyLink = useCallback(() => {
     const link = `${window.location.origin}/join/${roomId}`;
@@ -1297,7 +1338,7 @@ export default function GameRoomPage() {
       .then(() => toast({ title: "Link Copied!", description: "Room link copied to clipboard." }))
       .catch(() => toast({ title: "Error", description: "Could not copy link.", variant: "destructive" }));
     setIsSettingsDialogOpenLocal(false);
-  }, [roomId, toast]);
+  }, [roomId, toast, setIsSettingsDialogOpenLocal]);
 
   const handleDraw = useCallback((point: DrawingPoint) => {
     if (!room || !playerId || room?.currentDrawerId !== playerId || room?.gameState !== 'drawing') return;
@@ -1340,14 +1381,6 @@ export default function GameRoomPage() {
         setIsGeneratingAISketch(false);
     }
   }, [room, playerId, roomId, toast]);
-
-  const handleManualCloseToast = useCallback((toastUniqueId: string) => {
-    setToastMessages(prev => prev.filter(t => t.uniqueId !== toastUniqueId));
-    if (toastTimeoutsRef.current[toastUniqueId]) {
-        clearTimeout(toastTimeoutsRef.current[toastUniqueId]);
-        delete toastTimeoutsRef.current[toastUniqueId];
-    }
-  }, []);
 
 
   useEffect(() => {
@@ -1408,14 +1441,14 @@ export default function GameRoomPage() {
     });
 
     const onConnectedChange = onValue(playerConnectionsRef, (snap) => {
-      if (snap.val() === true && playerId && roomId) {
+      if (snap.val() === true && playerId && roomId && playerName) { // Added playerName check
         const playerRefForOnline = ref(database, `rooms/${roomId}/players/${playerId}`);
         get(playerRefForOnline).then(playerSnap => {
             if (playerSnap.exists()) {
                  set(playerStatusRef, true);
                  const currentPlayerData = playerSnap.val();
-                 if (!currentPlayerData.isOnline && playerName) {
-                     addSystemMessage(`[[SYSTEM_JOINED]]`, playerName);
+                 if (!currentPlayerData.isOnline) { // Check if previously offline
+                     addSystemMessage(`[[SYSTEM_JOINED]]`, playerName); // Use playerName from state
                  }
             }
         });
@@ -1434,7 +1467,7 @@ export default function GameRoomPage() {
       off(roomRefVal, 'value', onRoomValueChange);
       off(playerConnectionsRef, 'value', onConnectedChange);
     };
-  }, [roomId, playerId, toast, isLoading, addSystemMessage, playerName]);
+  }, [roomId, playerId, toast, isLoading, addSystemMessage, playerName]); // Added playerName
 
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt) {
@@ -1631,15 +1664,9 @@ export default function GameRoomPage() {
             }, 3000);
         }
     }
-    return () => {
-        Object.values(currentToastTimeouts).forEach(clearTimeout);
-        // Important: Do not reset toastTimeoutsRef.current = {} here,
-        // as this cleanup runs when dependencies (memoizedGuesses, playerId) change,
-        // not just on unmount. A full reset should only happen on unmount.
-    };
-  }, [memoizedGuesses, playerId]); // Removed toastMessages from dependency array
 
-  // Dedicated cleanup for unmount
+  }, [memoizedGuesses, playerId, toastMessages]); 
+
   useEffect(() => {
     return () => {
         Object.values(toastTimeoutsRef.current).forEach(clearTimeout);
@@ -1675,18 +1702,18 @@ export default function GameRoomPage() {
             isSettingsDialogOpen={isSettingsDialogOpenLocal}
             setIsSettingsDialogOpen={setIsSettingsDialogOpenLocal}
         />
-        {/* SettingsDialogContent is rendered inside the Dialog controlled by isSettingsDialogOpenLocal */}
-        <SettingsDialogContent onCopyLink={handleCopyLink} onLeaveRoom={handleLeaveRoom} />
+        <SettingsDialogContent 
+            onCopyLink={handleCopyLink} 
+            onLeaveRoom={handleLeaveRoom} 
+        />
     </Dialog>
 
 
     <div className="max-w-md mx-auto border border-black flex flex-col select-none" style={{ height: "100vh", maxHeight: "900px", minHeight: "700px" }}>
-      {/* Top Bar is now part of Dialog for settings, or needs to be separate if always visible */}
-      {/* <MobileTopBar ... /> was here, now handled by Dialog wrapping */}
-
+      {/* MobileTopBar is now rendered within the Dialog for settings access */}
 
       <div className="flex-grow flex flex-col gap-1 p-1 min-h-0"> {/* Main content area */}
-        <div className="flex-grow w-full min-h-0 relative"> {/* Drawing Canvas Container, needs relative for toast */}
+        <div className="flex-grow w-full min-h-0 relative"> {/* Drawing Canvas Container */}
           <DrawingCanvas
             drawingData={memoizedDrawingData}
             onDraw={handleDraw}
@@ -1701,26 +1728,20 @@ export default function GameRoomPage() {
             startButtonInfo={startButtonInfo}
             canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter((p:any)=>p.isOnline).length >= 1}
             aiSketchDataUri={room.aiSketchDataUri}
-            onDrawWithAI={handleDrawWithAI}
+            onDrawWithAI={isCurrentPlayerDrawing ? handleDrawWithAI : undefined}
             isGeneratingAISketch={isGeneratingAISketch}
           />
            {toastMessages.length > 0 && (
-            <div className="absolute bottom-2 left-2 flex flex-col-reverse gap-2 z-20"> {/* Changed to bottom-left */}
+            <div className="absolute bottom-2 right-2 flex flex-col-reverse gap-2 z-20">
               {toastMessages.map((message) => (
                 <div
                   key={message.uniqueId}
                   className={cn(
-                    "relative p-2 rounded-md shadow-lg text-xs max-w-[60%] animate-in fade-in duration-300", // Added relative for close button
+                    "relative p-2 rounded-md shadow-lg text-xs max-w-[60%] animate-in fade-in duration-300",
                     message.isCorrect ? "bg-green-100 text-green-700 border border-green-300" : "bg-card text-card-foreground border border-border"
                   )}
                 >
-                  <button
-                    onClick={() => handleManualCloseToast(message.uniqueId)}
-                    className="absolute top-0.5 right-0.5 p-0.5 bg-transparent hover:bg-black/10 rounded-full text-muted-foreground hover:text-foreground"
-                    aria-label="Close message"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                  {/* Cross button removed, toasts only auto-dismiss */}
                   <span className="font-semibold">{message.playerName}:</span> {message.text}
                 </div>
               ))}
@@ -1748,17 +1769,15 @@ export default function GameRoomPage() {
               playerId={playerId}
               currentDrawerId={room.currentDrawerId}
               correctGuessersThisRound={room.correctGuessersThisRound}
-              onGuessSubmit={handleGuessSubmit}
-              guessInputDisabled={!canGuess}
             />
           </div>
         </div>
       </div>
 
-      {/* This sticky input bar is only if GuessInput is NOT inside ChatArea */}
-      {/* <div className="p-1 border-t bg-background w-full flex-shrink-0 sticky bottom-0 z-20">
+      {/* Sticky Input Bar at the bottom of the main game container */}
+      <div className="p-1 border-t bg-background w-full flex-shrink-0 sticky bottom-0 z-20">
         <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
-      </div> */}
+      </div>
     </div>
 
     {room.gameState === 'word_selection' && isCurrentPlayerDrawing && (
