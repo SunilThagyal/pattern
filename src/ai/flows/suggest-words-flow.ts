@@ -13,7 +13,7 @@ import {z} from 'genkit';
 
 const SuggestWordsInputSchema = z.object({
   previouslyUsedWords: z.array(z.string()).describe('A list of words that have already been used in the current game session and should be avoided.'),
-  count: z.number().min(1).max(10).default(5).describe('The number of words to suggest.'), // Changed default and max
+  count: z.number().min(1).max(10).default(5).describe('The number of words to suggest.'),
   maxWordLength: z.number().min(3).optional().describe('Optional maximum length for the suggested words.'),
 });
 export type SuggestWordsInput = z.infer<typeof SuggestWordsInputSchema>;
@@ -25,6 +25,81 @@ export type SuggestWordsOutput = z.infer<typeof SuggestWordsOutputSchema>;
 export async function suggestWords(input: SuggestWordsInput): Promise<SuggestWordsOutput> {
   return suggestWordsFlow(input);
 }
+
+// Helper function to shuffle an array
+function shuffleArray<T>(array: T[]): T[] {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+}
+
+const defaultFallbackWordsLarge = [
+    "Apple", "House", "Star", "Car", "Tree", "Book", "Sun", "Moon", "Chair", "Guitar", 
+    "Lamp", "Phone", "Key", "Door", "Clock", "Shoes", "Hat", "Banana", "Orange", "Grape",
+    "Bread", "Cheese", "Pizza", "Cloud", "Pencil", "Brush", "Plane", "Train", "Boat", 
+    "Ball", "Box", "Cup", "Fish", "Duck", "Kite", "Drum", "Cake", "Sock", "Fork", 
+    "Spoon", "Plate", "Plant", "Flower", "Dog", "Cat", "Bird", "Mouse", "Bear", "Lion",
+    "Tiger", "Snake", "Spider", "Ant", "Bee", "Ladybug", "Butterfly", "Snail", "Frog",
+    "Shirt", "Pants", "Dress", "Socks", "Scarf", "Gloves", "Ring", "Necklace", "Watch",
+    "Table", "Bed", "Sofa", "Mirror", "Window", "Stairs", "Bridge", "Road", "River",
+    "Mountain", "Volcano", "Island", "Beach", "Forest", "Desert", "Rainbow", "Anchor",
+    "Balloon", "Candle", "Camera", "Computer", "Dice", "Earrings", "Feather", "Flag", 
+    "Fountain", "Hammer", "Helmet", "Igloo", "Jacket", "Ladder", "Magnet", "Medal",
+    "Microphone", "Notebook", "Octopus", "Pear", "Pineapple", "Pyramid", "Quilt", 
+    "Robot", "Rocket", "Sailboat", "Scissors", "Shovel", "Skateboard", "Suitcase",
+    "Swing", "Sword", "Telescope", "Tent", "Trophy", "Trumpet", "Umbrella", "Unicorn",
+    "Vase", "Violin", "Wallet", "Wheel", "Whistle", "Yacht", "Zebra", "Zipper"
+];
+
+const generateFallbackWords = (count: number, maxWordLength?: number, previouslyUsedWords?: string[]): string[] => {
+    let finalWords: string[] = [];
+    const shuffledFallbacks = shuffleArray(defaultFallbackWordsLarge);
+    const localUsedWords = new Set((previouslyUsedWords || []).map(w => w.toLowerCase()));
+    
+    for (const fb of shuffledFallbacks) {
+        if (finalWords.length >= count) break;
+        const fbLower = fb.toLowerCase();
+        if (!localUsedWords.has(fbLower) && 
+            !finalWords.map(w => w.toLowerCase()).includes(fbLower) &&
+            (maxWordLength ? fb.length <= maxWordLength : true)
+        ) {
+            finalWords.push(fb);
+        }
+    }
+    
+    // If still not enough words, use a very basic padding mechanism
+    const absolutePads = ["Pencil", "Paper", "Note", "Clip", "Pin", "Item", "Thing", "Object", "Icon", "Symbol"];
+    let padIdx = 0;
+    while(finalWords.length < count){
+        const baseWord = absolutePads[padIdx % absolutePads.length];
+        let potentialWord = baseWord;
+        let attempt = 0;
+        while(finalWords.map(w=>w.toLowerCase()).includes(potentialWord.toLowerCase()) || localUsedWords.has(potentialWord.toLowerCase())) {
+            attempt++; 
+            potentialWord = baseWord + attempt; 
+            if (attempt > 10) { 
+                potentialWord = baseWord + Math.floor(Math.random()*1000); 
+                if(finalWords.map(w=>w.toLowerCase()).includes(potentialWord.toLowerCase()) || localUsedWords.has(potentialWord.toLowerCase())){
+                   potentialWord = baseWord + "X" + Math.floor(Math.random()*1000); // Even more unique
+                }
+                break;
+            }
+        }
+         if (maxWordLength ? potentialWord.length <= maxWordLength : true) {
+             finalWords.push(potentialWord);
+         } else {
+            // If padded word is too long, try a shorter base or just a random short string
+            const shortBase = baseWord.substring(0, Math.min(baseWord.length, (maxWordLength || 20) - 2));
+            finalWords.push(shortBase + Math.floor(Math.random()*10)); 
+         }
+        padIdx++;
+    }
+    return finalWords.slice(0, count);
+};
+
 
 const suggestWordsPrompt = ai.definePrompt({
   name: 'suggestWordsPrompt',
@@ -55,8 +130,8 @@ const suggestWordsFlow = ai.defineFlow(
   async (input) => {
     try {
       const {output} = await prompt(input);
-      if (output && output.length === input.count) {
-        let filteredOutput = output.filter(word => word && word.trim().length > 0 && /^[a-zA-Z]+$/.test(word.trim())); // Ensure words are alphanumeric
+      if (output && Array.isArray(output)) {
+        let filteredOutput = output.filter(word => typeof word === 'string' && word.trim().length > 0 && /^[a-zA-Z]+$/.test(word.trim())); 
         if (input.maxWordLength) {
             filteredOutput = filteredOutput.filter(word => word.length <= input.maxWordLength!);
         }
@@ -65,37 +140,17 @@ const suggestWordsFlow = ai.defineFlow(
         if (distinctWords.length >= input.count) {
             return distinctWords.slice(0, input.count) as SuggestWordsOutput;
         } else {
-            console.warn(`Gemini returned ${distinctWords.length} distinct valid words, expected ${input.count}. Output:`, output, "Filtered:", filteredOutput, "Distinct:", distinctWords);
-            const fallbacks = ["Guitar", "Apple", "Car", "Umbrella", "Chair", "Book", "Tree", "Sun", "Moon", "Flower", "Banana", "Clock", "Shoe", "Key", "Door", "Hat", "Cup", "Fish", "Star", "House"];
-            let finalWords = [...distinctWords];
-            for (const fb of fallbacks) {
-                if (finalWords.length >= input.count) break;
-                if (!finalWords.map(w=>w.toLowerCase()).includes(fb.toLowerCase()) &&
-                    !(input.previouslyUsedWords.map(w=>w.toLowerCase()).includes(fb.toLowerCase())) &&
-                    (input.maxWordLength ? fb.length <= input.maxWordLength : true)
-                    ) {
-                    finalWords.push(fb);
-                }
-            }
-            const finalPads = ["Box", "Pen", "Lamp", "Desk", "Mouse"];
-            let padIdx = 0;
-            while(finalWords.length < input.count){
-                const padWord = finalPads[padIdx % finalPads.length] + (finalWords.length > 0 && padIdx > 2 ? finalWords.length.toString() : "");
-                 if (!finalWords.map(w=>w.toLowerCase()).includes(padWord.toLowerCase())) {
-                    finalWords.push(padWord);
-                 } else {
-                    finalWords.push(padWord + "X");
-                 }
-                padIdx++;
-            }
-            return finalWords.slice(0, input.count) as SuggestWordsOutput;
+            console.warn(`Gemini returned ${distinctWords.length} distinct valid words (expected ${input.count}). Output:`, output, "Filtered:", filteredOutput, "Distinct:", distinctWords, "Using enhanced fallback.");
+            const fallbackWords = generateFallbackWords(input.count - distinctWords.length, input.maxWordLength, [...input.previouslyUsedWords, ...distinctWords]);
+            return [...distinctWords, ...fallbackWords].slice(0, input.count) as SuggestWordsOutput;
         }
       }
-      console.error('Gemini did not return the expected number of words or format. Received:', output);
-      return ["Desk", "Lamp", "Mouse", "Keyboard", "Screen"].slice(0, input.count) as SuggestWordsOutput;
+      console.error('Gemini did not return the expected array format. Received:', output, "Using enhanced fallback.");
+      return generateFallbackWords(input.count, input.maxWordLength, input.previouslyUsedWords) as SuggestWordsOutput;
     } catch (error) {
-      console.error("Error in suggestWordsFlow:", error);
-      return ["Chair", "Table", "Screen", "Pen", "Cup"].slice(0, input.count) as SuggestWordsOutput;
+      console.error("Error in suggestWordsFlow:", error, "Using enhanced fallback.");
+      return generateFallbackWords(input.count, input.maxWordLength, input.previouslyUsedWords) as SuggestWordsOutput;
     }
   }
 );
+
