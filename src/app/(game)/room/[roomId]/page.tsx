@@ -330,7 +330,7 @@ const PlayerList = ({
     </CardHeader>
     <div className={cn(
         "transition-all duration-300 ease-in-out overflow-hidden flex-grow min-h-0",
-        isMinimized ? "max-h-0 opacity-0" : "opacity-100 flex-grow" // flex-grow needed to fill height
+        isMinimized ? "max-h-0 opacity-0" : "opacity-100 flex-grow" 
     )}>
         <CardContent className="h-full pt-2 sm:pt-3"> 
         <ScrollArea className="h-full pr-2 sm:pr-3">
@@ -393,15 +393,19 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
 const ChatArea = ({
     guesses,
     room,
+    onGuessSubmit,
+    disabled
 }: {
     guesses: Guess[],
     room: Room | null,
+    onGuessSubmit: (guess: string) => void,
+    disabled: boolean
 }) => (
- <Card className="shadow-md flex flex-col w-full h-full rounded-sm">
+ <Card className="shadow-md flex flex-col w-full h-full md:h-96 rounded-sm">
     <CardHeader className="p-2 sm:p-3 border-b">
       <CardTitle className="flex items-center gap-2 text-sm sm:text-base"><MessageSquare /> Guesses & Chat</CardTitle>
     </CardHeader>
-    <CardContent className="flex-grow min-h-0 pt-2 sm:pt-3 pb-0 pr-0">
+    <CardContent className="flex-grow min-h-0 md:max-h-96 pt-3 sm:pt-4 pb-0 pr-0">
       <ScrollArea className="h-full pr-2 sm:pr-3">
         <ul className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
           {guesses.map((g, i) => (
@@ -417,7 +421,9 @@ const ChatArea = ({
         </ul>
       </ScrollArea>
     </CardContent>
-    {/* GuessInput is now rendered separately at the bottom of the screen */}
+    <CardFooter className="p-2 border-t">
+        <GuessInput onGuessSubmit={onGuessSubmit} disabled={disabled} />
+    </CardFooter>
   </Card>
 );
 
@@ -442,10 +448,10 @@ const TimerDisplay = ({ targetTime, gameState, defaultSeconds, label, compact }:
   }, [targetTime, defaultSeconds]);
 
   if (timeLeft === null && (gameState === 'drawing' || gameState === 'word_selection')) {
-      return <div className={cn("font-semibold", compact ? "text-sm" : "text-base")}><Clock className={cn("inline mr-1", compact ? "h-3 w-3" : "h-4 w-4")} />Loading...</div>;
+      return <div className={cn("font-semibold", compact ? "text-sm" : "text-lg")}><Clock className={cn("inline mr-1", compact ? "h-3 w-3" : "h-4 w-4")} />Loading...</div>;
   }
   if (timeLeft === null) {
-      return <div className={cn("font-semibold", compact ? "text-sm" : "text-base")}><Clock className={cn("inline mr-1", compact ? "h-3 w-3" : "h-4 w-4")} />Waiting...</div>;
+      return <div className={cn("font-semibold", compact ? "text-sm" : "text-lg")}><Clock className={cn("inline mr-1", compact ? "h-3 w-3" : "h-4 w-4")} />Waiting...</div>;
   }
 
   const displayLabel = gameState === 'word_selection' ? "Word Choice" : (gameState === 'drawing' ? "Drawing" : label);
@@ -775,10 +781,6 @@ export default function GameRoomPage() {
 
     await update(ref(database, `rooms/${roomId}`), updates); 
 
-    // Check if all players guessed correctly after THIS player's correct guess
-    // This check should be performed by the host, or could be a Firebase Function trigger
-    // For client-side, only host can end round due to all guesses.
-    // Let's adjust this to make it a general check post-update
     const updatedRoomSnapForEndRound = await get(ref(database, `rooms/${roomId}`));
     if (!updatedRoomSnapForEndRound.exists()) return;
     const updatedRoomDataForEndRound: Room = updatedRoomSnapForEndRound.val();
@@ -1133,7 +1135,8 @@ export default function GameRoomPage() {
       const patternChars = currentPatternStr.split('');
       const currentPatternNonSpaceLength = currentPatternStr.replace(/\s/g, '').length;
       
-      const finalHintCount = Math.min(room.config.maxHintLetters, Math.max(0, currentPatternNonSpaceLength - 1));
+      const hostConfiguredMaxHints = room.config.maxWordLength; // Re-using maxWordLength temporarily, ideally this should be its own config for # of hints from host.
+      const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
 
 
       if (finalHintCount > 0) {
@@ -1147,12 +1150,14 @@ export default function GameRoomPage() {
           .map((char, index) => (char !== ' ' ? index : -1))
           .filter(index => index !== -1);
         
+        const initialUnderscorePatternForTransaction = patternChars.map(char => char === ' ' ? ' ' : '_');
+
+        // Select random indices to reveal
         while (indicesToRevealThisRound.length < finalHintCount && availableIndices.length > 0) {
           const randomIndex = Math.floor(Math.random() * availableIndices.length);
           indicesToRevealThisRound.push(availableIndices.splice(randomIndex, 1)[0]);
         }
 
-        const initialUnderscorePatternForTransaction = patternChars.map(char => char === ' ' ? ' ' : '_');
 
         indicesToRevealThisRound.forEach((targetCharIndex, hintIteration) => {
           const currentHintRevealTimeMs = startRevealTimeMs + (hintIteration * delayBetweenHintsMs);
@@ -1170,7 +1175,7 @@ export default function GameRoomPage() {
                 const revealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
                 await runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
                     if (currentFirebaseRevealedPattern === null && hintIteration > 0) {
-                        return; 
+                        return; // Abort if pattern becomes null mid-way through hints for some reason (shouldn't happen)
                     }
 
                     let basePattern;
@@ -1179,10 +1184,12 @@ export default function GameRoomPage() {
                         currentFirebaseRevealedPattern.length === patternChars.length) {
                         basePattern = [...currentFirebaseRevealedPattern];
                     } else {
+                        // Fallback: if Firebase pattern is missing or wrong length, start from fresh underscores.
+                        // This is critical to ensure the transaction can correctly apply the hint.
                         basePattern = [...initialUnderscorePatternForTransaction];
                     }
 
-                    if (basePattern[targetCharIndex] === '_') { 
+                    if (basePattern[targetCharIndex] === '_') { // Only reveal if it's still an underscore
                         basePattern[targetCharIndex] = patternChars[targetCharIndex];
                     }
                     return basePattern;
@@ -1228,7 +1235,7 @@ export default function GameRoomPage() {
 
     if (isHost && playerId === room.currentDrawerId) { 
         wordDisplayElements.push(
-            <span key="host-drawer-full-word" className="text-card-foreground font-semibold">
+            <span key="host-drawer-full-word" className="text-accent font-semibold">
                 {room.currentPattern}
             </span>
         );
@@ -1293,7 +1300,8 @@ export default function GameRoomPage() {
 
   return (
     <>
-      <div className="p-2 border-b bg-background shadow-sm sticky top-0 z-20 flex justify-between items-center text-sm flex-shrink-0">
+      {/* Mobile Only Top Bar */}
+      <div className="p-2 border-b bg-background shadow-sm sticky top-0 z-20 flex justify-between items-center text-sm flex-shrink-0 md:hidden">
           <div className="flex items-center gap-2">
             <TimerDisplay 
                 targetTime={room.gameState === 'drawing' ? room.roundEndsAt : (room.gameState === 'word_selection' ? room.wordSelectionEndsAt : null)} 
@@ -1305,7 +1313,7 @@ export default function GameRoomPage() {
             <span className="text-xs text-muted-foreground">Round {room.currentRoundNumber || 0}/{room.config.totalRounds || 'N/A'}</span>
           </div>
           
-          <div className="text-center font-semibold text-base">
+          <div className="text-center font-semibold text-base mx-2 flex-shrink min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
             {room.gameState === 'drawing' || room.gameState === 'word_selection' ? (
                  <span className={cn("font-mono tracking-wider", (isCurrentPlayerDrawing || (room.correctGuessersThisRound || []).includes(playerId)) ? "text-accent" : "text-primary")}>
                     {mobileWordToDisplay()}
@@ -1314,24 +1322,26 @@ export default function GameRoomPage() {
           </div>
 
           <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" onClick={handleCopyLink} aria-label="Copy room link"><Share2 size={18} /></Button>
-              <Button variant="ghost" size="icon" onClick={handleLeaveRoom} aria-label="Leave room"><LogOut size={18} /></Button>
               {isHost && startButtonInfo && (room.gameState === 'waiting' || room.gameState === 'game_over') && (
                   <Button
                       onClick={manageGameStart}
-                      size="sm" 
+                      size="icon" 
                       variant="outline"
-                      className="ml-2 px-2 py-1 h-auto text-xs"
+                      className="ml-2"
+                      aria-label={startButtonInfo.text}
                       disabled={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter(p=>p.isOnline).length < 1}
                   >
-                      {startButtonInfo.icon} {startButtonInfo.text}
+                      {startButtonInfo.icon}
                   </Button>
               )}
+              <Button variant="ghost" size="icon" onClick={handleCopyLink} aria-label="Copy room link"><Share2 size={18} /></Button>
+              <Button variant="ghost" size="icon" onClick={handleLeaveRoom} aria-label="Leave room"><LogOut size={18} /></Button>
           </div>
       </div>
       
+      {/* Desktop Only Word Display Card - Hidden on mobile */}
       {room.gameState === 'drawing' && room.currentPattern && (
-        <div className="p-2 text-center bg-accent/10 border-accent/20 shadow-sm rounded-sm hidden md:block">
+        <div className="p-3 text-center bg-accent/10 border-accent shadow rounded-md hidden md:block">
           <div className="text-sm text-card-foreground flex items-center justify-center">
             <span>
                 {isHost && playerId !== room.currentDrawerId ? "Click letters below to reveal hints. " : ""}
@@ -1346,7 +1356,7 @@ export default function GameRoomPage() {
             </span>
             <strong
                 key={room.revealedPattern?.join('')} 
-                className="text-lg ml-2 font-mono tracking-wider flex flex-wrap items-center gap-0.5 animate-in fade-in duration-300 text-accent" 
+                className="text-xl ml-2 font-mono tracking-wider flex flex-wrap items-center gap-0.5 animate-in fade-in duration-300 text-accent" 
             >
                 {wordDisplayElements}
             </strong>
@@ -1455,8 +1465,10 @@ export default function GameRoomPage() {
         </Card>
       )}
 
+    {/* Main Game Area: Canvas + (Players & Chat) + GuessInput */}
     <div className="flex-grow flex flex-col gap-1 p-1 min-h-0 w-full">
-        <div className="h-[55vh] w-full">
+        {/* Drawing Area */}
+        <div className="h-[55vh] w-full"> {/* Approx 55% of viewport height */}
             <DrawingCanvas
                 drawingData={room.drawingData || []}
                 onDraw={handleDraw}
@@ -1469,6 +1481,7 @@ export default function GameRoomPage() {
             />
         </div>
         
+        {/* Player List & Chat Area Row */}
         <div className="flex-grow flex flex-row gap-1 min-h-0 w-full">
             <div className="w-1/2 h-full">
                 <PlayerList
@@ -1483,13 +1496,15 @@ export default function GameRoomPage() {
                 <ChatArea
                     guesses={room.guesses || []}
                     room={room}
+                    onGuessSubmit={handleGuessSubmit}
+                    disabled={!canGuess}
                 />
             </div>
         </div>
         
-        <div className="p-1 border-t bg-background w-full flex-shrink-0">
-           <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
-        </div>
+        {/* Guess Input (This one is part of the main layout flow, not embedded in ChatArea directly if ChatArea needs fixed height) */}
+        {/* It will be effectively covered by ChatArea's CardFooter in the unified ChatArea component */}
+        {/* This separate GuessInput is no longer needed if ChatArea handles its own input */}
     </div>
 
     <AlertDialog open={isRevealConfirmDialogOpen} onOpenChange={setIsRevealConfirmDialogOpen}>
