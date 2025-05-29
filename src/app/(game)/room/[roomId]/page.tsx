@@ -29,7 +29,8 @@ import {
   AlertDialogDescription,
   AlertDialogCancel,
   AlertDialogAction,
-} from "@/components/ui/alert-dialog"; // Removed AlertDialogFooter as it's not used
+  AlertDialogFooter,
+} from "@/components/ui/alert-dialog"; 
 
 
 const WordSelectionDialog = dynamic(() => import('@/components/game/WordSelectionDialog').then(mod => mod.WordSelectionDialog), {
@@ -381,7 +382,7 @@ const PlayerList = React.memo(({
                 {isMinimized ? <ChevronDown className="h-4 w-4"/> : <ChevronUp className="h-4 w-4"/>}
             </Button>
         </div>
-        <div className={cn("transition-all duration-300 ease-in-out flex-grow min-h-0", isMinimized ? "max-h-0 opacity-0" : "opacity-100 max-h-40")}> {/* Adjusted max-h for less initial visible items */}
+        <div className={cn("transition-all duration-300 ease-in-out flex-grow min-h-0", isMinimized ? "max-h-0 opacity-0" : "opacity-100 max-h-48")}> {/* Adjusted max-h for less initial visible items */}
             <ScrollArea className="h-full">
                 <ul className="divide-y divide-gray-200 px-2 py-1.5 sm:px-3 sm:py-2">
                     {sortedPlayers.map((player, index) => (
@@ -479,7 +480,7 @@ const ChatArea = React.memo(({
         <div className="p-1.5 border-b border-black bg-gray-100">
             <h3 className="text-xs sm:text-sm font-semibold text-gray-700">Guesses & Chat</h3>
         </div>
-        <div className="flex-grow min-h-0 max-h-48 md:max-h-96"> {/* Adjusted max-h */}
+        <div className="flex-grow min-h-0 max-h-48 md:max-h-60"> {/* Adjusted max-h */}
              <ScrollArea className="h-full pr-3">
                 <div ref={internalChatScrollRef} className="p-2 space-y-1">
                     {guesses.map((g, i) => {
@@ -671,7 +672,7 @@ const WordDisplay = React.memo(({
       key={wordDisplayKey}
       className={cn(
         "text-[20px] font-mono font-normal tracking-widest select-text flex items-center justify-center gap-0.5 animate-in fade-in duration-300",
-         isCurrentPlayerDrawing ? "text-primary" : "text-foreground"
+         isCurrentPlayerDrawing ? "text-card-foreground" : (hasPlayerGuessedCorrectly ? "text-green-600" : "text-muted-foreground")
       )} style={{ letterSpacing: '0.2em' }}
     >
       {wordToDisplayElements}
@@ -691,8 +692,6 @@ WordDisplay.displayName = 'WordDisplay';
 const MobileTopBar = React.memo(({
   room,
   playerId,
-  onStartGame,
-  canStartGame,
   onCopyLink,
   onLeaveRoom,
   onDrawerLetterClick,
@@ -701,8 +700,6 @@ const MobileTopBar = React.memo(({
 }: {
   room: Room;
   playerId: string;
-  onStartGame?: () => void;
-  canStartGame?: boolean;
   onCopyLink: () => void;
   onLeaveRoom: () => void;
   onDrawerLetterClick: (char: string, index: number) => void;
@@ -712,14 +709,6 @@ const MobileTopBar = React.memo(({
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const hasPlayerGuessedCorrectly = (room.correctGuessersThisRound || []).includes(playerId);
   const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : "Someone";
-
-  const getStartButtonInfo = () => {
-    if (!room) return null;
-    if (room.gameState === 'waiting') return { text: 'Start Game', icon: <Play size={18} /> };
-    if (room.gameState === 'game_over') return { text: 'Play Again', icon: <RotateCcw size={18} /> };
-    return null;
-  };
-  const startButtonInfo = getStartButtonInfo();
 
   return (
     <div className="flex items-center justify-between border-b border-blue-900 px-1 py-0.5 sticky top-0 z-20 bg-background" style={{ borderWidth: "3px" }}>
@@ -734,18 +723,6 @@ const MobileTopBar = React.memo(({
             Round <span className="font-normal">{room.currentRoundNumber || 0}/{room.config.totalRounds || 'N/A'}</span>
           </div>
         }
-        {room.hostId === playerId && startButtonInfo && onStartGame && (
-            <Button
-                onClick={onStartGame}
-                size="icon"
-                variant="outline"
-                className="mt-1"
-                disabled={!canStartGame}
-                aria-label={startButtonInfo.text}
-            >
-                {startButtonInfo.icon}
-            </Button>
-        )}
       </div>
 
       <div className="flex flex-col items-center justify-center py-1 text-center flex-grow">
@@ -808,6 +785,7 @@ export default function GameRoomPage() {
   
   const hintTimerRef = useRef<NodeJS.Timeout[]>([]);
 
+  
   const playersArray = useMemo(() => {
     return room ? Object.values(room.players || {}) : [];
   }, [room?.players]);
@@ -1229,7 +1207,7 @@ export default function GameRoomPage() {
         setIsSettingsDialogOpenLocal(false);
         toast({ title: "Left Room", description: "You have left the room." });
         window.location.href = '/';
-    } catch (err) {
+    } catch (err){
         toast({ title: "Error", description: "Could not leave room cleanly.", variant: "destructive" });
         window.location.href = '/';
     }
@@ -1505,10 +1483,9 @@ export default function GameRoomPage() {
         const currentPatternStr = room.currentPattern;
         const patternChars = currentPatternStr.split('');
         const currentPatternNonSpaceLength = currentPatternStr.replace(/\s/g, '').length;
-        const hostConfiguredMaxHints = room.config.maxWordLength;
         
-        const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
-        
+        // Hint calculation: finalHintCount is the lesser of host's config and (word length - 1), but at least 0.
+        const finalHintCount = Math.min(room.config.maxHintLetters, Math.max(0, currentPatternNonSpaceLength - 1));
         const initialUnderscorePatternForTransaction = patternChars.map(c => (c === ' ' ? ' ' : '_'));
 
         if (finalHintCount > 0 && currentPatternNonSpaceLength > 1) {
@@ -1536,6 +1513,7 @@ export default function GameRoomPage() {
                     if (!latestRoomSnapshot.exists()) return;
                     const latestRoomData = latestRoomSnapshot.val() as Room;
 
+                    // Guard: Only proceed if the game is still in the same drawing state with the same pattern
                     if (latestRoomData.gameState === 'drawing' &&
                         latestRoomData.currentDrawerId === playerId && 
                         latestRoomData.currentPattern === currentPatternStr) { 
@@ -1544,15 +1522,17 @@ export default function GameRoomPage() {
                         try {
                             await runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
                                 let basePattern: string[];
+                                // Ensure we are working with the correct length pattern from Firebase or init a new one.
                                 if (currentFirebaseRevealedPattern &&
                                     Array.isArray(currentFirebaseRevealedPattern) &&
                                     currentFirebaseRevealedPattern.length === patternChars.length) {
                                     basePattern = [...currentFirebaseRevealedPattern];
                                 } else {
+                                    // Fallback to a fresh underscore pattern if Firebase state is unexpected
                                     basePattern = [...initialUnderscorePatternForTransaction];
                                 }
                                 
-                                if (basePattern[targetCharIndex] === '_') { 
+                                if (basePattern[targetCharIndex] === '_') { // Only reveal if not already revealed
                                     basePattern[targetCharIndex] = patternChars[targetCharIndex];
                                 }
                                 return basePattern;
@@ -1570,6 +1550,7 @@ export default function GameRoomPage() {
       hintTimerRef.current.forEach(clearTimeout);
       hintTimerRef.current = [];
     };
+  // Ensure revealedPattern is in dependency array to re-evaluate if host manually reveals a hint.
   }, [room?.gameState, room?.currentDrawerId, playerId, room?.currentPattern, room?.config, roomId, room?.revealedPattern]); 
 
 
@@ -1597,8 +1578,6 @@ export default function GameRoomPage() {
       <MobileTopBar
         room={room}
         playerId={playerId}
-        onStartGame={manageGameStart}
-        canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter((p:any)=>p.isOnline).length >= 1}
         onCopyLink={handleCopyLink}
         onLeaveRoom={handleLeaveRoom}
         onDrawerLetterClick={handleDrawerLetterClick}
@@ -1701,5 +1680,3 @@ export default function GameRoomPage() {
 }
 
     
-
-      
