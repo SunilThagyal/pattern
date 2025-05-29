@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings } from 'lucide-react';
+import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 
@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { APP_NAME } from '@/lib/config';
 import { suggestWords, type SuggestWordsInput, type SuggestWordsOutput } from '@/ai/flows/suggest-words-flow';
+import { generateAISketch, type GenerateAISketchInput, type GenerateAISketchOutput } from '@/ai/flows/generate-ai-sketch-flow';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
@@ -30,7 +31,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
   AlertDialogFooter,
-} from "@/components/ui/alert-dialog"; 
+} from "@/components/ui/alert-dialog";
 
 
 const WordSelectionDialog = dynamic(() => import('@/components/game/WordSelectionDialog').then(mod => mod.WordSelectionDialog), {
@@ -63,7 +64,10 @@ const DrawingCanvas = React.memo(({
   isHost,
   onStartGame,
   startButtonInfo,
-  canStartGame
+  canStartGame,
+  aiSketchDataUri,
+  onDrawWithAI,
+  isGeneratingAISketch,
 }: {
   drawingData: DrawingPoint[],
   onDraw: (point: DrawingPoint) => void,
@@ -76,18 +80,97 @@ const DrawingCanvas = React.memo(({
   isHost?: boolean,
   onStartGame?: () => void,
   startButtonInfo?: { text: string; icon: JSX.Element } | null,
-  canStartGame?: boolean
+  canStartGame?: boolean,
+  aiSketchDataUri?: string | null;
+  onDrawWithAI?: () => void;
+  isGeneratingAISketch?: boolean;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
   const [isPainting, setIsPainting] = useState(false);
   const [isToolbarMinimized, setIsToolbarMinimized] = useState(true);
   const isMobile = useIsMobile();
+  const aiBaseImageRef = useRef<HTMLImageElement | null>(null);
+  const [forceRedrawToggle, setForceRedrawToggle] = useState(false);
+
 
   const [color, setColor] = useState("#000000");
   const [lineWidth, setLineWidth] = useState(5);
 
   const colors = ["#000000", "#ef4444", "#22c55e", "#3b82f6", "#eab308", "#d946ef", "#06b6d4", "#ffffff", "#a855f7", "#f97316"];
+
+  const redrawFullCanvas = useCallback(() => {
+    const currentCtx = contextRef.current;
+    const currentCanvas = canvasRef.current;
+    if (!currentCtx || !currentCanvas) return;
+
+    currentCtx.clearRect(0, 0, currentCanvas.offsetWidth, currentCanvas.offsetHeight);
+
+    // Draw AI base image if it exists
+    if (aiBaseImageRef.current && aiBaseImageRef.current.complete) {
+        try {
+            currentCtx.drawImage(aiBaseImageRef.current, 0, 0, currentCanvas.offsetWidth, currentCanvas.offsetHeight);
+        } catch (e) {
+            console.error("Error drawing AI base image:", e);
+            // Potentially clear the ref if image is corrupted
+            aiBaseImageRef.current = null; 
+        }
+    }
+
+    // Draw user strokes
+    let pathActive = false;
+    let lastPointForPath: DrawingPoint | null = null;
+
+    drawingData.forEach(point => {
+        if (!currentCtx || !currentCanvas) return;
+        const xPx = point.x * currentCanvas.offsetWidth;
+        const yPx = point.y * currentCanvas.offsetHeight;
+
+        if (point.type === 'clear') {
+            // This 'clear' in drawingData already handled by the initial clearRect
+            // and potential AI image redraw. We mainly need to reset path state.
+            if (pathActive) currentCtx.stroke(); // finish any pending path
+            // Re-draw AI image if it exists after a "clear" event in drawingData
+            // This ensures AI image isn't wiped by a "clear" meant for user strokes.
+            // However, if clearCanvas() also clears aiSketchDataUri in DB, this is fine.
+            // The main clearRect at the start of redrawFullCanvas handles the visual clear.
+            // If an AI image is present, it would be redrawn just before this loop.
+            pathActive = false;
+            lastPointForPath = null;
+            return;
+        }
+
+        if (point.type === 'start') {
+            if (pathActive) currentCtx.stroke();
+            currentCtx.beginPath();
+            currentCtx.strokeStyle = point.color;
+            currentCtx.lineWidth = point.lineWidth;
+            currentCtx.moveTo(xPx, yPx);
+            pathActive = true;
+        } else if (point.type === 'draw' && pathActive) {
+            if (currentCtx.strokeStyle.toLowerCase() !== point.color.toLowerCase() || currentCtx.lineWidth !== point.lineWidth) {
+                currentCtx.stroke();
+                currentCtx.beginPath();
+                if(lastPointForPath) {
+                      currentCtx.moveTo(lastPointForPath.x * currentCanvas.offsetWidth, lastPointForPath.y * currentCanvas.offsetHeight);
+                } else {
+                      currentCtx.moveTo(xPx, yPx);
+                }
+                currentCtx.strokeStyle = point.color;
+                currentCtx.lineWidth = point.lineWidth;
+            }
+            currentCtx.lineTo(xPx, yPx);
+            currentCtx.stroke();
+            currentCtx.beginPath();
+            currentCtx.moveTo(xPx, yPx);
+        } else if (point.type === 'end' && pathActive) {
+            currentCtx.stroke();
+            pathActive = false;
+        }
+        lastPointForPath = point;
+    });
+      if (pathActive) currentCtx.stroke();
+  }, [drawingData]); // Removed aiSketchDataUri from here, will be handled by its own effect
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -107,67 +190,38 @@ const DrawingCanvas = React.memo(({
       }
     };
 
-    const redrawFullCanvas = () => {
-        const currentCtx = contextRef.current;
-        const currentCanvas = canvasRef.current;
-        if (!currentCtx || !currentCanvas) return;
-
-        currentCtx.clearRect(0, 0, currentCanvas.offsetWidth, currentCanvas.offsetHeight);
-
-        let pathActive = false;
-        let lastPointForPath: DrawingPoint | null = null;
-
-        drawingData.forEach(point => {
-            if (!currentCtx || !currentCanvas) return;
-            const xPx = point.x * currentCanvas.offsetWidth;
-            const yPx = point.y * currentCanvas.offsetHeight;
-
-            if (point.type === 'clear') {
-                if (pathActive) currentCtx.stroke();
-                currentCtx.clearRect(0, 0, currentCanvas.offsetWidth, currentCanvas.offsetHeight);
-                pathActive = false;
-                lastPointForPath = null;
-                return;
-            }
-
-            if (point.type === 'start') {
-                if (pathActive) currentCtx.stroke();
-                currentCtx.beginPath();
-                currentCtx.strokeStyle = point.color;
-                currentCtx.lineWidth = point.lineWidth;
-                currentCtx.moveTo(xPx, yPx);
-                pathActive = true;
-            } else if (point.type === 'draw' && pathActive) {
-                if (currentCtx.strokeStyle.toLowerCase() !== point.color.toLowerCase() || currentCtx.lineWidth !== point.lineWidth) {
-                    currentCtx.stroke();
-                    currentCtx.beginPath();
-                    if(lastPointForPath) {
-                         currentCtx.moveTo(lastPointForPath.x * currentCanvas.offsetWidth, lastPointForPath.y * currentCanvas.offsetHeight);
-                    } else {
-                         currentCtx.moveTo(xPx, yPx);
-                    }
-                    currentCtx.strokeStyle = point.color;
-                    currentCtx.lineWidth = point.lineWidth;
-                }
-                currentCtx.lineTo(xPx, yPx);
-                currentCtx.stroke();
-                currentCtx.beginPath();
-                currentCtx.moveTo(xPx, yPx);
-            } else if (point.type === 'end' && pathActive) {
-                currentCtx.stroke();
-                pathActive = false;
-            }
-            lastPointForPath = point;
-        });
-         if (pathActive) currentCtx.stroke();
-    };
-
     setupCanvas();
-    redrawFullCanvas(); 
-
     window.addEventListener('resize', setupCanvas);
     return () => window.removeEventListener('resize', setupCanvas);
-  }, [drawingData]);
+  }, [redrawFullCanvas]); // redrawFullCanvas is stable if its deps are stable
+
+  useEffect(() => {
+    // Effect specifically for handling AI sketch URI changes
+    if (aiSketchDataUri) {
+        const img = new Image();
+        img.onload = () => {
+            aiBaseImageRef.current = img;
+            redrawFullCanvas(); // Redraw to show new AI image + existing strokes
+        };
+        img.onerror = () => {
+            console.error("Failed to load AI sketch image.");
+            aiBaseImageRef.current = null; // Clear if loading failed
+            redrawFullCanvas(); // Redraw without AI image
+        };
+        img.src = aiSketchDataUri;
+    } else {
+        if (aiBaseImageRef.current) { // If URI becomes null, clear the ref and redraw
+            aiBaseImageRef.current = null;
+            redrawFullCanvas();
+        }
+    }
+  }, [aiSketchDataUri, redrawFullCanvas]);
+
+  useEffect(() => {
+      // This effect ensures canvas redraws if drawingData changes
+      // or if forced by forceRedrawToggle (which might be used after AI image load).
+      redrawFullCanvas();
+  }, [drawingData, forceRedrawToggle, redrawFullCanvas]);
 
 
   const getCoordinates = (event: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): { x: number; y: number } | null => {
@@ -259,16 +313,11 @@ const DrawingCanvas = React.memo(({
 
   const localClearAndPropagate = () => {
     if (!isDrawingEnabled) return;
-    const canvas = canvasRef.current;
-    const ctx = contextRef.current;
-    if(canvas && ctx) {
-        ctx.clearRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
-    }
-    clearCanvas();
+    clearCanvas(); // This will now also clear aiSketchDataUri in Firebase via GameRoomPage
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-muted/10 border border-border/30 overflow-hidden relative rounded-sm"> {/* Added relative */}
+    <div className="w-full h-full flex flex-col bg-muted/10 border border-border/30 overflow-hidden relative rounded-sm">
       <div className="p-1 border-b border-border/30">
         <div className="flex flex-row items-center justify-between">
           <div className="text-xs text-muted-foreground">
@@ -312,15 +361,21 @@ const DrawingCanvas = React.memo(({
                     <Button variant="ghost" size="icon" onClick={localClearAndPropagate} title="Clear Canvas" className="w-7 h-7">
                         <Eraser className="w-4 h-4" />
                     </Button>
+                    {onDrawWithAI && (
+                        <Button variant="outline" size="sm" onClick={onDrawWithAI} disabled={isGeneratingAISketch} className="h-7 px-2 text-xs" title="Draw with AI">
+                            {isGeneratingAISketch ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Sparkles className="w-3 h-3 mr-1" />}
+                            AI Sketch
+                        </Button>
+                    )}
                 </div>
             </div>
           )}
         </div>
       </div>
-      <div className="flex-grow p-0 bg-white relative min-h-0"> {/* Main canvas content area */}
+      <div className="flex-grow p-0 bg-white relative min-h-0">
         <canvas
           ref={canvasRef}
-          className="w-full h-full touch-none relative z-0" // Ensure canvas is behind overlay
+          className="w-full h-full touch-none relative z-0"
           onMouseDown={startPaint}
           onMouseMove={paint}
           onMouseUp={exitPaint}
@@ -329,9 +384,8 @@ const DrawingCanvas = React.memo(({
           onTouchMove={paint}
           onTouchEnd={exitPaint}
         />
-        {/* Overlay for dimmed background and Start Button */}
         {(gameState === 'waiting' || gameState === 'game_over') && (
-          <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-10"> {/* Dimming overlay */}
+          <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-10">
             {isHost && startButtonInfo && onStartGame && (
               <Button
                 onClick={onStartGame}
@@ -382,8 +436,8 @@ const PlayerList = React.memo(({
                 {isMinimized ? <ChevronDown className="h-4 w-4"/> : <ChevronUp className="h-4 w-4"/>}
             </Button>
         </div>
-        <div className={cn("transition-all duration-300 ease-in-out flex-grow min-h-0", isMinimized ? "max-h-0 opacity-0" : "opacity-100 max-h-48")}> {/* Adjusted max-h for less initial visible items */}
-            <ScrollArea className="h-full">
+        <div className={cn("transition-all duration-300 ease-in-out flex-grow min-h-0", isMinimized ? "max-h-0 opacity-0" : "opacity-100 max-h-48")}>
+             <ScrollArea className="h-full">
                 <ul className="divide-y divide-gray-200 px-2 py-1.5 sm:px-3 sm:py-2">
                     {sortedPlayers.map((player, index) => (
                     <li
@@ -441,7 +495,7 @@ const GuessInput = React.memo(({ onGuessSubmit, disabled }: { onGuessSubmit: (gu
         onChange={e => setGuess(e.target.value)}
         placeholder="Type your guess here..."
         disabled={disabled}
-        className="w-full text-center text-gray-600 text-base font-normal outline-none border-gray-300 focus:border-blue-500 h-10 px-3 pr-10" 
+        className="w-full text-center text-gray-600 text-base font-normal outline-none border-gray-300 focus:border-blue-500 h-10 px-3 pr-10"
       />
       <span className="absolute right-12 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
         {letterCount > 0 ? letterCount : ''}
@@ -480,7 +534,7 @@ const ChatArea = React.memo(({
         <div className="p-1.5 border-b border-black bg-gray-100">
             <h3 className="text-xs sm:text-sm font-semibold text-gray-700">Guesses & Chat</h3>
         </div>
-        <div className="flex-grow min-h-0 max-h-48 md:max-h-60"> {/* Adjusted max-h */}
+        <div className="flex-grow min-h-0 max-h-48 md:max-h-60">
              <ScrollArea className="h-full pr-3">
                 <div ref={internalChatScrollRef} className="p-2 space-y-1">
                     {guesses.map((g, i) => {
@@ -500,7 +554,7 @@ const ChatArea = React.memo(({
                          messageContent = <span className="font-semibold text-orange-600">{g.playerName} left the room!</span>;
                         messageClasses = cn(messageClasses, "bg-orange-100");
                     } else if (g.isCorrect) {
-                        const isFirst = correctGuessersThisRound?.[0] === g.playerId && g.playerId !== currentDrawerId;
+                        const isFirst = (correctGuessersThisRound?.[0] === g.playerId) && (g.playerId !== currentDrawerId);
                         messageContent = <span className="font-semibold text-green-700">{g.playerName} guessed the word! {isFirst ? <span className="font-bold text-yellow-500">(First!)</span> : ""}</span>;
                         messageClasses = cn(messageClasses, "bg-green-100 animate-pulse-bg-once");
                     } else if (g.text.startsWith("[[SYSTEM_ROUND_END_WORD]]")) {
@@ -602,20 +656,20 @@ const WordDisplay = React.memo(({
       ? revealedPattern
       : patternChars.map(c => c === ' ' ? ' ' : '_');
 
-    // Rule 1: Current player IS THE DRAWER
-    if (isCurrentPlayerDrawing) {
+
+    if (isCurrentPlayerDrawing) { // Current player IS THE DRAWER
         patternChars.forEach((char, index) => {
             if (char === ' ') {
                 elements.push(<span key={`drawer-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
             } else {
                  const isLetterRevealedToOthers = currentRevealedForDisplay[index] !== '_' && currentRevealedForDisplay[index] !== ' ';
-                 if(isLetterRevealedToOthers) { // Letter already revealed to guessers by drawer
+                 if(isLetterRevealedToOthers) {
                      elements.push(
                         <span key={`drawer-revealed-${index}`} className="font-bold text-green-600 cursor-default">
                             {char.toUpperCase()}
                         </span>
                     );
-                 } else { // Letter not yet revealed by drawer, make it clickable for drawer
+                 } else {
                     elements.push(
                         <button
                             key={`drawer-clickable-${index}`}
@@ -630,8 +684,7 @@ const WordDisplay = React.memo(({
                  }
             }
         });
-    } 
-    // Rule 2: Player has GUESSED CORRECTLY OR round/game is OVER (host or not)
+    }
     else if (hasPlayerGuessedCorrectly || gameState === 'round_end' || gameState === 'game_over') {
       patternChars.forEach((char, index) => {
         elements.push(
@@ -640,9 +693,8 @@ const WordDisplay = React.memo(({
           </span>
         );
       });
-    } 
-    // Rule 3: Player is a GUESSER (including HOST if not drawing) who has NOT guessed correctly and game is IN DRAWING state
-    else if (gameState === 'drawing') { 
+    }
+    else if (gameState === 'drawing') {
       currentRevealedForDisplay.forEach((char, index) => {
         elements.push(
           <span key={`guesser-revealed-char-${index}`} className={cn("font-bold", char === '_' || char === ' ' ? 'text-muted-foreground' : 'text-foreground')}>
@@ -650,9 +702,8 @@ const WordDisplay = React.memo(({
           </span>
         );
       });
-    } 
-    // Rule 4: Default placeholder for other states (e.g., 'waiting', or 'word_selection' for non-drawers including HOST)
-    else { 
+    }
+    else {
        elements.push(
         <span key="placeholder-state" className="text-muted-foreground">
           {gameState === 'word_selection' ? `${currentDrawerName || "Someone"} is choosing...` : "Waiting..."}
@@ -780,12 +831,11 @@ export default function GameRoomPage() {
 
   const [isRevealConfirmDialogOpen, setIsRevealConfirmDialogOpenLocal] = useState(false);
   const [letterToRevealInfo, setLetterToRevealInfo] = useState<{ char: string; index: number } | null>(null);
-  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(true); 
-  const [isSettingsDialogOpenLocal, setIsSettingsDialogOpenLocal] = useState(false); 
-  
-  const hintTimerRef = useRef<NodeJS.Timeout[]>([]);
+  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(true);
+  const [isSettingsDialogOpenLocal, setIsSettingsDialogOpenLocal] = useState(false);
+  const [isGeneratingAISketch, setIsGeneratingAISketch] = useState(false);
 
-  
+
   const playersArray = useMemo(() => {
     return room ? Object.values(room.players || {}) : [];
   }, [room?.players]);
@@ -833,7 +883,8 @@ export default function GameRoomPage() {
         roundEndsAt: null,
         wordSelectionEndsAt: null,
         guesses: [],
-        drawingData: [],
+        drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
+        aiSketchDataUri: null,
         correctGuessersThisRound: [],
         selectableWords: [],
         revealedPattern: [],
@@ -904,31 +955,29 @@ export default function GameRoomPage() {
         try {
             const suggestInput: SuggestWordsInput = {
                 previouslyUsedWords: currentRoomData.usedWords || [],
-                count: 3,
+                count: 5, // Request 5 words
                 maxWordLength: currentRoomData.config.maxWordLength,
             };
             const aiSuggestions = await suggestWords(suggestInput);
 
-            if (aiSuggestions && Array.isArray(aiSuggestions) && aiSuggestions.length === 3 && aiSuggestions.every(w => typeof w === 'string' && w.trim().length > 0 && /^[a-zA-Z]+$/.test(w.trim()))) {
+            if (aiSuggestions && Array.isArray(aiSuggestions) && aiSuggestions.length === 5 && aiSuggestions.every(w => typeof w === 'string' && w.trim().length > 0 && /^[a-zA-Z]+$/.test(w.trim()))) {
                 wordsForSelection = aiSuggestions;
             } else {
-                 console.warn("AI did not return 3 valid words, using robust fallback. Received:", aiSuggestions);
+                 console.warn("AI did not return 5 valid words, using robust fallback. Received:", aiSuggestions);
                  toast({ title: "AI Word Gen Issue", description: "Using default words as AI had an issue.", variant: "default" });
-                const defaultFallbackWords = [
-                    "Apple", "House", "Star", "Car", "Tree", "Book", "Sun", "Moon", "Chair", "Guitar", "Lamp", "Phone", "Key", "Door", "Clock", "Shoes", "Hat", "Banana", "Orange", "Grape", "Bread", "Cheese", "Pizza", "World", "Cloud", "Pencil", "Brush", "Plane", "Train", "Boat", "Ball", "Box", "Cup", "Fish", "Duck", "Kite", "Drum", "Cake", "Sock", "Fork", "Spoon", "Plate", "Plant", "Flower"
-                ];
+                const defaultFallbackWords = ["Apple", "House", "Star", "Car", "Tree", "Book", "Sun", "Moon", "Chair", "Guitar", "Lamp", "Phone", "Key", "Door", "Clock", "Shoes", "Hat", "Banana", "Orange", "Grape", "Bread", "Cheese", "Pizza", "World", "Cloud", "Pencil", "Brush", "Plane", "Train", "Boat", "Ball", "Box", "Cup", "Fish", "Duck", "Kite", "Drum", "Cake", "Sock", "Fork", "Spoon", "Plate", "Plant", "Flower", "Dog", "Cat", "Bird", "Mouse", "Bear"];
                 const shuffledFallbackWords = [...defaultFallbackWords].sort(() => 0.5 - Math.random());
                 const localUsedWords = new Set((currentRoomData.usedWords || []).map(w => w.toLowerCase()));
                 for (const word of shuffledFallbackWords) {
-                    if (wordsForSelection.length >= 3) break;
+                    if (wordsForSelection.length >= 5) break;
                     const wordLower = word.toLowerCase();
                     if (word.length <= (currentRoomData.config?.maxWordLength || 20) && !localUsedWords.has(wordLower) && !wordsForSelection.map(w=>w.toLowerCase()).includes(wordLower)) {
                         wordsForSelection.push(word);
                     }
                 }
-                const absoluteFallbacks = ["Ball", "Box", "Cup"];
+                const absoluteFallbacks = ["Ball", "Box", "Cup", "Pen", "Keypad"];
                 let abIdx = 0;
-                while(wordsForSelection.length < 3) {
+                while(wordsForSelection.length < 5) {
                     const baseWord = absoluteFallbacks[abIdx % absoluteFallbacks.length];
                     let potentialWord = baseWord;
                     let attempt = 0;
@@ -938,28 +987,28 @@ export default function GameRoomPage() {
                     if (potentialWord.length <= (currentRoomData.config?.maxWordLength || 20)) {
                          wordsForSelection.push(potentialWord);
                     } else {
-                        wordsForSelection.push(absoluteFallbacks[abIdx % absoluteFallbacks.length]); 
+                        wordsForSelection.push(absoluteFallbacks[abIdx % absoluteFallbacks.length]);
                     }
                     abIdx++;
                 }
-                wordsForSelection = wordsForSelection.slice(0,3);
+                wordsForSelection = wordsForSelection.slice(0,5);
             }
         } catch (aiError) {
             console.error("AI word suggestion error:", aiError);
             toast({ title: "AI Error", description: "Failed to get words from AI. Using default words.", variant: "destructive" });
-            wordsForSelection = ["Dog", "Moon", "Boat"].filter(w => w.length <= (currentRoomData.config?.maxWordLength || 20) && !(currentRoomData.usedWords || []).map(uw => uw.toLowerCase()).includes(w.toLowerCase()));
-             if (wordsForSelection.length < 3) {
-                const defaults = ["Apple", "House", "Star", "Cat", "Sun", "Car"];
+            wordsForSelection = ["Dog", "Moon", "Boat", "Desk", "Lamp"].filter(w => w.length <= (currentRoomData.config?.maxWordLength || 20) && !(currentRoomData.usedWords || []).map(uw => uw.toLowerCase()).includes(w.toLowerCase()));
+             if (wordsForSelection.length < 5) {
+                const defaults = ["Apple", "House", "Star", "Cat", "Sun", "Car", "Pencil", "Brush", "Train"];
                 for (const defWord of defaults) {
-                    if (wordsForSelection.length >=3) break;
+                    if (wordsForSelection.length >=5) break;
                      if (defWord.length <= (currentRoomData.config?.maxWordLength || 20) && !(currentRoomData.usedWords || []).map(uw => uw.toLowerCase()).includes(defWord.toLowerCase()) && !wordsForSelection.map(w => w.toLowerCase()).includes(defWord.toLowerCase())) {
                         wordsForSelection.push(defWord);
                     }
                 }
              }
-             while(wordsForSelection.length < 3 && wordsForSelection.length > 0) wordsForSelection.push(wordsForSelection[0] + "!");
-             while(wordsForSelection.length < 3) wordsForSelection.push("Key");
-             wordsForSelection = wordsForSelection.slice(0,3);
+             while(wordsForSelection.length < 5 && wordsForSelection.length > 0) wordsForSelection.push(wordsForSelection[0] + "!");
+             while(wordsForSelection.length < 5) wordsForSelection.push("Key");
+             wordsForSelection = wordsForSelection.slice(0,5);
         }
     }
 
@@ -971,7 +1020,8 @@ export default function GameRoomPage() {
         wordSelectionEndsAt: Date.now() + 15 * 1000,
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
-        guesses: currentRoomData.guesses || [], 
+        aiSketchDataUri: null,
+        guesses: currentRoomData.guesses || [],
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection,
         revealedPattern: [],
@@ -1005,15 +1055,15 @@ export default function GameRoomPage() {
         roundEndsAt: Date.now() + currentRoomData.config.roundTimeoutSeconds * 1000,
         selectableWords: [],
         wordSelectionEndsAt: null,
-        correctGuessersThisRound: [], 
+        correctGuessersThisRound: [],
         usedWords: newUsedWords,
+        revealedPattern: initialRevealedPattern, // Set initial pattern here
+        drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }], // Clear drawing data
+        aiSketchDataUri: null, // Clear any previous AI sketch
     };
     try {
-        await set(ref(database, `rooms/${roomId}/drawingData`), [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }]);
-        await set(ref(database, `rooms/${roomId}/revealedPattern`), initialRevealedPattern);
-        await update(ref(database, `rooms/${roomId}`), updates);
-        await update(ref(database, `rooms/${roomId}`), { gameState: 'drawing' }); 
-
+        // It's better to do one update if possible.
+        await update(ref(database, `rooms/${roomId}`), { ...updates, gameState: 'drawing' });
         toast({title: "Drawing Started!", description: `The word has been chosen. Time to draw!`});
     } catch(err) {
         console.error("Error starting drawing phase:", err);
@@ -1034,7 +1084,7 @@ export default function GameRoomPage() {
     }
 
     const correctGuessers = currentRoomData.correctGuessersThisRound || [];
-    const drawerPointsEarned = correctGuessers.length * 20; 
+    const drawerPointsEarned = correctGuessers.length * 20;
 
     if (drawerPointsEarned > 0) {
         const drawerPlayerRef = ref(database, `rooms/${roomId}/players/${currentRoomData.currentDrawerId}`);
@@ -1045,7 +1095,7 @@ export default function GameRoomPage() {
         }
     }
 
-    if (currentRoomData.hostId === playerId) { 
+    if (currentRoomData.hostId === playerId) {
         try {
             await update(ref(database, `rooms/${roomId}`), {
                 gameState: 'round_end',
@@ -1101,12 +1151,12 @@ export default function GameRoomPage() {
         newCorrectGuessers.push(playerId);
         updates.correctGuessersThisRound = newCorrectGuessers;
 
-        const guesserPosition = newCorrectGuessers.length - 1; // 0-indexed position
+        const guesserPosition = newCorrectGuessers.length - 1;
         let pointsAwardedToGuesser = 0;
         if (guesserPosition === 0) pointsAwardedToGuesser = 100;
         else if (guesserPosition === 1) pointsAwardedToGuesser = 80;
         else if (guesserPosition === 2) pointsAwardedToGuesser = 60;
-        else pointsAwardedToGuesser = 50; 
+        else pointsAwardedToGuesser = 50;
 
         const playerRef = ref(database, `rooms/${roomId}/players/${playerId}`);
         const currentPlayerData = currentRoom.players[playerId];
@@ -1116,7 +1166,7 @@ export default function GameRoomPage() {
     }
 
     await update(ref(database, `rooms/${roomId}`), updates);
-    
+
     const updatedRoomSnapForEndRound = await get(ref(database, `rooms/${roomId}`));
     if (!updatedRoomSnapForEndRound.exists()) return;
     const updatedRoomDataForEndRound: Room = updatedRoomSnapForEndRound.val();
@@ -1155,7 +1205,7 @@ export default function GameRoomPage() {
                                  : room.currentPattern.split('').map(c => c === ' ' ? ' ' : '_');
 
     if (char === ' ' || (currentRevealedPattern[index] && currentRevealedPattern[index] !== '_')) {
-      return; 
+      return;
     }
     setLetterToRevealInfo({ char: room.currentPattern[index], index });
     setIsRevealConfirmDialogOpenLocal(true);
@@ -1197,7 +1247,7 @@ export default function GameRoomPage() {
 
   const handleLeaveRoom = useCallback(async () => {
     if (!playerId || !room || !playerName) {
-        window.location.href = '/'; 
+        window.location.href = '/';
         return;
     }
     const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
@@ -1207,7 +1257,7 @@ export default function GameRoomPage() {
         setIsSettingsDialogOpenLocal(false);
         toast({ title: "Left Room", description: "You have left the room." });
         window.location.href = '/';
-    } catch (err){
+    } catch (err) {
         toast({ title: "Error", description: "Could not leave room cleanly.", variant: "destructive" });
         window.location.href = '/';
     }
@@ -1222,18 +1272,46 @@ export default function GameRoomPage() {
 
   const handleDraw = useCallback((point: DrawingPoint) => {
     if (!room || !playerId || room?.currentDrawerId !== playerId || room?.gameState !== 'drawing') return;
-    
+
     const drawingDataRef = ref(database, `rooms/${roomId}/drawingData`);
     const newDrawingData = [...(memoizedDrawingData || []), point];
     set(drawingDataRef, newDrawingData);
 
   }, [room, playerId, roomId, memoizedDrawingData]);
 
-  const handleClearCanvas = useCallback(() => {
+  const handleClearCanvas = useCallback(async () => {
     if (!room || !playerId || room?.currentDrawerId !== playerId || room?.gameState !== 'drawing') return;
-    const clearPoint: DrawingPoint = { type: 'clear', x:0, y:0, color:'', lineWidth:0 };
-    set(ref(database, `rooms/${roomId}/drawingData`), [clearPoint]);
+    const updates = {
+        drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
+        aiSketchDataUri: null
+    };
+    await update(ref(database, `rooms/${roomId}`), updates);
   },[room, playerId, roomId]);
+
+  const handleDrawWithAI = useCallback(async () => {
+    if (!room || !room.currentPattern || room.currentDrawerId !== playerId) return;
+    setIsGeneratingAISketch(true);
+    try {
+        const sketchInput: GenerateAISketchInput = { chosenWord: room.currentPattern };
+        const result = await generateAISketch(sketchInput);
+        if (result && result.imageDataUri) {
+            const updates = {
+                aiSketchDataUri: result.imageDataUri,
+                drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }] // Clear manual drawing
+            };
+            await update(ref(database, `rooms/${roomId}`), updates);
+            toast({ title: "AI Sketch Applied!", description: "The AI sketch is now on the canvas." });
+        } else {
+            throw new Error("AI sketch data URI was empty.");
+        }
+    } catch (error) {
+        console.error("Error generating AI sketch:", error);
+        toast({ title: "AI Sketch Error", description: "Could not generate AI sketch. Please try drawing manually.", variant: "destructive" });
+    } finally {
+        setIsGeneratingAISketch(false);
+    }
+  }, [room, playerId, roomId, toast]);
+
 
   useEffect(() => {
     const pId = localStorage.getItem('patternPartyPlayerId');
@@ -1245,7 +1323,11 @@ export default function GameRoomPage() {
     }
     setPlayerId(pId);
     setPlayerName(pName);
-  }, [roomId, toast]); 
+  }, [roomId, toast]);
+
+  useEffect(() => { // All useMemo hooks moved here, BEFORE early returns
+    // Ensure these are defined before any early returns
+  }, []); // Empty dependency to run once, or add specific non-room deps if needed
 
   useEffect(() => {
     if (!roomId || !playerId) return;
@@ -1269,6 +1351,9 @@ export default function GameRoomPage() {
         }
         if (roomData.revealedPattern === undefined) {
              roomData.revealedPattern = [];
+        }
+        if (roomData.aiSketchDataUri === undefined) {
+            roomData.aiSketchDataUri = null;
         }
 
         setRoom(roomData);
@@ -1317,11 +1402,11 @@ export default function GameRoomPage() {
     return () => {
       off(roomRefVal, 'value', onRoomValueChange);
       off(playerConnectionsRef, 'value', onConnectedChange);
-       if(playerStatusRef && playerId){ 
+       if(playerStatusRef && playerId){
          onDisconnect(playerStatusRef).cancel().catch(err => console.error("Error cancelling onDisconnect", err));
        }
     };
-  }, [roomId, playerId, toast, isLoading, addSystemMessage, playerName]); 
+  }, [roomId, playerId, toast, isLoading, addSystemMessage, playerName]);
 
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt) {
@@ -1475,83 +1560,7 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.hostId, playerId, room?.wordSelectionEndsAt, room?.currentPattern, room?.currentDrawerId, room?.players, selectWordForNewRound, toast, roomId, addSystemMessage]);
 
 
-  useEffect(() => {
-    hintTimerRef.current.forEach(clearTimeout);
-    hintTimerRef.current = [];
-
-    if (room?.gameState === 'drawing' && room.currentDrawerId === playerId && room.currentPattern && room.config) {
-        const currentPatternStr = room.currentPattern;
-        const patternChars = currentPatternStr.split('');
-        const currentPatternNonSpaceLength = currentPatternStr.replace(/\s/g, '').length;
-        
-        // Hint calculation: finalHintCount is the lesser of host's config and (word length - 1), but at least 0.
-        const finalHintCount = Math.min(room.config.maxHintLetters, Math.max(0, currentPatternNonSpaceLength - 1));
-        const initialUnderscorePatternForTransaction = patternChars.map(c => (c === ' ' ? ' ' : '_'));
-
-        if (finalHintCount > 0 && currentPatternNonSpaceLength > 1) {
-            const indicesToRevealThisRound: number[] = [];
-            const availableIndices = patternChars
-                .map((char, index) => (char !== ' ' && (room.revealedPattern?.[index] === '_' || !room.revealedPattern?.[index]) ? index : -1))
-                .filter(index => index !== -1);
-
-
-            availableIndices.sort(() => 0.5 - Math.random()); 
-            for(let i=0; i< Math.min(finalHintCount, availableIndices.length); i++){
-                indicesToRevealThisRound.push(availableIndices[i]);
-            }
-            
-            const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
-            const startRevealTimeMs = roundDurationMs / 2; 
-            const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs; 
-            const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0;
-
-
-            indicesToRevealThisRound.forEach((targetCharIndex, hintIteration) => {
-                const revealTimeForThisHint = startRevealTimeMs + (hintIteration * delayBetweenHintsMs);
-                const timeoutId = setTimeout(async () => {
-                    const latestRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
-                    if (!latestRoomSnapshot.exists()) return;
-                    const latestRoomData = latestRoomSnapshot.val() as Room;
-
-                    // Guard: Only proceed if the game is still in the same drawing state with the same pattern
-                    if (latestRoomData.gameState === 'drawing' &&
-                        latestRoomData.currentDrawerId === playerId && 
-                        latestRoomData.currentPattern === currentPatternStr) { 
-
-                        const revealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
-                        try {
-                            await runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
-                                let basePattern: string[];
-                                // Ensure we are working with the correct length pattern from Firebase or init a new one.
-                                if (currentFirebaseRevealedPattern &&
-                                    Array.isArray(currentFirebaseRevealedPattern) &&
-                                    currentFirebaseRevealedPattern.length === patternChars.length) {
-                                    basePattern = [...currentFirebaseRevealedPattern];
-                                } else {
-                                    // Fallback to a fresh underscore pattern if Firebase state is unexpected
-                                    basePattern = [...initialUnderscorePatternForTransaction];
-                                }
-                                
-                                if (basePattern[targetCharIndex] === '_') { // Only reveal if not already revealed
-                                    basePattern[targetCharIndex] = patternChars[targetCharIndex];
-                                }
-                                return basePattern;
-                            });
-                        } catch (transactionError) {
-                            console.error("Error revealing hint via transaction:", transactionError);
-                        }
-                    }
-                }, revealTimeForThisHint);
-                hintTimerRef.current.push(timeoutId);
-            });
-        }
-    }
-    return () => {
-      hintTimerRef.current.forEach(clearTimeout);
-      hintTimerRef.current = [];
-    };
-  // Ensure revealedPattern is in dependency array to re-evaluate if host manually reveals a hint.
-  }, [room?.gameState, room?.currentDrawerId, playerId, room?.currentPattern, room?.config, roomId, room?.revealedPattern]); 
+  // Manual Hint Reveal (Drawer-controlled, replacing automatic timed hints) logic is now handled by handleDrawerLetterClick and handleConfirmLetterRevealByDrawer
 
 
   if (isLoading) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl text-foreground">Loading Room...</span></div>;
@@ -1585,9 +1594,8 @@ export default function GameRoomPage() {
         setIsSettingsDialogOpen={setIsSettingsDialogOpenLocal}
       />
 
-      <div className="flex-grow flex flex-col gap-1 p-1 min-h-0"> {/* Outer flex-col for content rows */}
-        {/* Drawing Area - Primary flexible space */}
-        <div className="flex-grow w-full min-h-0"> {/* Drawing area grows */}
+      <div className="flex-grow flex flex-col gap-1 p-1 min-h-0">
+        <div className="flex-grow w-full min-h-0">
           <DrawingCanvas
             drawingData={memoizedDrawingData}
             onDraw={handleDraw}
@@ -1601,12 +1609,13 @@ export default function GameRoomPage() {
             onStartGame={manageGameStart}
             startButtonInfo={startButtonInfo}
             canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter((p:any)=>p.isOnline).length >= 1}
+            aiSketchDataUri={room.aiSketchDataUri}
+            onDrawWithAI={handleDrawWithAI}
+            isGeneratingAISketch={isGeneratingAISketch}
           />
         </div>
 
-        {/* Player List & Chat Area Row - Fixed shorter height */}
         <div className="h-48 flex flex-row gap-1 w-full flex-shrink-0">
-          {/* Player List Container */}
           <div className="w-1/2 h-full">
             <PlayerList
               players={playersArray}
@@ -1619,7 +1628,6 @@ export default function GameRoomPage() {
             />
           </div>
 
-          {/* Chat Area Container */}
           <div className="w-1/2 h-full">
             <ChatArea
               guesses={memoizedGuesses}
@@ -1632,7 +1640,6 @@ export default function GameRoomPage() {
         </div>
       </div>
 
-      {/* Guess Input Bar (Sticky at the bottom) */}
       <div className="p-1 border-t bg-background w-full flex-shrink-0 sticky bottom-0 z-20">
         <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
       </div>
@@ -1678,5 +1685,3 @@ export default function GameRoomPage() {
     </>
   );
 }
-
-    

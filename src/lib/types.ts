@@ -13,7 +13,6 @@ export interface Guess {
   text: string;
   isCorrect: boolean;
   timestamp: number;
-  // isFirstCorrect?: boolean; // Removed
 }
 
 export interface DrawingPoint {
@@ -28,7 +27,6 @@ export interface RoomConfig {
   roundTimeoutSeconds: number;
   totalRounds: number;
   maxWordLength: number;
-  // maxHintLetters removed as hints are now manual by drawer
 }
 
 export interface Room {
@@ -39,16 +37,17 @@ export interface Room {
   currentDrawerId?: string | null;
   currentPattern?: string | null;
   selectableWords?: string[];
-  revealedPattern?: string[]; // Letters revealed by the drawer
+  revealedPattern?: string[];
   guesses: Guess[];
   drawingData: DrawingPoint[];
   gameState: 'waiting' | 'word_selection' | 'drawing' | 'round_end' | 'game_over';
   currentRoundNumber: number;
   roundEndsAt?: number | null;
-  wordSelectionEndsAt?: number | null; // Timer for drawer to pick a word
-  correctGuessersThisRound?: string[]; // List of player IDs who guessed correctly in order
-  usedWords?: string[]; // Words already used in this game session
+  wordSelectionEndsAt?: number | null;
+  correctGuessersThisRound?: string[];
+  usedWords?: string[];
   createdAt: number;
+  aiSketchDataUri?: string | null; // New field for AI sketch
 }
 
 export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameState' | 'createdAt' | 'config' | 'currentRoundNumber'> & {
@@ -57,4 +56,5 @@ export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameSta
   selectableWords?: string[];
   usedWords?: string[];
   wordSelectionEndsAt?: null;
+  aiSketchDataUri?: null; // Initialize new field
 };
