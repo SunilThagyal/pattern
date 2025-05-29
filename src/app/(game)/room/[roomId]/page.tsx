@@ -409,7 +409,7 @@ const ChatArea = ({
     <CardHeader className="p-3 sm:p-4 border-b">
       <CardTitle className="flex items-center gap-2 text-base sm:text-lg"><MessageSquare /> Guesses & Chat</CardTitle>
     </CardHeader>
-    <CardContent className="flex-grow min-h-0 pt-3 sm:pt-4 pb-0 pr-0 md:max-h-96">
+    <CardContent className="flex-grow min-h-0 max-h-96 pt-3 sm:pt-4 pb-0 pr-0">
       <ScrollArea className="h-full pr-3">
         <ul className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
           {guesses.map((g, i) => (
@@ -1143,15 +1143,15 @@ export default function GameRoomPage() {
       const patternChars = currentPatternStr.split('');
       const currentPatternNonSpaceLength = currentPatternStr.replace(/\s/g, '').length;
       
-      const hostConfiguredMaxHints = room.config?.maxHintLetters || 0; 
-      const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength -1));
+      const hostConfiguredMaxHints = room.config.totalRounds; // Using totalRounds as a placeholder for removed maxHintLetters
+      const finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
 
 
       if (finalHintCount > 0) {
         const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
         const startRevealTimeMs = roundDurationMs / 2; 
         const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs;
-        const delayBetweenHintsMs = timeWindowForHintsMs / finalHintCount;
+        const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0;
 
         const indicesToRevealThisRound: number[] = [];
         const availableIndices = patternChars
@@ -1237,7 +1237,18 @@ export default function GameRoomPage() {
                             ? room.revealedPattern
                             : patternChars.map(c => c === ' ' ? ' ' : '_');
 
-    if (isHost && playerId === room.hostId) { // Only host can click to reveal
+    if (isHost && playerId === room.currentDrawerId) { // Host logic (drawer and host are the same)
+        wordDisplayElements.push(
+            <span key="host-drawer-full-word" className="text-card-foreground font-semibold">
+                {room.currentPattern}
+            </span>
+        );
+        wordDisplayElements.push(
+            <span key="host-drawer-hint-info" className="ml-2 text-xs text-muted-foreground">
+                (You're drawing! Others see hints.)
+            </span>
+        );
+    } else if (isHost && playerId !== room.currentDrawerId) { // Host but not drawing (can reveal for current drawer)
         patternChars.forEach((char, index) => {
         if (char === ' ') {
             wordDisplayElements.push(<span key={`host-space-${index}`} className="mx-0.5"> </span>);
@@ -1378,7 +1389,7 @@ export default function GameRoomPage() {
         <div className="p-3 text-center bg-accent/10 border-accent shadow rounded-md hidden md:block animate-in fade-in duration-300">
           <div className="text-sm text-card-foreground flex items-center justify-center">
             <span>
-                {isHost && playerId === room.hostId ? "Click letters below to reveal hints. " : ""}
+                {isHost && playerId !== room.currentDrawerId ? "Click letters below to reveal hints. " : ""}
                 {isCurrentPlayerDrawing 
                     ? "Your word to draw is: " 
                     : (room.correctGuessersThisRound || []).includes(playerId) 
@@ -1506,7 +1517,7 @@ export default function GameRoomPage() {
         {/* Mobile Layout Wrapper */}
         <div className="md:hidden flex flex-col w-full h-full flex-grow min-h-0">
             {/* Drawing Canvas Container (Mobile: Takes a large portion of height) */}
-            <div className="h-[55vh] p-1"> 
+            <div className="h-[55vh] p-1"> {/* Adjusted height */}
                 <DrawingCanvas
                 drawingData={room.drawingData || []}
                 onDraw={handleDraw}
@@ -1539,10 +1550,7 @@ export default function GameRoomPage() {
                     />
                 </div>
             </div>
-            {/* Guess Input Container (Mobile: Sticky at the bottom) */}
-            <div className="p-2 border-t bg-background flex-shrink-0 sticky bottom-0 z-10">
-                 <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
-            </div>
+            {/* Guess Input Container (Mobile: Sticky at the bottom) - REMOVED AS PER PREVIOUS REQUEST */}
         </div>
 
         {/* Desktop Layout Wrapper */}
@@ -1594,4 +1602,3 @@ export default function GameRoomPage() {
   );
 }
     
-
