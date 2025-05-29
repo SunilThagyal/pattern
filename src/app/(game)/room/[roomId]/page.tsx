@@ -336,7 +336,7 @@ const PlayerList = ({
         </div>
         <div className={cn(
             "flex-grow overflow-y-auto scrollbar-thin min-h-0 transition-all duration-300 ease-in-out",
-            isMinimized ? "max-h-0 opacity-0" : "opacity-100" // Ensure this grows to max height if not minimized
+            isMinimized ? "max-h-0 opacity-0" : "opacity-100 flex-1" 
         )}>
             {sortedPlayers.map((player, index) => (
             <div
@@ -407,14 +407,10 @@ const ChatArea = ({
     guesses,
     room,
     playerId,
-    onGuessSubmit,
-    disabled,
 }: {
     guesses: Guess[],
     room: Room | null,
     playerId: string,
-    onGuessSubmit: (guess: string) => void,
-    disabled: boolean,
 }) => {
     const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -473,9 +469,6 @@ const ChatArea = ({
                 {room?.gameState === 'drawing' ? "No guesses yet. Be the first!" : "Chat messages will appear here."}
             </p>}
         </div>
-        <div className="p-2 border-t border-gray-300 bg-gray-100">
-            <GuessInput onGuessSubmit={onGuessSubmit} disabled={disabled} />
-        </div>
     </div>
     );
 };
@@ -532,7 +525,7 @@ export default function GameRoomPage() {
 
   const [isRevealConfirmDialogOpen, setIsRevealConfirmDialogOpen] = useState(false);
   const [letterToRevealInfo, setLetterToRevealInfo] = useState<{ char: string; index: number } | null>(null);
-  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(true);
+  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(false); // Player list not minimized by default
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
 
 
@@ -704,7 +697,7 @@ export default function GameRoomPage() {
         wordSelectionEndsAt: Date.now() + 15 * 1000,
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
-        guesses: currentRoomData.guesses || [], // Ensure guesses is an array
+        guesses: currentRoomData.guesses || [],
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection,
         revealedPattern: [],
@@ -742,13 +735,10 @@ export default function GameRoomPage() {
         guesses: currentRoomData.guesses || [],
         correctGuessersThisRound: [],
         usedWords: newUsedWords,
-        // revealedPattern is set separately below to ensure atomicity with drawingData clear
     };
     try {
-        // Set revealedPattern and clear drawingData first
         await set(ref(database, `rooms/${roomId}/revealedPattern`), initialRevealedPattern);
         await set(ref(database, `rooms/${roomId}/drawingData`), [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }]);
-        // Then apply other updates
         await update(ref(database, `rooms/${roomId}`), updates);
 
         toast({title: "Drawing Started!", description: `The word has been chosen. Time to draw!`});
@@ -1001,7 +991,13 @@ export default function GameRoomPage() {
             roomData.config = { roundTimeoutSeconds: 90, totalRounds: 5, maxWordLength: 20 };
         }
         if (roomData.revealedPattern === undefined) {
-            roomData.revealedPattern = [];
+             // If revealedPattern is missing, and we have a currentPattern (game in progress), initialize it based on the pattern.
+             // Otherwise, an empty array is fine (e.g., game not started).
+            if (roomData.gameState === 'drawing' && roomData.currentPattern) {
+                roomData.revealedPattern = roomData.currentPattern.split('').map(char => char === ' ' ? ' ' : '_');
+            } else {
+                roomData.revealedPattern = [];
+            }
         }
 
         setRoom(roomData);
@@ -1212,7 +1208,69 @@ export default function GameRoomPage() {
     hintTimerRef.current = [];
 
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.currentPattern && room.config && room.roundEndsAt) {
-        // Manual hint reveal logic is in handleHostLetterClick
+        const currentPatternStr = room.currentPattern;
+        const patternChars = currentPatternStr.split('');
+        const currentPatternNonSpaceLength = patternChars.filter(char => char !== ' ').length;
+        
+        // finalHintCount: Reveal letters based on host config, but not more than (word length - 1)
+        const hostConfiguredMaxHints = room.config.maxWordLength > 0 ? room.config.maxWordLength : 0; // Fallback if not set
+        let finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
+        
+        if (finalHintCount > 0 && currentPatternNonSpaceLength > 1) {
+            const indicesToRevealThisRound: number[] = [];
+            const availableIndices = patternChars
+                .map((char, index) => (char !== ' ' ? index : -1))
+                .filter(index => index !== -1);
+
+            // Shuffle available indices and pick `finalHintCount`
+            for (let i = availableIndices.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [availableIndices[i], availableIndices[j]] = [availableIndices[j], availableIndices[i]];
+            }
+            indicesToRevealThisRound.push(...availableIndices.slice(0, finalHintCount));
+
+            const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
+            const startRevealTimeMs = roundDurationMs / 2; 
+            const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs;
+            const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0;
+            
+            const initialUnderscorePatternForTransaction = patternChars.map(char => char === ' ' ? ' ' : '_');
+
+            indicesToRevealThisRound.forEach((targetCharIndex, hintIteration) => {
+                const currentHintRevealTimeMs = startRevealTimeMs + (hintIteration * delayBetweenHintsMs);
+                const timeoutId = setTimeout(async () => {
+                    const latestRoomSnap = await get(ref(database, `rooms/${roomId}`));
+                    if (!latestRoomSnap.exists()) return;
+                    const latestRoomData = latestRoomSnap.val() as Room;
+
+                    // Only proceed if still in drawing phase and the word hasn't changed
+                    if (latestRoomData.gameState === 'drawing' && latestRoomData.currentPattern === currentPatternStr) {
+                        const revealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
+                        runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
+                            if (currentFirebaseRevealedPattern === null) { // Firebase can return null if path doesn't exist
+                                currentFirebaseRevealedPattern = [...initialUnderscorePatternForTransaction];
+                            }
+                            
+                            let basePattern;
+                            if (Array.isArray(currentFirebaseRevealedPattern) && currentFirebaseRevealedPattern.length === patternChars.length) {
+                                basePattern = [...currentFirebaseRevealedPattern];
+                            } else {
+                                // Fallback to fresh underscore pattern if Firebase data is malformed or not set
+                                basePattern = [...initialUnderscorePatternForTransaction];
+                            }
+
+                            if (basePattern[targetCharIndex] === '_') {
+                                basePattern[targetCharIndex] = patternChars[targetCharIndex];
+                            }
+                            return basePattern;
+                        }).catch(transactionError => {
+                            console.error("Hint reveal transaction failed:", transactionError);
+                        });
+                    }
+                }, currentHintRevealTimeMs);
+                hintTimerRef.current.push(timeoutId);
+            });
+        }
     }
     return () => {
       hintTimerRef.current.forEach(clearTimeout);
@@ -1307,9 +1365,9 @@ export default function GameRoomPage() {
   return (
     <>
     {/* Main container mimicking skribbl.io with fixed dimensions */}
-    <div className="max-w-md mx-auto border border-black bg-gray-100 flex flex-col select-none" style={{ height: '100vh', maxHeight: '900px', minHeight: '700px' }}>
+    <div className="max-w-md mx-auto border border-black flex flex-col select-none" style={{ height: '100vh', maxHeight: '900px', minHeight: '700px' }}>
         {/* Top bar */}
-        <div className="flex items-center justify-between border-b-2 border-blue-900 px-1 py-0.5">
+        <div className="flex items-center justify-between border-b border-blue-900 px-1 py-0.5" style={{ borderWidth: "2px"}}>
             {/* Left: Timer & Round */}
             <div className="flex flex-col items-center justify-center w-16 relative">
                 <TimerDisplay
@@ -1358,7 +1416,7 @@ export default function GameRoomPage() {
             </div>
 
             {/* Right: Actions - Share and Settings */}
-            <div className="w-16 flex flex-col sm:flex-row justify-end items-center gap-1">
+            <div className="w-16 flex justify-end items-center gap-1">
                 <Button variant="ghost" size="icon" className="w-8 h-8 text-gray-600 hover:bg-gray-200" onClick={handleCopyLink} aria-label="Copy room link"><Share2 size={18} /></Button>
                 <Dialog open={isSettingsDialogOpen} onOpenChange={setIsSettingsDialogOpen}>
                     <DialogTrigger asChild>
@@ -1397,9 +1455,9 @@ export default function GameRoomPage() {
         </div>
 
         {/* Bottom section: Players and chat */}
-        <div className="flex border-t-2 border-black" style={{ height: 'calc(100% - 40vh - 70px - 52px)', minHeight: '200px' }}>
+        <div className="flex-grow flex flex-row gap-1 min-h-0 w-full" style={{ height: 'calc(100% - 40vh - 2px - 42px - 52px)'}}> {/* Approx height accounting for borders and input box */}
             {/* Players list */}
-            <div className="w-1/2 border-r-2 border-black">
+            <div className="w-1/2 h-full">
                 <PlayerList
                     players={playersArray}
                     currentPlayerId={room.currentDrawerId}
@@ -1411,16 +1469,20 @@ export default function GameRoomPage() {
                 />
             </div>
             {/* Chat area */}
-            <div className="w-1/2">
+            <div className="w-1/2 h-full">
                 <ChatArea
                     guesses={room.guesses || []}
                     room={room}
                     playerId={playerId}
-                    onGuessSubmit={handleGuessSubmit}
-                    disabled={!canGuess}
                 />
             </div>
         </div>
+        
+        {/* Guess Input Bar (Sticky at the bottom of the main game container) */}
+        <div className="p-1 border-t border-black bg-background w-full flex-shrink-0 sticky bottom-0 z-20">
+            <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
+        </div>
+
     </div>
 
       {/* Word Selection Dialog */}
