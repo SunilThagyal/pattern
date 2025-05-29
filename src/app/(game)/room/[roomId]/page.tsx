@@ -22,9 +22,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 import { suggestWords, type SuggestWordsInput, type SuggestWordsOutput } from '@/ai/flows/suggest-words-flow';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { APP_NAME } from '@/lib/config';
@@ -53,7 +53,7 @@ const DrawingCanvas = ({
   const contextRef = useRef<CanvasRenderingContext2D | null>(null);
   const [isPainting, setIsPainting] = useState(false);
   const [isToolbarMinimized, setIsToolbarMinimized] = useState(true);
-  const isMobile = useIsMobile(); // Using this for toolbar behavior, not main layout
+  const isMobile = useIsMobile();
 
   const [color, setColor] = useState("#000000");
   const [lineWidth, setLineWidth] = useState(5);
@@ -239,7 +239,7 @@ const DrawingCanvas = ({
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-muted/10 overflow-hidden">
+    <div className="w-full h-full flex flex-col bg-muted/10 overflow-hidden border border-black rounded-sm"> {/* Added border and rounded */}
       <div className="p-1 border-b border-border/30">
         <div className="flex flex-row items-center justify-between">
           <div className="text-xs text-muted-foreground">
@@ -269,7 +269,7 @@ const DrawingCanvas = ({
                         <button
                             key={c}
                             onClick={() => setColor(c)}
-                            className="w-5 h-5 rounded-full border-2 shadow-sm" // Smaller buttons
+                            className="w-5 h-5 rounded-full border-2 shadow-sm"
                             style={{ backgroundColor: c, borderColor: color.toLowerCase() === c.toLowerCase() ? 'hsl(var(--primary))' : 'hsl(var(--border))' }}
                             aria-label={`Select color ${c}`}
                         />
@@ -288,7 +288,7 @@ const DrawingCanvas = ({
           )}
         </div>
       </div>
-      <div className="flex-grow p-0 bg-white relative min-h-0"> {/* Canvas background */}
+      <div className="flex-grow p-0 bg-white relative min-h-0">
         <canvas
           ref={canvasRef}
           className="w-full h-full touch-none" 
@@ -309,50 +309,65 @@ const DrawingCanvas = ({
 
 const PlayerList = ({
     players,
-    currentPlayerId, // current drawer ID
-    playerId, // current user's ID
+    currentPlayerId,
+    playerId,
     hostId,
     correctGuessersThisRound,
+    isMinimized,
+    setIsMinimized,
 }: {
     players: Player[],
     currentPlayerId?: string | null,
     playerId: string,
     hostId?: string,
     correctGuessersThisRound: string[],
+    isMinimized: boolean,
+    setIsMinimized: (isMinimized: boolean) => void,
 }) => {
     const sortedPlayers = [...players].sort((a, b) => (b.score || 0) - (a.score || 0));
 
     return (
-    <div className="flex flex-col w-full h-full overflow-y-auto scrollbar-thin bg-gray-50">
-        {sortedPlayers.map((player, index) => (
-        <div 
-            key={player.id} 
-            className={cn(
-                "flex items-center px-2 py-1 border-b border-gray-300",
-                correctGuessersThisRound.includes(player.id) && player.id !== currentPlayerId ? "bg-green-100" : "bg-white",
-                player.id === playerId ? "border-l-4 border-blue-500" : "" // Highlight for "You"
-            )}
-        >
-            <div className="w-8 font-bold text-sm text-gray-700">#{index + 1}</div>
-            <div className="flex-1 text-center text-xs">
-            <span className={cn("font-bold", player.id === playerId ? "text-blue-600" : "text-gray-800", !player.isOnline ? "line-through text-gray-400" : "")}>
-                {player.name} {player.id === playerId ? "(You)" : ""} {player.id === hostId ? <span className="text-xs">(Host)</span> : ""}
-            </span>
-            <br />
-            <span className="font-normal text-gray-600">{player.score || 0} points</span>
-            </div>
-            <div className="w-10 h-10 flex items-center justify-center">
-                {player.id === currentPlayerId ? (
-                    <Brush className="text-blue-500 animate-pulse h-5 w-5" title="Drawing" />
-                ) : (
-                    <Avatar className="h-8 w-8">
-                        <AvatarImage src={`https://placehold.co/32x32.png?text=${player.name.substring(0,1)}`} data-ai-hint="profile avatar"/>
-                        <AvatarFallback>{player.name.substring(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                )}
-            </div>
+    <div className="w-full h-full flex flex-col border border-black rounded-sm bg-gray-50"> {/* Added border and rounded */}
+        <div className="p-1.5 border-b border-black flex items-center justify-between bg-gray-100">
+            <h3 className="text-xs sm:text-sm font-semibold text-gray-700">Players ({players.length})</h3>
+            <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => setIsMinimized(!isMinimized)}>
+                {isMinimized ? <ChevronDown className="h-4 w-4"/> : <ChevronUp className="h-4 w-4"/>}
+            </Button>
         </div>
-        ))}
+        <div className={cn(
+            "flex-grow overflow-y-auto scrollbar-thin min-h-0 transition-all duration-300 ease-in-out",
+            isMinimized ? "max-h-0 opacity-0" : "opacity-100"
+        )}>
+            {sortedPlayers.map((player, index) => (
+            <div 
+                key={player.id} 
+                className={cn(
+                    "flex items-center px-2 py-1 border-b border-gray-300",
+                    correctGuessersThisRound.includes(player.id) && player.id !== currentPlayerId ? "bg-green-100" : "bg-white",
+                    player.id === playerId ? "border-l-4 border-blue-500" : "" 
+                )}
+            >
+                <div className="w-8 font-bold text-sm text-gray-700">#{index + 1}</div>
+                <div className="flex-1 text-center text-xs">
+                <span className={cn("font-bold", player.id === playerId ? "text-blue-600" : "text-gray-800", !player.isOnline ? "line-through text-gray-400" : "")}>
+                    {player.name} {player.id === playerId ? "(You)" : ""} {player.id === hostId ? <span className="text-xs">(Host)</span> : ""}
+                </span>
+                <br />
+                <span className="font-normal text-gray-600">{player.score || 0} points</span>
+                </div>
+                <div className="w-10 h-10 flex items-center justify-center">
+                    {player.id === currentPlayerId ? (
+                        <Brush className="text-blue-500 animate-pulse h-5 w-5" title="Drawing" />
+                    ) : (
+                        <Avatar className="h-8 w-8">
+                            <AvatarImage src={`https://placehold.co/32x32.png?text=${player.name.substring(0,1)}`} data-ai-hint="profile avatar"/>
+                            <AvatarFallback>{player.name.substring(0, 2).toUpperCase()}</AvatarFallback>
+                        </Avatar>
+                    )}
+                </div>
+            </div>
+            ))}
+        </div>
     </div>
     );
 };
@@ -366,17 +381,21 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
       setGuess('');
     }
   };
+  const letterCount = guess.trim().length;
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 w-full items-center">
+    <form onSubmit={handleSubmit} className="flex gap-2 w-full items-center relative">
       <Input
         type="text"
         value={guess}
         onChange={e => setGuess(e.target.value)}
         placeholder="Type your guess here..."
         disabled={disabled}
-        className="w-full text-center text-gray-600 text-base font-normal outline-none border-gray-300 focus:border-blue-500 h-10 px-3"
+        className="w-full text-center text-gray-600 text-base font-normal outline-none border-gray-300 focus:border-blue-500 h-10 px-3 pr-10" // Added pr-10 for letter count
       />
+      <span className="absolute right-12 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
+        {letterCount}
+      </span>
       <Button type="submit" disabled={disabled} size="icon" className="h-10 w-10 bg-blue-500 hover:bg-blue-600">
         <Send size={18} className="text-white" />
       </Button>
@@ -387,11 +406,15 @@ const GuessInput = ({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string
 const ChatArea = ({
     guesses,
     room,
-    playerId
+    playerId,
+    onGuessSubmit,
+    guessInputDisabled,
 }: {
     guesses: Guess[],
     room: Room | null,
     playerId: string,
+    onGuessSubmit: (guess: string) => void,
+    guessInputDisabled: boolean,
 }) => {
     const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -402,49 +425,57 @@ const ChatArea = ({
     }, [guesses]);
     
     return (
-    <div 
-        ref={scrollAreaRef} 
-        className="flex flex-col w-full h-full overflow-y-auto scrollbar-thin bg-gray-50 text-[12px] leading-tight"
-    >
-        {guesses.map((g, i) => {
-        let messageContent;
-        let messageClasses = "px-2 py-1 border-b border-gray-300";
+    <div className="w-full h-full flex flex-col border border-black rounded-sm bg-gray-50"> {/* Added border and rounded */}
+        <div className="p-1.5 border-b border-black bg-gray-100">
+            <h3 className="text-xs sm:text-sm font-semibold text-gray-700">Guesses & Chat</h3>
+        </div>
+        <div 
+            ref={scrollAreaRef} 
+            className="flex-grow overflow-y-auto scrollbar-thin min-h-0 text-[12px] leading-tight"
+        >
+            {guesses.map((g, i) => {
+            let messageContent;
+            let messageClasses = "px-2 py-1 border-b border-gray-300";
 
-        if (g.text === "[[SYSTEM_DRAWER_CHANGE]]") {
-            messageContent = <span className="font-semibold text-blue-600">{g.playerName} is drawing now!</span>;
-            messageClasses = cn(messageClasses, "bg-blue-100");
-        } else if (g.text === "[[SYSTEM_GAME_RESET]]") {
-            messageContent = <span className="font-semibold text-purple-600">Game has been reset!</span>;
-             messageClasses = cn(messageClasses, "bg-purple-100");
-        } else if (g.text.startsWith("[[SYSTEM_JOINED]]")) {
-            messageContent = <span className="font-semibold text-gray-600">{g.playerName} joined the room!</span>;
-            messageClasses = cn(messageClasses, "bg-gray-100");
-        } else if (g.text.startsWith("[[SYSTEM_LEFT]]")) {
-             messageContent = <span className="font-semibold text-orange-600">{g.playerName} left the room!</span>;
-            messageClasses = cn(messageClasses, "bg-orange-100");
-        } else if (g.isCorrect) {
-            messageContent = <span className="font-semibold text-green-700">{g.playerName} guessed the word!</span>;
-            messageClasses = cn(messageClasses, "bg-green-100 animate-pulse-bg-once");
-        } else if (g.text.startsWith("[[SYSTEM_ROUND_END_WORD]]")) {
-             messageContent = <span className="font-semibold text-indigo-700">The word was '{g.playerName}'</span>; // playerName stores the word here
-            messageClasses = cn(messageClasses, "bg-indigo-100");
-        } else {
-            messageContent = <>
-            <span className={cn("font-bold", g.playerId === playerId ? "text-blue-600" : "text-gray-800")}>
-                {g.playerName}{g.playerId === playerId ? " (You)" : ""}:
-            </span> {g.text}
-            </>;
-        }
-        
-        return (
-            <div key={i} className={messageClasses}>
-            {messageContent}
-            </div>
-        );
-        })}
-        {guesses.length === 0 && <p className="text-gray-500 text-center italic p-4">
-            {room?.gameState === 'drawing' ? "No guesses yet. Be the first!" : "Chat messages will appear here."}
-        </p>}
+            if (g.text === "[[SYSTEM_DRAWER_CHANGE]]") {
+                messageContent = <span className="font-semibold text-blue-600">{g.playerName} is drawing now!</span>;
+                messageClasses = cn(messageClasses, "bg-blue-100");
+            } else if (g.text === "[[SYSTEM_GAME_RESET]]") {
+                messageContent = <span className="font-semibold text-purple-600">Game has been reset!</span>;
+                 messageClasses = cn(messageClasses, "bg-purple-100");
+            } else if (g.text.startsWith("[[SYSTEM_JOINED]]")) {
+                messageContent = <span className="font-semibold text-gray-600">{g.playerName} joined the room!</span>;
+                messageClasses = cn(messageClasses, "bg-gray-100");
+            } else if (g.text.startsWith("[[SYSTEM_LEFT]]")) {
+                 messageContent = <span className="font-semibold text-orange-600">{g.playerName} left the room!</span>;
+                messageClasses = cn(messageClasses, "bg-orange-100");
+            } else if (g.isCorrect) {
+                messageContent = <span className="font-semibold text-green-700">{g.playerName} guessed the word!</span>;
+                messageClasses = cn(messageClasses, "bg-green-100 animate-pulse-bg-once");
+            } else if (g.text.startsWith("[[SYSTEM_ROUND_END_WORD]]")) {
+                 messageContent = <span className="font-semibold text-indigo-700">The word was '{g.playerName}'</span>;
+                messageClasses = cn(messageClasses, "bg-indigo-100");
+            } else {
+                messageContent = <>
+                <span className={cn("font-bold", g.playerId === playerId ? "text-blue-600" : "text-gray-800")}>
+                    {g.playerName}{g.playerId === playerId ? " (You)" : ""}:
+                </span> {g.text}
+                </>;
+            }
+            
+            return (
+                <div key={i} className={messageClasses}>
+                {messageContent}
+                </div>
+            );
+            })}
+            {guesses.length === 0 && <p className="text-gray-500 text-center italic p-4">
+                {room?.gameState === 'drawing' ? "No guesses yet. Be the first!" : "Chat messages will appear here."}
+            </p>}
+        </div>
+        <div className="p-2 border-t border-gray-300 bg-gray-100">
+            <GuessInput onGuessSubmit={onGuessSubmit} disabled={guessInputDisabled} />
+        </div>
     </div>
     );
 };
@@ -454,8 +485,8 @@ const TimerDisplay = ({ targetTime, defaultSeconds, compact }: { targetTime?: nu
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!targetTime || targetTime <= Date.now()) { // Also handle if targetTime is in the past
-      setTimeLeft(Math.max(0, defaultSeconds)); // show default or 0 if targetTime is invalid
+    if (!targetTime || targetTime <= Date.now()) {
+      setTimeLeft(Math.max(0, defaultSeconds));
       return;
     }
 
@@ -465,7 +496,7 @@ const TimerDisplay = ({ targetTime, defaultSeconds, compact }: { targetTime?: nu
       setTimeLeft(remaining);
     };
 
-    calculateTimeLeft(); // Initial calculation
+    calculateTimeLeft();
     const interval = setInterval(calculateTimeLeft, 1000);
     return () => clearInterval(interval);
   }, [targetTime, defaultSeconds]);
@@ -501,6 +532,9 @@ export default function GameRoomPage() {
 
   const [isRevealConfirmDialogOpen, setIsRevealConfirmDialogOpen] = useState(false);
   const [letterToRevealInfo, setLetterToRevealInfo] = useState<{ char: string; index: number } | null>(null);
+  const [isPlayerListMinimized, setIsPlayerListMinimized] = useState(true); 
+  const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
+
 
   const hintTimerRef = useRef<NodeJS.Timeout[]>([]);
 
@@ -670,7 +704,7 @@ export default function GameRoomPage() {
         wordSelectionEndsAt: Date.now() + 15 * 1000, 
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }], 
-        guesses: currentRoomData.guesses, // Preserve existing guesses initially
+        guesses: currentRoomData.guesses,
         correctGuessersThisRound: [], 
         selectableWords: wordsForSelection,
         revealedPattern: [], 
@@ -822,20 +856,12 @@ export default function GameRoomPage() {
     const onlineNonDrawingPlayers = Object.values(updatedRoomDataForEndRound.players || {}).filter(p => p.isOnline && p.id !== updatedRoomDataForEndRound.currentDrawerId);
     const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (updatedRoomDataForEndRound.correctGuessersThisRound || []).includes(p.id));
     
-    if (isCorrect && updatedRoomDataForEndRound.hostId === playerId && updatedRoomDataForEndRound.gameState === 'drawing') { // Check if host is the one who made the correct guess
+    if (isCorrect && updatedRoomDataForEndRound.hostId === playerId && updatedRoomDataForEndRound.gameState === 'drawing') {
         if (allGuessed) {
            endCurrentRound("All players guessed correctly!");
         }
-    } else if (updatedRoomDataForEndRound.hostId === playerId && allGuessed && updatedRoomDataForEndRound.gameState === 'drawing') { // Or if host is just the host and everyone else guessed
+    } else if (updatedRoomDataForEndRound.hostId === playerId && allGuessed && updatedRoomDataForEndRound.gameState === 'drawing') {
         endCurrentRound("All players guessed correctly!");
-    } else if (!updatedRoomDataForEndRound.hostId && allGuessed && updatedRoomDataForEndRound.gameState === 'drawing') { // Case for non-host guess triggering all guessed.
-         // This part might need a transaction or more robust host-driven end if player is not host
-         // For simplicity, if all guessed, let any player potentially trigger this.
-         // Ideally, only host calls endCurrentRound directly. This needs review.
-         // For now, we assume if all guessed, the round should end. The host's useEffect for timer will also catch it.
-         // To prevent non-hosts from directly ending, we'd make endCurrentRound a host-only action
-         // and clients would just signal the "all guessed" state to the host.
-         // For this iteration, this direct call by host logic is sufficient.
     }
   }, [playerId, playerName, roomId, toast, endCurrentRound]); 
 
@@ -900,6 +926,7 @@ export default function GameRoomPage() {
       try {
         addSystemMessage(`[[SYSTEM_LEFT]]`, playerName || "A player");
         await update(playerRef, { isOnline: false });
+        setIsSettingsDialogOpen(false); // Close dialog on leave
         toast({ title: "Left Room", description: "You have left the room." });
         router.push('/');
       } catch (err) {
@@ -1001,7 +1028,6 @@ export default function GameRoomPage() {
                  set(playerStatusRef, true);
                  onDisconnect(playerStatusRef).set(false).catch(err => console.error("onDisconnect error for player status", err));
                  
-                 // Add join message if player was previously offline or not present
                  const currentPlayerData = playerSnap.val();
                  if (!currentPlayerData.isOnline) {
                      addSystemMessage(`[[SYSTEM_JOINED]]`, playerName || "A player");
@@ -1184,79 +1210,7 @@ export default function GameRoomPage() {
     hintTimerRef.current = [];
 
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.currentPattern && room.config) {
-      const currentPatternStr = room.currentPattern;
-      const patternChars = currentPatternStr.split('');
-      const currentPatternNonSpaceLength = currentPatternStr.replace(/\s/g, '').length;
-      
-      const finalHintCount = Math.min(
-          room.config.maxHintLetters, // Host configured hint count
-          Math.max(0, currentPatternNonSpaceLength - 1) // Ensure at least one letter is hidden
-      );
-
-
-      if (finalHintCount > 0 && room.roundEndsAt) {
-        const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
-        const startRevealTimeMs = roundDurationMs / 2; 
-        const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs;
-        const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0;
-
-        const indicesToRevealThisRound: number[] = [];
-        const availableIndices = patternChars
-          .map((char, index) => (char !== ' ' ? index : -1))
-          .filter(index => index !== -1);
-        
-        const initialUnderscorePatternForTransaction = patternChars.map(char => char === ' ' ? ' ' : '_');
-
-        while (indicesToRevealThisRound.length < finalHintCount && availableIndices.length > 0) {
-          const randomIndex = Math.floor(Math.random() * availableIndices.length);
-          indicesToRevealThisRound.push(availableIndices.splice(randomIndex, 1)[0]);
-        }
-
-
-        indicesToRevealThisRound.forEach((targetCharIndex, hintIteration) => {
-          const currentHintRevealTimeMs = startRevealTimeMs + (hintIteration * delayBetweenHintsMs);
-          
-          const timeoutId = setTimeout(async () => {
-            try {
-                const latestRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
-                if (!latestRoomSnapshot.exists()) return;
-                const latestRoomData = latestRoomSnapshot.val() as Room;
-
-                if (latestRoomData.gameState !== 'drawing' || latestRoomData.currentPattern !== currentPatternStr) {
-                    return; 
-                }
-
-                const revealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
-                await runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
-                    if (currentFirebaseRevealedPattern === null && hintIteration > 0) {
-                         // This might happen if the path was deleted or is null.
-                         // We should not proceed if we expect a pattern but find null, unless it's the first hint.
-                         // For safety, if it's not the very first hint trying to initialize an empty array,
-                         // and we get null, we might be in an inconsistent state. Let's avoid writing.
-                        return; 
-                    }
-
-                    let basePattern;
-                    if (currentFirebaseRevealedPattern && 
-                        Array.isArray(currentFirebaseRevealedPattern) && 
-                        currentFirebaseRevealedPattern.length === patternChars.length) {
-                        basePattern = [...currentFirebaseRevealedPattern];
-                    } else {
-                        basePattern = [...initialUnderscorePatternForTransaction];
-                    }
-
-                    if (basePattern[targetCharIndex] === '_') { 
-                        basePattern[targetCharIndex] = patternChars[targetCharIndex];
-                    }
-                    return basePattern;
-                });
-            } catch (transactionError) {
-                console.error("Error revealing hint via transaction:", transactionError);
-            }
-          }, currentHintRevealTimeMs);
-          hintTimerRef.current.push(timeoutId);
-        });
-      }
+        // Manual hint reveal logic is now in handleHostLetterClick
     }
     return () => {
       hintTimerRef.current.forEach(clearTimeout);
@@ -1289,19 +1243,12 @@ export default function GameRoomPage() {
                             ? room.revealedPattern
                             : patternChars.map(c => c === ' ' ? ' ' : '_');
 
-    if (isHost && isCurrentPlayerDrawing) { 
+    if (isHost && room.gameState === 'drawing') { 
         patternChars.forEach((char, index) => {
-            wordToDisplayElements.push(
-                <span key={`host-drawer-char-${index}`} className="font-bold text-gray-800">
-                    {char === ' ' ? '\u00A0\u00A0' : char}
-                </span>
-            );
-        });
-    } else if (isHost && playerId !== room.currentDrawerId) { 
-        patternChars.forEach((char, index) => {
+            const isRevealed = revealedChars[index] !== '_' && revealedChars[index] !== ' ';
             if (char === ' ') {
                 wordToDisplayElements.push(<span key={`host-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
-            } else if (revealedChars[index] !== '_' && revealedChars[index] !== ' ') { 
+            } else if (isRevealed) {
                 wordToDisplayElements.push(
                     <span key={`host-revealed-${index}`} className="font-bold text-gray-800 cursor-default">
                         {char}
@@ -1330,7 +1277,7 @@ export default function GameRoomPage() {
                 </span>
             );
         });
-    } else { // Normal guesser
+    } else { 
         revealedChars.forEach((char, index) => {
             wordToDisplayElements.push(
                 <span key={`guesser-char-${index}`} className={cn("font-bold", char === '_' || char === ' ' ? 'text-gray-400' : 'text-gray-800')}>
@@ -1347,7 +1294,7 @@ export default function GameRoomPage() {
             </span>
         );
     });
-  } else { // Waiting, word selection etc.
+  } else { 
      wordToDisplayElements.push(
         <span key="choosing-word" className="text-gray-500">
            {room.gameState === 'word_selection' ? "Choosing word..." : "Waiting..."}
@@ -1357,20 +1304,34 @@ export default function GameRoomPage() {
 
   return (
     <>
+    {/* Main container with Skribbl.io-like fixed dimensions */}
     <div className="max-w-md mx-auto border border-black bg-gray-100 flex flex-col select-none" style={{ height: '100vh', maxHeight: '900px', minHeight: '700px' }}>
-        {/* Top bar */}
+        {/* Top bar - Skribbl.io style */}
         <div className="flex items-center justify-between border-b-2 border-blue-900 px-1 py-0.5">
             {/* Left: Timer & Round */}
             <div className="flex flex-col items-center justify-center w-16 relative">
                 <TimerDisplay 
                     targetTime={room.gameState === 'drawing' ? room.roundEndsAt : (room.gameState === 'word_selection' ? room.wordSelectionEndsAt : null)} 
                     defaultSeconds={room.gameState === 'drawing' ? room.config.roundTimeoutSeconds : (room.gameState === 'word_selection' ? 15 : 0)} 
+                    compact={true}
                 />
                 { (room.gameState === 'drawing' || room.gameState === 'word_selection' || room.gameState === 'round_end') &&
                     <div className="text-[9px] font-bold leading-none mt-0.5 text-gray-700">
                     Round <span className="font-normal">{room.currentRoundNumber || 0}/{room.config.totalRounds || 'N/A'}</span>
                     </div>
                 }
+                {isHost && startButtonInfo && (room.gameState === 'waiting' || room.gameState === 'game_over') && (
+                    <Button
+                        onClick={manageGameStart}
+                        size="icon" 
+                        variant="outline"
+                        className="mt-1 w-8 h-8 text-blue-600 hover:bg-blue-100"
+                        aria-label={startButtonInfo.text}
+                        disabled={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter(p=>p.isOnline).length < 1}
+                    >
+                        {startButtonInfo.icon}
+                    </Button>
+                 )}
             </div>
 
             {/* Center: Guess This and word */}
@@ -1380,7 +1341,7 @@ export default function GameRoomPage() {
                 </div>
                 <div 
                     key={room.revealedPattern?.join('')} 
-                    className="text-[20px] font-mono font-normal tracking-widest select-text flex items-center gap-0.5" style={{ letterSpacing: '0.2em' }}
+                    className="text-[20px] font-mono font-normal tracking-widest select-text flex items-center gap-0.5 animate-in fade-in duration-300" style={{ letterSpacing: '0.2em' }}
                 >
                     {wordToDisplayElements}
                     {(room.gameState === 'drawing' && room.currentPattern && !isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId)) && (
@@ -1389,32 +1350,38 @@ export default function GameRoomPage() {
                         </sup>
                     )}
                 </div>
-                 {isHost && playerId !== room.currentDrawerId && room.gameState === 'drawing' && (
+                 {isHost && room.gameState === 'drawing' && (
                      <div className="text-[9px] text-blue-600 mt-0.5">(Click letters above to reveal hints)</div>
                  )}
             </div>
 
-            {/* Right: Actions */}
-            <div className="w-16 flex justify-end items-center gap-1">
-                 {isHost && startButtonInfo && (room.gameState === 'waiting' || room.gameState === 'game_over') && (
-                    <Button
-                        onClick={manageGameStart}
-                        size="icon" 
-                        variant="ghost"
-                        className="w-8 h-8 text-blue-600 hover:bg-blue-100"
-                        aria-label={startButtonInfo.text}
-                        disabled={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter(p=>p.isOnline).length < 1}
-                    >
-                        {startButtonInfo.icon}
-                    </Button>
-                 )}
-                {/* Settings functionality can be added here later */}
-                <Button variant="ghost" size="icon" className="w-8 h-8 text-gray-600 hover:bg-gray-200" onClick={handleLeaveRoom} aria-label="Leave room"><LogOut size={18} /></Button>
+            {/* Right: Actions - Share and Settings */}
+            <div className="w-16 flex flex-col sm:flex-row justify-end items-center gap-1">
+                <Button variant="ghost" size="icon" className="w-8 h-8 text-gray-600 hover:bg-gray-200" onClick={handleCopyLink} aria-label="Copy room link"><Share2 size={18} /></Button>
+                <Dialog open={isSettingsDialogOpen} onOpenChange={setIsSettingsDialogOpen}>
+                    <DialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="w-8 h-8 text-gray-600 hover:bg-gray-200" aria-label="Room Settings"><Settings size={18} /></Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                        <DialogHeader>
+                        <DialogTitle>Room Settings</DialogTitle>
+                        <DialogDescription>Manage your room preferences here.</DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                            <Button variant="outline" onClick={handleCopyLink} className="w-full justify-start">
+                                <Share2 className="mr-2 h-4 w-4" /> Share Room Link
+                            </Button>
+                            <Button variant="destructive" onClick={handleLeaveRoom} className="w-full justify-start">
+                                <LogOut className="mr-2 h-4 w-4" /> Leave Room
+                            </Button>
+                        </div>
+                    </DialogContent>
+                </Dialog>
             </div>
         </div>
 
-        {/* Drawing area */}
-        <div className="relative border border-black m-1 rounded bg-white" style={{ height: '40vh', minHeight: '220px' }}>
+        {/* Drawing area - Skribbl.io style */}
+        <div className="relative border border-black m-1 rounded" style={{ height: '40vh', minHeight: '220px' }}> {/* Added border, margin, rounded */}
              <DrawingCanvas
                 drawingData={room.drawingData || []}
                 onDraw={handleDraw}
@@ -1427,8 +1394,8 @@ export default function GameRoomPage() {
             />
         </div>
 
-        {/* Bottom section: Players and chat */}
-        <div className="flex border-t-2 border-black" style={{ height: 'calc(100% - 40vh - 70px - 52px)', minHeight: '200px' }}> {/* Adjusted height calc */}
+        {/* Bottom section: Players and chat - Skribbl.io style */}
+        <div className="flex border-t-2 border-black" style={{ height: 'calc(100% - 40vh - 70px - 52px)', minHeight: '200px' }}> {/* Adjusted height calc, ensure borders */}
             {/* Players list */}
             <div className="w-1/2 border-r-2 border-black">
                 <PlayerList
@@ -1437,21 +1404,20 @@ export default function GameRoomPage() {
                     playerId={playerId}
                     hostId={room.hostId}
                     correctGuessersThisRound={room.correctGuessersThisRound || []}
+                    isMinimized={isPlayerListMinimized}
+                    setIsMinimized={setIsPlayerListMinimized}
                 />
             </div>
             {/* Chat area */}
-            <div className="w-1/2">
+            <div className="w-1/2"> {/* No border-l needed if PlayerList has border-r */}
                 <ChatArea
                     guesses={room.guesses || []}
                     room={room}
                     playerId={playerId}
+                    onGuessSubmit={handleGuessSubmit}
+                    guessInputDisabled={!canGuess}
                 />
             </div>
-        </div>
-        
-        {/* Input box */}
-        <div className="border-t-2 border-black p-2 bg-gray-100">
-            <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
         </div>
     </div>
 
@@ -1481,7 +1447,7 @@ export default function GameRoomPage() {
                 {(!room.selectableWords || room.selectableWords.length === 0) && <p className="text-muted-foreground flex items-center gap-2"><Loader2 className="animate-spin"/>Loading AI suggestions...</p>}
               </div>
               <form onSubmit={handleCustomWordSubmit} className="space-y-3">
-                <Label htmlFor="customWord" className="text-base sm:text-md font-medium">Or enter your custom word:</Label>
+                <label htmlFor="customWord" className="text-base sm:text-md font-medium">Or enter your custom word:</label>
                 <div className="flex gap-2">
                     <Input
                     id="customWord"
