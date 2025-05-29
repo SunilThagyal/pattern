@@ -1,22 +1,24 @@
+
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Paintbrush, Users, Zap } from 'lucide-react';
 import Image from 'next/image';
+import { APP_NAME } from '@/lib/config';
 
 export default function HomePage() {
   return (
     <div className="flex flex-col items-center justify-center text-center w-full max-w-3xl animate-in fade-in duration-500">
       <Image 
         src="/placehold.jpg" 
-        alt="Pattern Party game banner" 
+        alt={`${APP_NAME} game banner`}
         width={300} 
         height={200} 
         className="mb-8 rounded-lg shadow-xl"
         data-ai-hint="abstract art party"
       />
       <h1 className="text-5xl font-extrabold tracking-tight mb-4">
-        Welcome to <span className="text-primary">Pattern</span> <span className="text-accent">Party</span>!
+        Welcome to <span className="text-primary">{APP_NAME.split(' ')[0]}</span> <span className="text-accent">{APP_NAME.split(' ').slice(1).join(' ')}</span>!
       </h1>
       <p className="text-lg text-muted-foreground mb-10 max-w-xl">
         Unleash your inner artist! Draw patterns, challenge your friends, and guess your way to victory in this exciting real-time multiplayer game.
