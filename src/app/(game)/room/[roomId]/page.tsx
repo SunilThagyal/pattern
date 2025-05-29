@@ -874,8 +874,12 @@ export default function GameRoomPage() {
 
   const handleHostLetterClick = (char: string, index: number) => {
     if (!room || !room.currentPattern || !room.revealedPattern) return;
-    if (char === ' ' || (room.revealedPattern[index] && room.revealedPattern[index] !== '_')) {
-      return;
+    const currentRevealedPattern = (room.revealedPattern && room.revealedPattern.length === room.currentPattern.length)
+                                 ? room.revealedPattern
+                                 : room.currentPattern.split('').map(c => c === ' ' ? ' ' : '_');
+
+    if (char === ' ' || (currentRevealedPattern[index] && currentRevealedPattern[index] !== '_')) {
+      return; // Don't try to reveal spaces or already revealed letters
     }
     setLetterToRevealInfo({ char: room.currentPattern[index], index });
     setIsRevealConfirmDialogOpen(true);
@@ -991,8 +995,6 @@ export default function GameRoomPage() {
             roomData.config = { roundTimeoutSeconds: 90, totalRounds: 5, maxWordLength: 20 };
         }
         if (roomData.revealedPattern === undefined) {
-             // If revealedPattern is missing, and we have a currentPattern (game in progress), initialize it based on the pattern.
-             // Otherwise, an empty array is fine (e.g., game not started).
             if (roomData.gameState === 'drawing' && roomData.currentPattern) {
                 roomData.revealedPattern = roomData.currentPattern.split('').map(char => char === ' ' ? ' ' : '_');
             } else {
@@ -1203,82 +1205,6 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.hostId, playerId, room?.wordSelectionEndsAt, room?.currentPattern, room?.currentDrawerId, room?.players, selectWordForNewRound, toast, roomId, addSystemMessage]);
 
 
-  useEffect(() => {
-    hintTimerRef.current.forEach(clearTimeout);
-    hintTimerRef.current = [];
-
-    if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.currentPattern && room.config && room.roundEndsAt) {
-        const currentPatternStr = room.currentPattern;
-        const patternChars = currentPatternStr.split('');
-        const currentPatternNonSpaceLength = patternChars.filter(char => char !== ' ').length;
-        
-        // finalHintCount: Reveal letters based on host config, but not more than (word length - 1)
-        const hostConfiguredMaxHints = room.config.maxWordLength > 0 ? room.config.maxWordLength : 0; // Fallback if not set
-        let finalHintCount = Math.min(hostConfiguredMaxHints, Math.max(0, currentPatternNonSpaceLength - 1));
-        
-        if (finalHintCount > 0 && currentPatternNonSpaceLength > 1) {
-            const indicesToRevealThisRound: number[] = [];
-            const availableIndices = patternChars
-                .map((char, index) => (char !== ' ' ? index : -1))
-                .filter(index => index !== -1);
-
-            // Shuffle available indices and pick `finalHintCount`
-            for (let i = availableIndices.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [availableIndices[i], availableIndices[j]] = [availableIndices[j], availableIndices[i]];
-            }
-            indicesToRevealThisRound.push(...availableIndices.slice(0, finalHintCount));
-
-            const roundDurationMs = room.config.roundTimeoutSeconds * 1000;
-            const startRevealTimeMs = roundDurationMs / 2; 
-            const timeWindowForHintsMs = roundDurationMs - startRevealTimeMs;
-            const delayBetweenHintsMs = finalHintCount > 0 ? timeWindowForHintsMs / finalHintCount : 0;
-            
-            const initialUnderscorePatternForTransaction = patternChars.map(char => char === ' ' ? ' ' : '_');
-
-            indicesToRevealThisRound.forEach((targetCharIndex, hintIteration) => {
-                const currentHintRevealTimeMs = startRevealTimeMs + (hintIteration * delayBetweenHintsMs);
-                const timeoutId = setTimeout(async () => {
-                    const latestRoomSnap = await get(ref(database, `rooms/${roomId}`));
-                    if (!latestRoomSnap.exists()) return;
-                    const latestRoomData = latestRoomSnap.val() as Room;
-
-                    // Only proceed if still in drawing phase and the word hasn't changed
-                    if (latestRoomData.gameState === 'drawing' && latestRoomData.currentPattern === currentPatternStr) {
-                        const revealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
-                        runTransaction(revealedPatternRef, (currentFirebaseRevealedPattern) => {
-                            if (currentFirebaseRevealedPattern === null) { // Firebase can return null if path doesn't exist
-                                currentFirebaseRevealedPattern = [...initialUnderscorePatternForTransaction];
-                            }
-                            
-                            let basePattern;
-                            if (Array.isArray(currentFirebaseRevealedPattern) && currentFirebaseRevealedPattern.length === patternChars.length) {
-                                basePattern = [...currentFirebaseRevealedPattern];
-                            } else {
-                                // Fallback to fresh underscore pattern if Firebase data is malformed or not set
-                                basePattern = [...initialUnderscorePatternForTransaction];
-                            }
-
-                            if (basePattern[targetCharIndex] === '_') {
-                                basePattern[targetCharIndex] = patternChars[targetCharIndex];
-                            }
-                            return basePattern;
-                        }).catch(transactionError => {
-                            console.error("Hint reveal transaction failed:", transactionError);
-                        });
-                    }
-                }, currentHintRevealTimeMs);
-                hintTimerRef.current.push(timeoutId);
-            });
-        }
-    }
-    return () => {
-      hintTimerRef.current.forEach(clearTimeout);
-      hintTimerRef.current = [];
-    };
-  }, [room?.gameState, room?.currentPattern, room?.roundEndsAt, room?.hostId, playerId, roomId, room?.config]);
-
-
   if (isLoading) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-blue-600" /> <span className="ml-4 text-xl text-gray-700">Loading Room...</span></div>;
   if (error) return <div className="text-center text-red-500 p-8 bg-red-50 border border-red-200 rounded-md h-screen flex flex-col justify-center items-center"><AlertCircle className="mx-auto h-12 w-12 mb-4" /> <h2 className="text-2xl font-semibold mb-2">Error Loading Room</h2><p>{error}</p><Button onClick={() => router.push('/')} className="mt-4 bg-blue-500 hover:bg-blue-600 text-white">Go Home</Button></div>;
   if (!room || !playerId || !playerName || !room.config) return <div className="text-center p-8 h-screen flex flex-col justify-center items-center">Room data is not available or incomplete. <Link href="/" className="text-blue-600 hover:underline">Go Home</Link></div>;
@@ -1299,18 +1225,18 @@ export default function GameRoomPage() {
   const wordToDisplayElements = [];
   if (room.gameState === 'drawing' && room.currentPattern) {
     const patternChars = room.currentPattern.split('');
-    const revealedChars = (room.revealedPattern && room.revealedPattern.length === patternChars.length)
+    const currentRevealedPattern = (room.revealedPattern && room.revealedPattern.length === patternChars.length)
                             ? room.revealedPattern
                             : patternChars.map(c => c === ' ' ? ' ' : '_');
 
     if (isHost && room.gameState === 'drawing') {
         patternChars.forEach((char, index) => {
-            const isRevealed = revealedChars[index] !== '_' && revealedChars[index] !== ' ';
+            const isAlreadyRevealedToOthers = currentRevealedPattern[index] !== '_' && currentRevealedPattern[index] !== ' ';
             if (char === ' ') {
                 wordToDisplayElements.push(<span key={`host-space-${index}`} className="mx-0.5 select-none">{'\u00A0\u00A0'}</span>);
-            } else if (isRevealed) {
+            } else if (isAlreadyRevealedToOthers) {
                 wordToDisplayElements.push(
-                    <span key={`host-revealed-${index}`} className="font-bold text-gray-800 cursor-default">
+                    <span key={`host-revealed-${index}`} className="font-bold text-green-600 cursor-default">
                         {char}
                     </span>
                 );
@@ -1319,12 +1245,12 @@ export default function GameRoomPage() {
                 <button
                     key={`host-clickable-${index}`}
                     onClick={() => handleHostLetterClick(char, index)}
-                    className="font-bold text-gray-400 hover:text-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+                    className="font-bold text-gray-700 hover:text-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-gray-700"
                     aria-label={`Reveal letter ${char}`}
                     title={`Click to reveal this letter: ${char}`}
                     disabled={isSubmittingWord || isRevealConfirmDialogOpen}
                 >
-                    {'_'}
+                    {char}
                 </button>
                 );
             }
@@ -1338,7 +1264,7 @@ export default function GameRoomPage() {
             );
         });
     } else {
-        revealedChars.forEach((char, index) => {
+        currentRevealedPattern.forEach((char, index) => {
             wordToDisplayElements.push(
                 <span key={`guesser-char-${index}`} className={cn("font-bold", char === '_' || char === ' ' ? 'text-gray-400' : 'text-gray-800')}>
                     {char === ' ' ? '\u00A0\u00A0' : char}
@@ -1608,5 +1534,3 @@ export default function GameRoomPage() {
     </>
   );
 }
-
-    
