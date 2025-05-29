@@ -409,7 +409,7 @@ const ChatArea = ({
     <CardHeader className="p-3 sm:p-4 border-b">
       <CardTitle className="flex items-center gap-2 text-base sm:text-lg"><MessageSquare /> Guesses & Chat</CardTitle>
     </CardHeader>
-    <CardContent className="flex-grow min-h-0 pt-3 sm:pt-4 pb-0 pr-0">
+    <CardContent className="flex-grow min-h-0 pt-3 sm:pt-4 pb-0 pr-0 md:max-h-96">
       <ScrollArea className="h-full pr-3">
         <ul className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
           {guesses.map((g, i) => (
@@ -984,7 +984,7 @@ export default function GameRoomPage() {
 
 
   useEffect(() => {
-    if (room?.gameState === 'drawing' && room?.hostId === playerId && room.roundEndsAt) {
+    if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt) {
       let roundTimer: NodeJS.Timeout | null = null;
 
       const onlineNonDrawingPlayers = Object.values(room.players || {}).filter(p => p.isOnline && p.id !== room.currentDrawerId);
@@ -1594,3 +1594,4 @@ export default function GameRoomPage() {
   );
 }
     
+
