@@ -1644,37 +1644,41 @@ export default function GameRoomPage() {
         setToastMessages(prevToastsArg => {
             const prevToasts = Array.isArray(prevToastsArg) ? prevToastsArg : [];
             
-            // Check again inside updater to prevent race conditions if multiple guesses arrive quickly
-            if (prevToasts.some(t => t.timestamp === latestGuess.timestamp && t.playerId === latestGuess.playerId && t.text === latestGuess.text)) {
+            if (prevToasts.some(t => t.uniqueId === newToastId)) { // Check by uniqueId in case of rapid re-renders
+                return prevToasts;
+            }
+             if (prevToasts.some(t => t.timestamp === latestGuess.timestamp && t.playerId === latestGuess.playerId && t.text === latestGuess.text)) {
                 return prevToasts;
             }
 
-            const toastsWithNew = [newToastMessage, ...prevToasts];
-            const limitedToasts = toastsWithNew.slice(0, TOAST_MAX_COUNT);
+
+            let updatedToasts = [newToastMessage, ...prevToasts];
+            
+            const toastsToRemove: string[] = [];
+            if (updatedToasts.length > TOAST_MAX_COUNT) {
+                const oldestToasts = updatedToasts.slice(TOAST_MAX_COUNT);
+                oldestToasts.forEach(toast => toastsToRemove.push(toast.uniqueId));
+                updatedToasts = updatedToasts.slice(0, TOAST_MAX_COUNT);
+            }
 
             const currentTimeoutRefs = toastTimeoutsRef.current;
-            toastsWithNew.forEach(toastInOldArray => {
-                if (!limitedToasts.some(toastInNewArray => toastInNewArray.uniqueId === toastInOldArray.uniqueId)) {
-                    if (currentTimeoutRefs[toastInOldArray.uniqueId]) {
-                        clearTimeout(currentTimeoutRefs[toastInOldArray.uniqueId]);
-                        delete currentTimeoutRefs[toastInOldArray.uniqueId];
-                    }
+            toastsToRemove.forEach(idToRemove => {
+                if (currentTimeoutRefs[idToRemove]) {
+                    clearTimeout(currentTimeoutRefs[idToRemove]);
+                    delete currentTimeoutRefs[idToRemove];
                 }
             });
             
-            // Schedule removal for the new toast, only if it's in the final list
-            if (limitedToasts.find(t => t.uniqueId === newToastId)) {
-                const timeoutId = setTimeout(() => {
-                    setToastMessages(prev => prev.filter(t => t.uniqueId !== newToastId));
-                    const currentRefsForRemoval = toastTimeoutsRef.current;
-                    if (currentRefsForRemoval[newToastId]) { // Check before deleting
-                        delete currentRefsForRemoval[newToastId];
-                    }
-                }, 3000);
-                toastTimeoutsRef.current[newToastId] = timeoutId;
-            }
+            const timeoutId = setTimeout(() => {
+                setToastMessages(prev => prev.filter(t => t.uniqueId !== newToastId));
+                const currentRefsForRemoval = toastTimeoutsRef.current;
+                if (currentRefsForRemoval[newToastId]) {
+                    delete currentRefsForRemoval[newToastId];
+                }
+            }, 3000);
+            toastTimeoutsRef.current[newToastId] = timeoutId;
             
-            return limitedToasts;
+            return updatedToasts;
         });
     }
   }, [memoizedGuesses, playerId]); 

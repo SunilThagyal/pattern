@@ -1,2 +1,3 @@
 
-export const APP_NAME = "Pattern Party";
+export const APP_NAME = "Drawly";
+

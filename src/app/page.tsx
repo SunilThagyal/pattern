@@ -18,10 +18,10 @@ export default function HomePage() {
         data-ai-hint="abstract art party"
       />
       <h1 className="text-5xl font-extrabold tracking-tight mb-4">
-        Welcome to <span className="text-primary">{APP_NAME.split(' ')[0]}</span> <span className="text-accent">{APP_NAME.split(' ').slice(1).join(' ')}</span>!
+        Welcome to <span className="text-primary">{APP_NAME}</span>!
       </h1>
       <p className="text-lg text-muted-foreground mb-10 max-w-xl">
-        Unleash your inner artist! Draw patterns, challenge your friends, and guess your way to victory in this exciting real-time multiplayer game.
+        Unleash your inner artist! Draw, challenge your friends, and guess your way to victory in this exciting real-time multiplayer game, now with AI-powered word suggestions and sketch assistance!
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12 w-full max-w-md">
@@ -45,7 +45,7 @@ export default function HomePage() {
               <CardTitle className="flex items-center"><Paintbrush className="mr-2 text-primary" />Draw</CardTitle>
             </CardHeader>
             <CardContent>
-              <CardDescription>One player gets a design pattern to draw on the shared canvas. Get creative!</CardDescription>
+              <CardDescription>One player gets a word to draw (or use AI sketch!). Get creative!</CardDescription>
             </CardContent>
           </Card>
           <Card className="shadow-md hover:shadow-lg transition-shadow">
@@ -53,7 +53,7 @@ export default function HomePage() {
               <CardTitle className="flex items-center"><Zap className="mr-2 text-accent" />Guess</CardTitle>
             </CardHeader>
             <CardContent>
-              <CardDescription>Other players race to guess the pattern. Type your guesses quickly!</CardDescription>
+              <CardDescription>Other players race to guess the drawing. Type your guesses quickly!</CardDescription>
             </CardContent>
           </Card>
           <Card className="shadow-md hover:shadow-lg transition-shadow">
@@ -61,7 +61,7 @@ export default function HomePage() {
               <CardTitle className="flex items-center"><Users className="mr-2 text-primary" />Score</CardTitle>
             </CardHeader>
             <CardContent>
-              <CardDescription>Earn points for correct guesses and for stumping others with your drawings!</CardDescription>
+              <CardDescription>Earn points for correct guesses and for your drawing skills!</CardDescription>
             </CardContent>
           </Card>
         </div>
@@ -69,3 +69,4 @@ export default function HomePage() {
     </div>
   );
 }
+
