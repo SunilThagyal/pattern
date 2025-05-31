@@ -32,7 +32,7 @@ export default function RootLayout({
         <meta name="description" content={`Join the fun in ${APP_NAME}! Draw, guess, and challenge friends in this exciting real-time multiplayer game with AI-powered features.`} />
         <meta name="keywords" content="drawing game, guess game, multiplayer, online game, Pictionary, AI drawing, sketch game, Drawly" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="/favicon.ico" sizes="any" /> {/* Recommended way for favicon */}
+        <link rel="icon" href="/favicon.ico" sizes="any" />
       </head>
       <body className="min-h-screen bg-background font-sans antialiased flex flex-col">
         <Providers>
@@ -50,4 +50,3 @@ export default function RootLayout({
     </html>
   );
 }
-
