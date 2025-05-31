@@ -1,19 +1,39 @@
 
+"use client";
+
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Paintbrush, Users, Zap } from 'lucide-react';
+import { Paintbrush, Users, Zap, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { APP_NAME } from '@/lib/config';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function HomePage() {
+  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+  const [isJoiningRoom, setIsJoiningRoom] = useState(false);
+  const router = useRouter();
+
+  const handleCreateRoomClick = () => {
+    setIsCreatingRoom(true);
+    router.push('/create-room');
+    // No need to set isCreatingRoom to false here as the component will unmount on navigation.
+  };
+
+  const handleJoinRoomClick = () => {
+    setIsJoiningRoom(true);
+    router.push('/join');
+    // No need to set isJoiningRoom to false here.
+  };
+
   return (
     <div className="flex flex-col items-center justify-center text-center w-full max-w-3xl animate-in fade-in duration-500">
-      <Image 
-        src="/placehold.jpg" 
+      <Image
+        src="/placehold.jpg"
         alt={`${APP_NAME} game banner`}
-        width={300} 
-        height={200} 
+        width={300}
+        height={200}
         className="mb-8 rounded-lg shadow-xl"
         data-ai-hint="abstract art party"
       />
@@ -25,16 +45,33 @@ export default function HomePage() {
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12 w-full max-w-md">
-        <Link href="/create-room" passHref>
-          <Button size="lg" className="w-full py-8 text-lg shadow-lg hover:shadow-xl transition-shadow">
-            <Paintbrush className="mr-2 h-6 w-6" /> Create New Room
-          </Button>
-        </Link>
-        <Link href="/join" passHref>
-          <Button variant="secondary" size="lg" className="w-full py-8 text-lg shadow-lg hover:shadow-xl transition-shadow">
-            <Users className="mr-2 h-6 w-6" /> Join Existing Room
-          </Button>
-        </Link>
+        <Button
+          size="lg"
+          className="w-full py-8 text-lg shadow-lg hover:shadow-xl transition-shadow"
+          onClick={handleCreateRoomClick}
+          disabled={isCreatingRoom || isJoiningRoom}
+        >
+          {isCreatingRoom ? (
+            <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+          ) : (
+            <Paintbrush className="mr-2 h-6 w-6" />
+          )}
+          {isCreatingRoom ? 'Creating...' : 'Create New Room'}
+        </Button>
+        <Button
+          variant="secondary"
+          size="lg"
+          className="w-full py-8 text-lg shadow-lg hover:shadow-xl transition-shadow"
+          onClick={handleJoinRoomClick}
+          disabled={isJoiningRoom || isCreatingRoom}
+        >
+          {isJoiningRoom ? (
+            <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+          ) : (
+            <Users className="mr-2 h-6 w-6" />
+          )}
+          {isJoiningRoom ? 'Joining...' : 'Join Existing Room'}
+        </Button>
       </div>
 
       <div className="mt-8 w-full">
@@ -69,4 +106,3 @@ export default function HomePage() {
     </div>
   );
 }
-
