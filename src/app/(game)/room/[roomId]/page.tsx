@@ -1559,62 +1559,59 @@ export default function GameRoomPage() {
     }
   }, [room?.gameState, room?.hostId, playerId, room?.wordSelectionEndsAt, room?.currentPattern, room?.currentDrawerId, room?.players, selectWordForNewRound, toast, roomId, addSystemMessage]);
 
+  const handleManualCloseToast = useCallback((toastUniqueId: string) => {
+    setToastMessages(prevToasts => prevToasts.filter(t => t.uniqueId !== toastUniqueId));
+    if (toastTimeoutsRef.current[toastUniqueId]) {
+        clearTimeout(toastTimeoutsRef.current[toastUniqueId]);
+        delete toastTimeoutsRef.current[toastUniqueId];
+    }
+  }, []);
+
   useEffect(() => {
     if (!memoizedGuesses || memoizedGuesses.length === 0 || !playerId) return;
 
     const latestGuess = memoizedGuesses[memoizedGuesses.length - 1];
+    const potentialToastId = `toast-${latestGuess.timestamp}-${latestGuess.playerId}-${latestGuess.text.substring(0,5)}`;
 
-    const isToastAlreadyPresent = toastMessages.some(
-        (t) => t.timestamp === latestGuess.timestamp && t.playerId === latestGuess.playerId && t.text === latestGuess.text
-    );
 
     if (
         latestGuess.playerId !== playerId &&
         latestGuess.playerId !== 'system' &&
-        !latestGuess.text.startsWith('[[SYSTEM_') &&
-        !isToastAlreadyPresent
+        !latestGuess.text.startsWith('[[SYSTEM_')
     ) {
-        toastIdCounter.current += 1;
-        const newToastId = `toast-${latestGuess.timestamp}-${latestGuess.playerId}-${toastIdCounter.current}-${Math.random().toString(36).substring(7)}`;
-        const newToastMessage = { ...latestGuess, uniqueId: newToastId };
-
-        setToastMessages(prevToastsArg => {
-            const prevToasts = Array.isArray(prevToastsArg) ? prevToastsArg : [];
-
-            if (prevToasts.some(t => t.uniqueId === newToastId)) {
-                return prevToasts;
+        
+        setToastMessages(prevToasts => {
+            if (prevToasts.some(t => t.uniqueId === potentialToastId)) {
+                return prevToasts; 
             }
-             if (prevToasts.some(t => t.timestamp === latestGuess.timestamp && t.playerId === latestGuess.playerId && t.text === latestGuess.text)) {
-                return prevToasts;
-            }
+
+            toastIdCounter.current +=1;
+            const newToastIdWithCounter = `${potentialToastId}-${toastIdCounter.current}`;
+            const newToastMessage = { ...latestGuess, uniqueId: newToastIdWithCounter };
 
             let updatedToasts = [newToastMessage, ...prevToasts];
-            const toastsToRemove: string[] = [];
-
+            
             if (updatedToasts.length > TOAST_MAX_COUNT) {
-                const oldestToasts = updatedToasts.slice(TOAST_MAX_COUNT);
-                oldestToasts.forEach(toast => {
-                    toastsToRemove.push(toast.uniqueId);
-                    if (toastTimeoutsRef.current[toast.uniqueId]) {
-                        clearTimeout(toastTimeoutsRef.current[toast.uniqueId]);
-                        delete toastTimeoutsRef.current[toast.uniqueId];
-                    }
-                });
+                const oldestToast = updatedToasts[TOAST_MAX_COUNT]; // The toast that will be removed
+                if (toastTimeoutsRef.current[oldestToast.uniqueId]) {
+                    clearTimeout(toastTimeoutsRef.current[oldestToast.uniqueId]);
+                    delete toastTimeoutsRef.current[oldestToast.uniqueId];
+                }
                 updatedToasts = updatedToasts.slice(0, TOAST_MAX_COUNT);
             }
-
+            
             const timeoutId = setTimeout(() => {
-                setToastMessages(currentToasts => currentToasts.filter(t => t.uniqueId !== newToastId));
-                if (toastTimeoutsRef.current[newToastId]) {
-                    delete toastTimeoutsRef.current[newToastId];
+                setToastMessages(currentToasts => currentToasts.filter(t => t.uniqueId !== newToastIdWithCounter));
+                if (toastTimeoutsRef.current[newToastIdWithCounter]) {
+                    delete toastTimeoutsRef.current[newToastIdWithCounter];
                 }
             }, 3000);
-            toastTimeoutsRef.current[newToastId] = timeoutId;
+            toastTimeoutsRef.current[newToastIdWithCounter] = timeoutId;
 
             return updatedToasts;
         });
     }
-  }, [memoizedGuesses, playerId, toastMessages]);
+  }, [memoizedGuesses, playerId]);
 
   useEffect(() => {
     return () => {
@@ -1695,6 +1692,15 @@ export default function GameRoomPage() {
                     message.isCorrect ? "bg-green-100 text-green-700 border border-green-300" : "bg-card text-card-foreground border border-border"
                   )}
                 >
+                   {/* <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="absolute top-0 right-0 w-5 h-5 text-muted-foreground hover:text-foreground"
+                        onClick={() => handleManualCloseToast(message.uniqueId)}
+                        aria-label="Close message"
+                    >
+                        <X size={12} />
+                    </Button> */}
                   <span className="font-semibold">{message.playerName}:</span> {message.text}
                 </div>
               ))}
@@ -1851,3 +1857,4 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     }
     return finalWords.slice(0, count);
 };
+
