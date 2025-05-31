@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { ref, onValue, off, update, serverTimestamp, set, child, get, runTransaction } from 'firebase/database';
 import { database } from '@/lib/firebase';
 import type { Room, Player, DrawingPoint, Guess, RoomConfig } from '@/lib/types';
-import { useToast } from '@/hooks/use-toast';
+import { useToast as useShadToast } from '@/hooks/use-toast'; // Renamed to avoid conflict if needed
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -813,7 +813,7 @@ const TOAST_MAX_COUNT = 3;
 
 export default function GameRoomPage() {
   const params = useParams();
-  const { toast } = useToast();
+  const { toast } = useShadToast();
   const roomId = params.roomId as string;
   const isMobile = useIsMobile();
 
@@ -1571,13 +1571,15 @@ export default function GameRoomPage() {
     if (!memoizedGuesses || memoizedGuesses.length === 0 || !playerId) return;
 
     const latestGuess = memoizedGuesses[memoizedGuesses.length - 1];
-    const potentialToastId = `toast-${latestGuess.timestamp}-${latestGuess.playerId}-${latestGuess.text.substring(0,5)}`;
+    if (!latestGuess) return; // Guard against empty latestGuess
+
+    const potentialToastId = `toast-${latestGuess.timestamp}-${latestGuess.playerId}-${(latestGuess.text || "").substring(0,10)}`;
 
 
     if (
         latestGuess.playerId !== playerId &&
         latestGuess.playerId !== 'system' &&
-        !latestGuess.text.startsWith('[[SYSTEM_')
+        !(latestGuess.text || "").startsWith('[[SYSTEM_')
     ) {
         
         setToastMessages(prevToasts => {
@@ -1590,15 +1592,19 @@ export default function GameRoomPage() {
             const newToastMessage = { ...latestGuess, uniqueId: newToastIdWithCounter };
 
             let updatedToasts = [newToastMessage, ...prevToasts];
+            let removedToasts: Array<Guess & { uniqueId: string }> = [];
             
             if (updatedToasts.length > TOAST_MAX_COUNT) {
-                const oldestToast = updatedToasts[TOAST_MAX_COUNT]; // The toast that will be removed
-                if (toastTimeoutsRef.current[oldestToast.uniqueId]) {
-                    clearTimeout(toastTimeoutsRef.current[oldestToast.uniqueId]);
-                    delete toastTimeoutsRef.current[oldestToast.uniqueId];
-                }
+                removedToasts = updatedToasts.slice(TOAST_MAX_COUNT);
                 updatedToasts = updatedToasts.slice(0, TOAST_MAX_COUNT);
             }
+            
+            removedToasts.forEach(rt => {
+                if (toastTimeoutsRef.current[rt.uniqueId]) {
+                    clearTimeout(toastTimeoutsRef.current[rt.uniqueId]);
+                    delete toastTimeoutsRef.current[rt.uniqueId];
+                }
+            });
             
             const timeoutId = setTimeout(() => {
                 setToastMessages(currentToasts => currentToasts.filter(t => t.uniqueId !== newToastIdWithCounter));
@@ -1692,15 +1698,6 @@ export default function GameRoomPage() {
                     message.isCorrect ? "bg-green-100 text-green-700 border border-green-300" : "bg-card text-card-foreground border border-border"
                   )}
                 >
-                   {/* <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="absolute top-0 right-0 w-5 h-5 text-muted-foreground hover:text-foreground"
-                        onClick={() => handleManualCloseToast(message.uniqueId)}
-                        aria-label="Close message"
-                    >
-                        <X size={12} />
-                    </Button> */}
                   <span className="font-semibold">{message.playerName}:</span> {message.text}
                 </div>
               ))}
