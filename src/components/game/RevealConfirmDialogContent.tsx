@@ -10,14 +10,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button"; // Added
+import { Loader2 } from "lucide-react"; // Added
 
 interface RevealConfirmDialogContentProps {
   letterChar?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  isRevealingLetter?: boolean; // Added
 }
 
-export function RevealConfirmDialogContent({ letterChar, onConfirm, onCancel }: RevealConfirmDialogContentProps) {
+export function RevealConfirmDialogContent({ letterChar, onConfirm, onCancel, isRevealingLetter }: RevealConfirmDialogContentProps) {
   return (
     <AlertDialogContent>
       <AlertDialogHeader>
@@ -27,8 +30,11 @@ export function RevealConfirmDialogContent({ letterChar, onConfirm, onCancel }: 
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
-        <AlertDialogAction onClick={onConfirm}>Confirm</AlertDialogAction>
+        <AlertDialogCancel onClick={onCancel} disabled={isRevealingLetter}>Cancel</AlertDialogCancel>
+        <AlertDialogAction onClick={onConfirm} disabled={isRevealingLetter}>
+          {isRevealingLetter && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Confirm
+        </AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>
   );

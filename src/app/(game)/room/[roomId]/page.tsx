@@ -65,6 +65,7 @@ const DrawingCanvas = React.memo(({
   onStartGame,
   startButtonInfo,
   canStartGame,
+  isStartingNextRoundOrGame,
   aiSketchDataUri,
   onDrawWithAI,
   isGeneratingAISketch,
@@ -81,6 +82,7 @@ const DrawingCanvas = React.memo(({
   onStartGame?: () => void,
   startButtonInfo?: { text: string; icon: JSX.Element } | null,
   canStartGame?: boolean,
+  isStartingNextRoundOrGame?: boolean,
   aiSketchDataUri?: string | null;
   onDrawWithAI?: () => void;
   isGeneratingAISketch?: boolean;
@@ -377,10 +379,16 @@ const DrawingCanvas = React.memo(({
                 size="lg"
                 variant="secondary"
                 className="shadow-xl animate-pulse"
-                disabled={!canStartGame}
+                disabled={!canStartGame || isStartingNextRoundOrGame}
               >
-                {startButtonInfo.icon}
-                <span className="ml-2">{startButtonInfo.text}</span>
+                {isStartingNextRoundOrGame ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                    <>
+                        {startButtonInfo.icon}
+                        <span className="ml-2">{startButtonInfo.text}</span>
+                    </>
+                )}
               </Button>
             )}
           </div>
@@ -423,7 +431,7 @@ const PlayerList = React.memo(({
         </div>
         <div className={cn(
             "transition-all duration-300 ease-in-out flex-grow min-h-0",
-            isMinimized ? "max-h-0 opacity-0" : "max-h-48 opacity-100" 
+            isMinimized ? "max-h-0 opacity-0" : "max-h-full opacity-100" 
         )}>
              <ScrollArea className="h-full">
                 <ul className="divide-y divide-gray-200 px-2 py-1.5 sm:px-3 sm:py-2">
@@ -464,11 +472,11 @@ const PlayerList = React.memo(({
 });
 PlayerList.displayName = 'PlayerList';
 
-const GuessInput = React.memo(({ onGuessSubmit, disabled }: { onGuessSubmit: (guess: string) => void, disabled: boolean }) => {
+const GuessInput = React.memo(({ onGuessSubmit, disabled, isSubmittingGuess }: { onGuessSubmit: (guess: string) => void, disabled: boolean, isSubmittingGuess?: boolean }) => {
   const [guess, setGuess] = useState('');
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (guess.trim()) {
+    if (guess.trim() && !isSubmittingGuess) {
       onGuessSubmit(guess.trim());
       setGuess('');
     }
@@ -482,14 +490,14 @@ const GuessInput = React.memo(({ onGuessSubmit, disabled }: { onGuessSubmit: (gu
         value={guess}
         onChange={e => setGuess(e.target.value)}
         placeholder="Type your guess here..."
-        disabled={disabled}
+        disabled={disabled || isSubmittingGuess}
         className="w-full text-center text-gray-600 text-base font-normal outline-none border-gray-300 focus:border-blue-500 h-10 px-3 pr-10" 
       />
       <span className="absolute right-12 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none">
         {letterCount > 0 ? letterCount : ''}
       </span>
-      <Button type="submit" disabled={disabled || !guess.trim()} size="icon" className="h-10 w-10 bg-blue-500 hover:bg-blue-600">
-        <Send size={18} className="text-white" />
+      <Button type="submit" disabled={disabled || !guess.trim() || isSubmittingGuess} size="icon" className="h-10 w-10 bg-blue-500 hover:bg-blue-600">
+        {isSubmittingGuess ? <Loader2 size={18} className="text-white animate-spin"/> : <Send size={18} className="text-white" />}
       </Button>
     </form>
   );
@@ -522,7 +530,7 @@ const ChatArea = React.memo(({
         <div className="p-1.5 border-b border-black bg-gray-100">
             <h3 className="text-xs sm:text-sm font-semibold text-gray-700">Guesses & Chat</h3>
         </div>
-        <div className="flex-grow min-h-0 max-h-60 md:max-h-96"> 
+        <div className="flex-grow min-h-0 max-h-full"> 
              <ScrollArea className="h-full pr-3"> 
                 <div ref={internalChatScrollRef} className="p-2 space-y-1"> 
                     {guesses.map((g, i) => {
@@ -735,61 +743,18 @@ const MobileTopBar = React.memo(({
   isSettingsDialogOpen,
   setIsSettingsDialogOpen,
   onDrawerLetterClick, 
+  isLeavingRoom,
 }: {
   room: Room;
   playerId: string;
   isSettingsDialogOpen: boolean;
   setIsSettingsDialogOpen: (open: boolean) => void;
   onDrawerLetterClick: (char: string, index: number) => void; 
+  isLeavingRoom?: boolean;
 }) => {
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const hasPlayerGuessedCorrectly = (room.correctGuessersThisRound || []).includes(playerId);
   const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : "Someone";
-  const { toast } = useToast(); 
-  const params = useParams();
-  const roomId = params.roomId as string;
-
-
-  const handleLeaveRoom = useCallback(async () => {
-    if (!playerId || !room ) { 
-        window.location.href = '/';
-        return;
-    }
-    const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
-    try {
-        const currentPlayerName = room.players[playerId]?.name || 'A player';
-        const systemGuess: Guess = {
-            playerId: 'system',
-            playerName: APP_NAME, 
-            text: `[[SYSTEM_LEFT]]`,
-            isCorrect: false,
-            timestamp: serverTimestamp() as any,
-        };
-        const guessesRef = ref(database, `rooms/${roomId}/guesses`);
-        const currentGuessesSnap = await get(guessesRef);
-        const currentGuesses = currentGuessesSnap.exists() ? currentGuessesSnap.val() : [];
-        await set(guessesRef, [...currentGuesses, { ...systemGuess, playerName: currentPlayerName }]);
-
-
-        await update(playerRef, { isOnline: false });
-        setIsSettingsDialogOpen(false);
-        toast({ title: "Left Room", description: "You have left the room." });
-        window.location.href = '/';
-    } catch (err) {
-        console.error("Error leaving room:", err);
-        toast({ title: "Error", description: "Could not leave room cleanly.", variant: "destructive" });
-        window.location.href = '/';
-    }
-  }, [playerId, room, toast, setIsSettingsDialogOpen, roomId]);
-
-  const handleCopyLink = useCallback(() => {
-    const link = `${window.location.origin}/join/${roomId}`;
-    navigator.clipboard.writeText(link)
-      .then(() => toast({ title: "Link Copied!", description: "Room link copied to clipboard." }))
-      .catch(() => toast({ title: "Error", description: "Could not copy link.", variant: "destructive" }));
-    setIsSettingsDialogOpen(false);
-  }, [roomId, toast, setIsSettingsDialogOpen]);
-
 
   return (
     <div className="flex items-center justify-between border-b border-blue-900 px-1 py-0.5 sticky top-0 z-20 bg-background" style={{ borderWidth: "3px" }}>
@@ -834,7 +799,9 @@ const MobileTopBar = React.memo(({
 
       <div className="p-1 w-16 flex justify-end items-center gap-0.5">
          <DialogTrigger asChild>
-             <Button variant="ghost" size="icon" className="text-gray-600 hover:bg-gray-200 w-7 h-7" aria-label="Room Settings" onClick={() => setIsSettingsDialogOpen(true)}><Settings size={18} /></Button>
+             <Button variant="ghost" size="icon" className="text-gray-600 hover:bg-gray-200 w-7 h-7" aria-label="Room Settings" onClick={() => setIsSettingsDialogOpen(true)} disabled={isLeavingRoom}>
+                {isLeavingRoom ? <Loader2 size={18} className="animate-spin"/> : <Settings size={18} />}
+             </Button>
          </DialogTrigger>
       </div>
     </div>
@@ -856,6 +823,11 @@ export default function GameRoomPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [isSubmittingWord, setIsSubmittingWord] = useState(false);
+  const [isSubmittingGuess, setIsSubmittingGuess] = useState(false);
+  const [isStartingNextRoundOrGame, setIsStartingNextRoundOrGame] = useState(false);
+  const [isRevealingLetter, setIsRevealingLetter] = useState(false);
+  const [isLeavingRoom, setIsLeavingRoom] = useState(false);
+
   const [roundEndCountdown, setRoundEndCountdown] = useState<number | null>(null);
 
   const [isRevealConfirmDialogOpen, setIsRevealConfirmDialogOpenLocal] = useState(false);
@@ -999,80 +971,24 @@ export default function GameRoomPage() {
                 maxWordLength: currentRoomData.config.maxWordLength,
             };
             const aiSuggestions = await suggestWords(suggestInput);
-
-            if (aiSuggestions && Array.isArray(aiSuggestions) && aiSuggestions.length === 5 && aiSuggestions.every(w => typeof w === 'string' && w.trim().length > 0 && /^[a-zA-Z]+$/.test(w.trim()))) {
-                wordsForSelection = aiSuggestions;
+            
+            // Robust check for AI suggestions
+            if (aiSuggestions && Array.isArray(aiSuggestions) && aiSuggestions.length > 0 && aiSuggestions.every(w => typeof w === 'string' && w.trim().length > 0 && /^[a-zA-Z]+$/.test(w.trim()))) {
+                wordsForSelection = aiSuggestions.slice(0, 5); // Ensure we only take up to 5 valid words
             } else {
-                 console.warn("AI did not return 5 valid words, using robust fallback. Received:", aiSuggestions);
+                 console.warn("AI did not return enough valid words, using robust fallback. Received:", aiSuggestions);
                  toast({ title: "AI Word Gen Issue", description: "Using default words as AI had an issue.", variant: "default" });
-                const defaultFallbackWordsLarge = [
-                    "Apple", "House", "Star", "Car", "Tree", "Book", "Sun", "Moon", "Chair", "Guitar", 
-                    "Lamp", "Phone", "Key", "Door", "Clock", "Shoes", "Hat", "Banana", "Orange", "Grape",
-                    "Bread", "Cheese", "Pizza", "Cloud", "Pencil", "Brush", "Plane", "Train", "Boat", 
-                    "Ball", "Box", "Cup", "Fish", "Duck", "Kite", "Drum", "Cake", "Sock", "Fork", 
-                    "Spoon", "Plate", "Plant", "Flower", "Dog", "Cat", "Bird", "Mouse", "Bear", "Lion",
-                    "Tiger", "Snake", "Spider", "Ant", "Bee", "Ladybug", "Butterfly", "Snail", "Frog",
-                    "Shirt", "Pants", "Dress", "Socks", "Scarf", "Gloves", "Ring", "Necklace", "Watch",
-                    "Table", "Bed", "Sofa", "Mirror", "Window", "Stairs", "Bridge", "Road", "River",
-                    "Mountain", "Volcano", "Island", "Beach", "Forest", "Desert", "Rainbow", "Anchor",
-                    "Balloon", "Candle", "Camera", "Computer", "Dice", "Earrings", "Feather", "Flag", 
-                    "Fountain", "Hammer", "Helmet", "Igloo", "Jacket", "Ladder", "Magnet", "Medal",
-                    "Microphone", "Notebook", "Octopus", "Pear", "Pineapple", "Pyramid", "Quilt", 
-                    "Robot", "Rocket", "Sailboat", "Scissors", "Shovel", "Skateboard", "Suitcase",
-                    "Swing", "Sword", "Telescope", "Tent", "Trophy", "Trumpet", "Umbrella", "Unicorn",
-                    "Vase", "Violin", "Wallet", "Wheel", "Whistle", "Yacht", "Zebra", "Zipper"
-                ];
-                const shuffleArray = <T,>(array: T[]): T[] => {
-                    const newArray = [...array];
-                    for (let i = newArray.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-                    }
-                    return newArray;
-                };
-                const shuffledFallbackWords = shuffleArray(defaultFallbackWordsLarge);
-                const localUsedWords = new Set((currentRoomData.usedWords || []).map(w => w.toLowerCase()));
-                for (const word of shuffledFallbackWords) {
-                    if (wordsForSelection.length >= 5) break;
-                    const wordLower = word.toLowerCase();
-                    if (word.length <= (currentRoomData.config?.maxWordLength || 20) && !localUsedWords.has(wordLower) && !wordsForSelection.map(w=>w.toLowerCase()).includes(wordLower)) {
-                        wordsForSelection.push(word);
-                    }
-                }
-                const absoluteFallbacks = ["Ball", "Box", "Cup", "Pen", "Keypad", "Note", "Item", "Clip", "Thing"];
-                let abIdx = 0;
-                while(wordsForSelection.length < 5){
-                    const baseWord = absoluteFallbacks[abIdx % absoluteFallbacks.length];
-                    let potentialWord = baseWord;
-                    let attempt = 0;
-                    while(wordsForSelection.map(w=>w.toLowerCase()).includes(potentialWord.toLowerCase()) || localUsedWords.has(potentialWord.toLowerCase())) {
-                        attempt++; potentialWord = baseWord + attempt; if (attempt > 10) { potentialWord = baseWord + Math.floor(Math.random()*100); break;} 
-                    }
-                    if (potentialWord.length <= (currentRoomData.config?.maxWordLength || 20)) {
-                         wordsForSelection.push(potentialWord);
-                    } else {
-                         wordsForSelection.push(absoluteFallbacks[abIdx % absoluteFallbacks.length]);
-                    }
-                    abIdx++;
-                }
-                wordsForSelection = wordsForSelection.slice(0,5); 
+                 wordsForSelection = generateFallbackWords(5, currentRoomData.config.maxWordLength, currentRoomData.usedWords);
             }
+            if (wordsForSelection.length < 5) { // If still less than 5, use more robust fallback
+                console.warn(`Fallback also returned ${wordsForSelection.length} words. Using absolute padding.`);
+                wordsForSelection = generateFallbackWords(5, currentRoomData.config.maxWordLength, [...(currentRoomData.usedWords || []), ...wordsForSelection]);
+            }
+
         } catch (aiError) {
             console.error("AI word suggestion error:", aiError);
             toast({ title: "AI Error", description: "Failed to get words from AI. Using default words.", variant: "destructive" });
-            wordsForSelection = ["Dog", "Moon", "Boat", "Desk", "Lamp"].filter(w => w.length <= (currentRoomData.config?.maxWordLength || 20) && !(currentRoomData.usedWords || []).map(uw => uw.toLowerCase()).includes(w.toLowerCase()));
-             if (wordsForSelection.length < 5) { 
-                const defaults = ["Apple", "House", "Star", "Cat", "Sun", "Car", "Pencil", "Brush", "Train"];
-                for (const defWord of defaults) {
-                    if (wordsForSelection.length >=5) break;
-                     if (defWord.length <= (currentRoomData.config?.maxWordLength || 20) && !(currentRoomData.usedWords || []).map(uw => uw.toLowerCase()).includes(defWord.toLowerCase()) && !wordsForSelection.map(w => w.toLowerCase()).includes(defWord.toLowerCase())) {
-                        wordsForSelection.push(defWord);
-                    }
-                }
-             }
-             while(wordsForSelection.length < 5 && wordsForSelection.length > 0) wordsForSelection.push(wordsForSelection[0] + "!"); 
-             while(wordsForSelection.length < 5) wordsForSelection.push("Key"); 
-             wordsForSelection = wordsForSelection.slice(0,5); 
+            wordsForSelection = generateFallbackWords(5, currentRoomData.config?.maxWordLength, currentRoomData.usedWords);
         }
     }
 
@@ -1087,7 +1003,7 @@ export default function GameRoomPage() {
         aiSketchDataUri: null, 
         guesses: currentRoomData.guesses || [], 
         correctGuessersThisRound: [],
-        selectableWords: wordsForSelection,
+        selectableWords: wordsForSelection.slice(0,5), // Ensure exactly 5 or fewer if not enough generated
         revealedPattern: [], 
     };
     try {
@@ -1183,85 +1099,101 @@ export default function GameRoomPage() {
   }, [playerId, roomId, toast, addSystemMessage]);
 
   const handleGuessSubmit = useCallback(async (guessText: string) => {
-    const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`)); 
-    if (!currentRoomSnapshot.exists()) return;
-    const currentRoom: Room = currentRoomSnapshot.val();
+    setIsSubmittingGuess(true);
+    try {
+        const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`)); 
+        if (!currentRoomSnapshot.exists()) return;
+        const currentRoom: Room = currentRoomSnapshot.val();
 
-    if (!currentRoom || !playerId || !playerName || currentRoom.currentDrawerId === playerId || currentRoom.gameState !== 'drawing' || !currentRoom.currentPattern) {
-        return;
-    }
-
-    if ((currentRoom.correctGuessersThisRound || []).includes(playerId)) {
-        toast({title: "Already Guessed", description: "You've already guessed correctly this round!", variant: "default"});
-        return;
-    }
-
-    const isCorrect = guessText.toLowerCase() === currentRoom.currentPattern.toLowerCase();
-
-    const newGuess: Guess = {
-      playerId,
-      playerName,
-      text: guessText,
-      isCorrect,
-      timestamp: serverTimestamp() as any 
-    };
-
-    const guessesRef = ref(database, `rooms/${roomId}/guesses`);
-    const currentGuesses = currentRoom.guesses || []; 
-    const newGuesses = [...currentGuesses, newGuess];
-
-    const updates: Partial<Room> = { guesses: newGuesses };
-    let newCorrectGuessers = [...(currentRoom.correctGuessersThisRound || [])];
-
-    if (isCorrect) {
-        newCorrectGuessers.push(playerId);
-        updates.correctGuessersThisRound = newCorrectGuessers;
-
-        const guesserPosition = newCorrectGuessers.length - 1; 
-        let pointsAwardedToGuesser = 0;
-        if (guesserPosition === 0) pointsAwardedToGuesser = 100; 
-        else if (guesserPosition === 1) pointsAwardedToGuesser = 80; 
-        else if (guesserPosition === 2) pointsAwardedToGuesser = 60; 
-        else pointsAwardedToGuesser = 50; 
-
-        const playerRef = ref(database, `rooms/${roomId}/players/${playerId}`);
-        const currentPlayerData = currentRoom.players[playerId];
-        if (currentPlayerData) { 
-             await update(playerRef, { score: (currentPlayerData.score || 0) + pointsAwardedToGuesser });
+        if (!currentRoom || !playerId || !playerName || currentRoom.currentDrawerId === playerId || currentRoom.gameState !== 'drawing' || !currentRoom.currentPattern) {
+            return;
         }
-    }
 
-    await update(ref(database, `rooms/${roomId}`), updates);
-
-    const updatedRoomSnapForEndRound = await get(ref(database, `rooms/${roomId}`)); 
-    if (!updatedRoomSnapForEndRound.exists()) return;
-    const updatedRoomDataForEndRound: Room = updatedRoomSnapForEndRound.val();
-
-    if (updatedRoomDataForEndRound.gameState === 'drawing' && updatedRoomDataForEndRound.hostId === playerId) { 
-        const onlineNonDrawingPlayers = Object.values(updatedRoomDataForEndRound.players || {}).filter(p => p.isOnline && p.id !== updatedRoomDataForEndRound.currentDrawerId);
-        const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (updatedRoomDataForEndRound.correctGuessersThisRound || []).includes(p.id));
-
-        if(allGuessed){
-            endCurrentRound("All players guessed correctly!");
+        if ((currentRoom.correctGuessersThisRound || []).includes(playerId)) {
+            toast({title: "Already Guessed", description: "You've already guessed correctly this round!", variant: "default"});
+            return;
         }
+
+        const isCorrect = guessText.toLowerCase() === currentRoom.currentPattern.toLowerCase();
+
+        const newGuess: Guess = {
+          playerId,
+          playerName,
+          text: guessText,
+          isCorrect,
+          timestamp: serverTimestamp() as any 
+        };
+
+        const guessesRef = ref(database, `rooms/${roomId}/guesses`);
+        const currentGuesses = currentRoom.guesses || []; 
+        const newGuesses = [...currentGuesses, newGuess];
+
+        const updates: Partial<Room> = { guesses: newGuesses };
+        let newCorrectGuessers = [...(currentRoom.correctGuessersThisRound || [])];
+
+        if (isCorrect) {
+            newCorrectGuessers.push(playerId);
+            updates.correctGuessersThisRound = newCorrectGuessers;
+
+            const guesserPosition = newCorrectGuessers.length - 1; 
+            let pointsAwardedToGuesser = 0;
+            if (guesserPosition === 0) pointsAwardedToGuesser = 100; 
+            else if (guesserPosition === 1) pointsAwardedToGuesser = 80; 
+            else if (guesserPosition === 2) pointsAwardedToGuesser = 60; 
+            else pointsAwardedToGuesser = 50; 
+
+            const playerRef = ref(database, `rooms/${roomId}/players/${playerId}`);
+            const currentPlayerData = currentRoom.players[playerId];
+            if (currentPlayerData) { 
+                 await update(playerRef, { score: (currentPlayerData.score || 0) + pointsAwardedToGuesser });
+            }
+        }
+
+        await update(ref(database, `rooms/${roomId}`), updates);
+
+        const updatedRoomSnapForEndRound = await get(ref(database, `rooms/${roomId}`)); 
+        if (!updatedRoomSnapForEndRound.exists()) return;
+        const updatedRoomDataForEndRound: Room = updatedRoomSnapForEndRound.val();
+
+        if (updatedRoomDataForEndRound.gameState === 'drawing' && updatedRoomDataForEndRound.hostId === playerId) { 
+            const onlineNonDrawingPlayers = Object.values(updatedRoomDataForEndRound.players || {}).filter(p => p.isOnline && p.id !== updatedRoomDataForEndRound.currentDrawerId);
+            const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (updatedRoomDataForEndRound.correctGuessersThisRound || []).includes(p.id));
+
+            if(allGuessed){
+                endCurrentRound("All players guessed correctly!");
+            }
+        }
+    } catch (error) {
+        console.error("Error submitting guess:", error);
+        toast({ title: "Error", description: "Could not submit guess.", variant: "destructive" });
+    } finally {
+        setIsSubmittingGuess(false);
     }
   }, [playerId, playerName, roomId, toast, endCurrentRound]); 
 
 
   const manageGameStart = useCallback(async () => {
-    const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
-    if (!currentRoomSnapshot.exists()) return;
-    const currentRoomData: Room = currentRoomSnapshot.val();
+    setIsStartingNextRoundOrGame(true);
+    try {
+        const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
+        if (!currentRoomSnapshot.exists()) return;
+        const currentRoomData: Room = currentRoomSnapshot.val();
 
-    if (!currentRoomData || !playerId || currentRoomData.hostId !== playerId) return;
+        if (!currentRoomData || !playerId || currentRoomData.hostId !== playerId) return;
 
-    if (currentRoomData.gameState === 'waiting' || currentRoomData.gameState === 'game_over') {
-        if (currentRoomData.gameState === 'game_over') {
-            await prepareNewGameSession(); 
+        if (currentRoomData.gameState === 'waiting' || currentRoomData.gameState === 'game_over') {
+            if (currentRoomData.gameState === 'game_over') {
+                await prepareNewGameSession(); 
+            }
+            await selectWordForNewRound();
         }
-        await selectWordForNewRound();
+    } catch (error) {
+        console.error("Error managing game start:", error);
+        toast({ title: "Error", description: "Could not start the game.", variant: "destructive" });
+    } finally {
+        setIsStartingNextRoundOrGame(false);
     }
-  }, [playerId, roomId, prepareNewGameSession, selectWordForNewRound]);
+  }, [playerId, roomId, prepareNewGameSession, selectWordForNewRound, toast]);
 
   const handleDrawerLetterClick = useCallback((char: string, index: number) => {
     if (!room || !room.currentPattern || room.currentDrawerId !== playerId || room.gameState !== 'drawing') return;
@@ -1279,7 +1211,8 @@ export default function GameRoomPage() {
 
   const handleConfirmLetterRevealByDrawer = useCallback(async () => {
     if (!room || !letterToRevealInfo || !room.currentPattern || room.currentDrawerId !== playerId || room.gameState !== 'drawing') return;
-  
+    
+    setIsRevealingLetter(true);
     const revealedPatternRef = ref(database, `rooms/${roomId}/revealedPattern`);
     const currentPatternStr = room.currentPattern; 
     const patternChars = currentPatternStr.split(''); 
@@ -1310,6 +1243,7 @@ export default function GameRoomPage() {
     } finally {
       setIsRevealConfirmDialogOpenLocal(false);
       setLetterToRevealInfo(null);
+      setIsRevealingLetter(false);
     }
   }, [room, letterToRevealInfo, playerId, roomId, toast]);
   
@@ -1319,6 +1253,7 @@ export default function GameRoomPage() {
         window.location.href = '/';
         return;
     }
+    setIsLeavingRoom(true);
     const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
     try {
         addSystemMessage(`[[SYSTEM_LEFT]]`, playerName); 
@@ -1329,6 +1264,8 @@ export default function GameRoomPage() {
     } catch (err) {
         toast({ title: "Error", description: "Could not leave room cleanly.", variant: "destructive" });
         window.location.href = '/'; 
+    } finally {
+        setIsLeavingRoom(false);
     }
   }, [playerId, room, playerName, toast, addSystemMessage, setIsSettingsDialogOpenLocal]); 
 
@@ -1638,42 +1575,38 @@ export default function GameRoomPage() {
         !isToastAlreadyPresent
     ) {
         toastIdCounter.current += 1;
-        const newToastId = `toast-${latestGuess.timestamp}-${latestGuess.playerId}-${toastIdCounter.current}`;
+        const newToastId = `toast-${latestGuess.timestamp}-${latestGuess.playerId}-${toastIdCounter.current}-${Math.random().toString(36).substring(7)}`;
         const newToastMessage = { ...latestGuess, uniqueId: newToastId };
 
         setToastMessages(prevToastsArg => {
             const prevToasts = Array.isArray(prevToastsArg) ? prevToastsArg : [];
             
-            if (prevToasts.some(t => t.uniqueId === newToastId)) { // Check by uniqueId in case of rapid re-renders
+            if (prevToasts.some(t => t.uniqueId === newToastId)) {
                 return prevToasts;
             }
              if (prevToasts.some(t => t.timestamp === latestGuess.timestamp && t.playerId === latestGuess.playerId && t.text === latestGuess.text)) {
                 return prevToasts;
             }
 
-
             let updatedToasts = [newToastMessage, ...prevToasts];
-            
             const toastsToRemove: string[] = [];
+
             if (updatedToasts.length > TOAST_MAX_COUNT) {
                 const oldestToasts = updatedToasts.slice(TOAST_MAX_COUNT);
-                oldestToasts.forEach(toast => toastsToRemove.push(toast.uniqueId));
+                oldestToasts.forEach(toast => {
+                    toastsToRemove.push(toast.uniqueId);
+                    if (toastTimeoutsRef.current[toast.uniqueId]) {
+                        clearTimeout(toastTimeoutsRef.current[toast.uniqueId]);
+                        delete toastTimeoutsRef.current[toast.uniqueId];
+                    }
+                });
                 updatedToasts = updatedToasts.slice(0, TOAST_MAX_COUNT);
             }
-
-            const currentTimeoutRefs = toastTimeoutsRef.current;
-            toastsToRemove.forEach(idToRemove => {
-                if (currentTimeoutRefs[idToRemove]) {
-                    clearTimeout(currentTimeoutRefs[idToRemove]);
-                    delete currentTimeoutRefs[idToRemove];
-                }
-            });
             
             const timeoutId = setTimeout(() => {
-                setToastMessages(prev => prev.filter(t => t.uniqueId !== newToastId));
-                const currentRefsForRemoval = toastTimeoutsRef.current;
-                if (currentRefsForRemoval[newToastId]) {
-                    delete currentRefsForRemoval[newToastId];
+                setToastMessages(currentToasts => currentToasts.filter(t => t.uniqueId !== newToastId));
+                if (toastTimeoutsRef.current[newToastId]) {
+                    delete toastTimeoutsRef.current[newToastId];
                 }
             }, 3000);
             toastTimeoutsRef.current[newToastId] = timeoutId;
@@ -1719,10 +1652,12 @@ export default function GameRoomPage() {
                 isSettingsDialogOpen={isSettingsDialogOpenLocal}
                 setIsSettingsDialogOpen={setIsSettingsDialogOpenLocal}
                 onDrawerLetterClick={handleDrawerLetterClick}
+                isLeavingRoom={isLeavingRoom}
             />
             <SettingsDialogContent 
                 onCopyLink={handleCopyLink} 
                 onLeaveRoom={handleLeaveRoom} 
+                isLeavingRoom={isLeavingRoom}
             />
         </Dialog>
 
@@ -1742,6 +1677,7 @@ export default function GameRoomPage() {
                 onStartGame={manageGameStart}
                 startButtonInfo={startButtonInfo}
                 canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter((p:any)=>p.isOnline).length >= 1}
+                isStartingNextRoundOrGame={isStartingNextRoundOrGame}
                 aiSketchDataUri={room.aiSketchDataUri}
                 onDrawWithAI={isCurrentPlayerDrawing ? handleDrawWithAI : undefined}
                 isGeneratingAISketch={isGeneratingAISketch}
@@ -1752,7 +1688,7 @@ export default function GameRoomPage() {
                     <div
                       key={message.uniqueId}
                       className={cn(
-                        "relative p-2 rounded-md shadow-lg text-xs max-w-[60%] animate-in fade-in duration-300 break-words overflow-wrap-break-word",
+                        "relative p-2 rounded-md shadow-lg text-xs max-w-[150px] sm:max-w-[180px] animate-in fade-in duration-300 break-words overflow-wrap-break-word",
                         message.isCorrect ? "bg-green-100 text-green-700 border border-green-300" : "bg-card text-card-foreground border border-border"
                       )}
                     >
@@ -1788,7 +1724,7 @@ export default function GameRoomPage() {
         </div>
 
         <div className="p-1 border-t bg-background w-full flex-shrink-0">
-            <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} />
+            <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} isSubmittingGuess={isSubmittingGuess} />
         </div>
     </div>
 
@@ -1811,6 +1747,7 @@ export default function GameRoomPage() {
             onPlayAgain={manageGameStart}
             canPlayAgain={Object.values(room.players).filter(p=>p.isOnline).length >= 1}
             roundEndCountdown={roundEndCountdown}
+            isStartingNextRoundOrGame={isStartingNextRoundOrGame}
         />
     )}
 
@@ -1826,6 +1763,7 @@ export default function GameRoomPage() {
                 setLetterToRevealInfo(null);
             }}
             onConfirm={handleConfirmLetterRevealByDrawer}
+            isRevealingLetter={isRevealingLetter}
         />
       )}
     </AlertDialog>
@@ -1833,3 +1771,73 @@ export default function GameRoomPage() {
   );
 }
 
+// Helper function to generate fallback words (ensure it's outside the component or memoized if inside)
+const generateFallbackWords = (count: number, maxWordLength?: number, previouslyUsedWords?: string[]): string[] => {
+    const defaultFallbackWordsLarge = [
+        "Apple", "House", "Star", "Car", "Tree", "Book", "Sun", "Moon", "Chair", "Guitar", 
+        "Lamp", "Phone", "Key", "Door", "Clock", "Shoes", "Hat", "Banana", "Orange", "Grape",
+        "Bread", "Cheese", "Pizza", "Cloud", "Pencil", "Brush", "Plane", "Train", "Boat", 
+        "Ball", "Box", "Cup", "Fish", "Duck", "Kite", "Drum", "Cake", "Sock", "Fork", 
+        "Spoon", "Plate", "Plant", "Flower", "Dog", "Cat", "Bird", "Mouse", "Bear", "Lion",
+        "Tiger", "Snake", "Spider", "Ant", "Bee", "Ladybug", "Butterfly", "Snail", "Frog",
+        "Shirt", "Pants", "Dress", "Socks", "Scarf", "Gloves", "Ring", "Necklace", "Watch",
+        "Table", "Bed", "Sofa", "Mirror", "Window", "Stairs", "Bridge", "Road", "River",
+        "Mountain", "Volcano", "Island", "Beach", "Forest", "Desert", "Rainbow", "Anchor",
+        "Balloon", "Candle", "Camera", "Computer", "Dice", "Earrings", "Feather", "Flag", 
+        "Fountain", "Hammer", "Helmet", "Igloo", "Jacket", "Ladder", "Magnet", "Medal",
+        "Microphone", "Notebook", "Octopus", "Pear", "Pineapple", "Pyramid", "Quilt", 
+        "Robot", "Rocket", "Sailboat", "Scissors", "Shovel", "Skateboard", "Suitcase",
+        "Swing", "Sword", "Telescope", "Tent", "Trophy", "Trumpet", "Umbrella", "Unicorn",
+        "Vase", "Violin", "Wallet", "Wheel", "Whistle", "Yacht", "Zebra", "Zipper"
+    ];
+    const shuffleArray = <T,>(array: T[]): T[] => {
+        const newArray = [...array];
+        for (let i = newArray.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+        }
+        return newArray;
+    };
+
+    let finalWords: string[] = [];
+    const shuffledFallbacks = shuffleArray(defaultFallbackWordsLarge);
+    const localUsedWords = new Set((previouslyUsedWords || []).map(w => w.toLowerCase()));
+    
+    for (const fb of shuffledFallbacks) {
+        if (finalWords.length >= count) break;
+        const fbLower = fb.toLowerCase();
+        if (!localUsedWords.has(fbLower) && 
+            !finalWords.map(w => w.toLowerCase()).includes(fbLower) &&
+            (maxWordLength ? fb.length <= maxWordLength : true)
+        ) {
+            finalWords.push(fb);
+        }
+    }
+    
+    const absolutePads = ["Pencil", "Paper", "Note", "Clip", "Pin", "Item", "Thing", "Object", "Icon", "Symbol"];
+    let padIdx = 0;
+    while(finalWords.length < count){
+        const baseWord = absolutePads[padIdx % absolutePads.length];
+        let potentialWord = baseWord;
+        let attempt = 0;
+        while(finalWords.map(w=>w.toLowerCase()).includes(potentialWord.toLowerCase()) || localUsedWords.has(potentialWord.toLowerCase())) {
+            attempt++; 
+            potentialWord = baseWord + attempt; 
+            if (attempt > 10) { 
+                potentialWord = baseWord + Math.floor(Math.random()*1000); 
+                if(finalWords.map(w=>w.toLowerCase()).includes(potentialWord.toLowerCase()) || localUsedWords.has(potentialWord.toLowerCase())){
+                   potentialWord = baseWord + "X" + Math.floor(Math.random()*1000);
+                }
+                break;
+            }
+        }
+         if (maxWordLength ? potentialWord.length <= maxWordLength : true) {
+             finalWords.push(potentialWord);
+         } else {
+            const shortBase = baseWord.substring(0, Math.min(baseWord.length, (maxWordLength || 20) - 2));
+            finalWords.push(shortBase + Math.floor(Math.random()*10)); 
+         }
+        padIdx++;
+    }
+    return finalWords.slice(0, count);
+};

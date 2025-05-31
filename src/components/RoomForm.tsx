@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Timer, ListChecks, TextCursorInput } from 'lucide-react'; // Removed Info icon
+import { Loader2, Timer, ListChecks, TextCursorInput } from 'lucide-react'; 
 
 interface RoomFormProps {
   mode: 'create' | 'join';
@@ -29,7 +29,6 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   const [roundTimeoutSeconds, setRoundTimeoutSeconds] = useState(90);
   const [totalRounds, setTotalRounds] = useState(5);
   const [maxWordLength, setMaxWordLength] = useState(20);
-  // maxHintLetters state removed
 
 
   useEffect(() => {
@@ -66,7 +65,6 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
             Number.isNaN(roundTimeoutSeconds) || roundTimeoutSeconds < 30 ||
             Number.isNaN(totalRounds) || totalRounds < 1 ||
             Number.isNaN(maxWordLength) || maxWordLength < 3
-            // Removed maxHintLetters validation
         ) {
             toast({ title: "Invalid Config", description: "Please check room settings. Timeout >= 30s, Rounds >= 1, Max Word Length >= 3.", variant: "destructive" });
             setIsLoading(false);
@@ -86,7 +84,6 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         roundTimeoutSeconds: roundTimeoutSeconds,
         totalRounds: totalRounds,
         maxWordLength: maxWordLength,
-        // maxHintLetters removed from config
       };
       
       const roomData: RoomCreationData = {
@@ -102,6 +99,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         revealedPattern: [],
         selectableWords: [],
         wordSelectionEndsAt: null,
+        aiSketchDataUri: null,
       };
 
       try {
@@ -111,6 +109,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       } catch (error) {
         console.error("Error creating room:", error);
         toast({ title: "Error", description: "Could not create room. Please try again.", variant: "destructive" });
+      } finally {
         setIsLoading(false);
       }
 
@@ -138,11 +137,11 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
           router.push(`/room/${roomId}`);
         } else {
           toast({ title: "Room Not Found", description: `Room ${roomId} does not exist.`, variant: "destructive" });
-          setIsLoading(false);
         }
       } catch (error) {
         console.error("Error joining room:", error);
         toast({ title: "Error", description: "Could not join room. Please try again.", variant: "destructive" });
+      } finally {
         setIsLoading(false);
       }
     }
@@ -182,7 +181,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                 onChange={(e) => setRoomId(e.target.value.toUpperCase())}
                 placeholder="Enter 6-character Room ID"
                 required
-                disabled={!!initialRoomId}
+                disabled={!!initialRoomId || isLoading}
                 className="text-base py-6"
                 maxLength={6}
               />
@@ -200,6 +199,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   onChange={e => setRoundTimeoutSeconds(parseInt(e.target.value))} 
                   min="30" 
                   className="text-base py-3"
+                  disabled={isLoading}
                 />
                 <p className="text-xs text-muted-foreground">Time limit for each player to draw (min 30s).</p>
               </div>
@@ -212,6 +212,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   onChange={e => setTotalRounds(parseInt(e.target.value))} 
                   min="1" 
                   className="text-base py-3"
+                  disabled={isLoading}
                 />
                 <p className="text-xs text-muted-foreground">Number of rounds before the game ends (min 1).</p>
               </div>
@@ -224,17 +225,23 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   onChange={e => setMaxWordLength(parseInt(e.target.value))} 
                   min="3" 
                   className="text-base py-3"
+                  disabled={isLoading}
                 />
                 <p className="text-xs text-muted-foreground">Maximum character length for words to be drawn (min 3 chars).</p>
               </div>
-              {/* maxHintLetters input removed */}
             </>
           )}
         </CardContent>
         <CardFooter>
           <Button type="submit" className="w-full text-lg py-6" disabled={isLoading}>
-            {isLoading && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-            {isLoading ? (mode === 'create' ? 'Creating...' : 'Joining...') : (mode === 'create' ? 'Create Room & Start Playing' : 'Join Room & Play')}
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                {mode === 'create' ? 'Creating...' : 'Joining...'}
+              </>
+            ) : (
+              mode === 'create' ? 'Create Room & Start Playing' : 'Join Room & Play'
+            )}
           </Button>
         </CardFooter>
       </form>

@@ -1,17 +1,19 @@
+
 "use client";
 
 import { Button } from '@/components/ui/button';
-import type { Room, Guess, Player } from '@/lib/types';
-import { Trophy, Play, RotateCcw } from 'lucide-react';
+import type { Room, Player } from '@/lib/types';
+import { Trophy, Play, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface GameStateModalsProps {
-  room: Room | null; // Changed to accept the whole room object
+  room: Room | null;
   players: Player[];
   isHost: boolean;
   onPlayAgain: () => void;
   canPlayAgain: boolean;
   roundEndCountdown: number | null;
+  isStartingNextRoundOrGame?: boolean;
 }
 
 export function GameStateModals({
@@ -21,13 +23,14 @@ export function GameStateModals({
   onPlayAgain,
   canPlayAgain,
   roundEndCountdown,
+  isStartingNextRoundOrGame,
 }: GameStateModalsProps) {
   if (!room || (room.gameState !== 'round_end' && room.gameState !== 'game_over')) {
     return null;
   }
 
   const startButtonInfo = room.gameState === 'game_over' 
-    ? { text: 'Play Again', icon: <RotateCcw size={16} /> }
+    ? { text: isStartingNextRoundOrGame ? 'Starting...' : 'Play Again', icon: isStartingNextRoundOrGame ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} /> }
     : null; 
 
   const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] 
@@ -88,7 +91,7 @@ export function GameStateModals({
                   size="lg"
                   variant="default"
                   className="px-8 py-3 text-lg"
-                  disabled={!canPlayAgain}
+                  disabled={!canPlayAgain || isStartingNextRoundOrGame}
                 >
                   {startButtonInfo.icon} {startButtonInfo.text}
                 </Button>

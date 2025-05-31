@@ -28,7 +28,7 @@ interface WordSelectionDialogProps {
   isOpen: boolean;
   maxWordLength: number;
   selectableWords: string[];
-  onConfirmWord: (word: string) => void; // Changed from Promise<void> to void
+  onConfirmWord: (word: string) => void;
   isSubmittingWord: boolean;
   wordSelectionEndsAt: number | null;
 }
@@ -42,18 +42,30 @@ export function WordSelectionDialog({
   wordSelectionEndsAt,
 }: WordSelectionDialogProps) {
   const [customWordInput, setCustomWordInput] = useState('');
+  const [localSubmittingWord, setLocalSubmittingWord] = useState<string | null>(null);
+
 
   const handleSuggestedWordClick = (word: string) => {
     if (isSubmittingWord) return;
-    onConfirmWord(word); // Removed await
+    setLocalSubmittingWord(word);
+    onConfirmWord(word); 
   };
 
   const handleCustomWordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customWordInput.trim() || isSubmittingWord) return;
-    onConfirmWord(customWordInput.trim()); // Removed await
-    setCustomWordInput(''); 
+    setLocalSubmittingWord('__custom__');
+    onConfirmWord(customWordInput.trim());
+    // setCustomWordInput(''); // Keep input for a moment so loader shows on it
   };
+
+  useEffect(() => {
+    if (!isSubmittingWord) {
+      setLocalSubmittingWord(null);
+      if (localSubmittingWord === '__custom__') setCustomWordInput(''); // Clear after submission ends
+    }
+  }, [isSubmittingWord, localSubmittingWord]);
+
 
   if (!isOpen) return null;
 
@@ -78,6 +90,7 @@ export function WordSelectionDialog({
                 onClick={() => handleSuggestedWordClick(word)}
                 disabled={isSubmittingWord}
               >
+                {isSubmittingWord && localSubmittingWord === word ? <Loader2 className="animate-spin mr-2" /> : null}
                 {word}
               </Button>
             ))}
@@ -97,7 +110,7 @@ export function WordSelectionDialog({
                 disabled={isSubmittingWord}
               />
               <Button type="submit" disabled={isSubmittingWord || !customWordInput.trim()}>
-                {isSubmittingWord && customWordInput ? <Loader2 className="animate-spin mr-2" /> : <Edit3 className="mr-2 h-4 w-4" />}
+                {isSubmittingWord && localSubmittingWord === '__custom__' ? <Loader2 className="animate-spin mr-2" /> : <Edit3 className="mr-2 h-4 w-4" />}
                 Draw This
               </Button>
             </div>
