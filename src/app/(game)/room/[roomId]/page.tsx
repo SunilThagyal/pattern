@@ -972,15 +972,14 @@ export default function GameRoomPage() {
             };
             const aiSuggestions = await suggestWords(suggestInput);
             
-            // Robust check for AI suggestions
             if (aiSuggestions && Array.isArray(aiSuggestions) && aiSuggestions.length > 0 && aiSuggestions.every(w => typeof w === 'string' && w.trim().length > 0 && /^[a-zA-Z]+$/.test(w.trim()))) {
-                wordsForSelection = aiSuggestions.slice(0, 5); // Ensure we only take up to 5 valid words
+                wordsForSelection = aiSuggestions.slice(0, 5); 
             } else {
                  console.warn("AI did not return enough valid words, using robust fallback. Received:", aiSuggestions);
                  toast({ title: "AI Word Gen Issue", description: "Using default words as AI had an issue.", variant: "default" });
                  wordsForSelection = generateFallbackWords(5, currentRoomData.config.maxWordLength, currentRoomData.usedWords);
             }
-            if (wordsForSelection.length < 5) { // If still less than 5, use more robust fallback
+            if (wordsForSelection.length < 5) { 
                 console.warn(`Fallback also returned ${wordsForSelection.length} words. Using absolute padding.`);
                 wordsForSelection = generateFallbackWords(5, currentRoomData.config.maxWordLength, [...(currentRoomData.usedWords || []), ...wordsForSelection]);
             }
@@ -1003,7 +1002,7 @@ export default function GameRoomPage() {
         aiSketchDataUri: null, 
         guesses: currentRoomData.guesses || [], 
         correctGuessersThisRound: [],
-        selectableWords: wordsForSelection.slice(0,5), // Ensure exactly 5 or fewer if not enough generated
+        selectableWords: wordsForSelection.slice(0,5), 
         revealedPattern: [], 
     };
     try {
@@ -1614,7 +1613,7 @@ export default function GameRoomPage() {
             return updatedToasts;
         });
     }
-  }, [memoizedGuesses, playerId]); 
+  }, [memoizedGuesses, playerId, toastMessages]); 
 
   useEffect(() => {
     return () => {
@@ -1644,7 +1643,7 @@ export default function GameRoomPage() {
 
   return (
     <>
-    <div className="max-w-md mx-auto border border-black flex flex-col select-none" style={{ height: "100vh", maxHeight: "900px", minHeight: "700px" }}>
+    <div className="max-w-md mx-auto border border-black flex flex-col select-none overflow-hidden" style={{ height: "100vh", maxHeight: "900px", minHeight: "700px" }}>
         <Dialog open={isSettingsDialogOpenLocal} onOpenChange={setIsSettingsDialogOpenLocal}>
             <MobileTopBar
                 room={room}
@@ -1661,9 +1660,9 @@ export default function GameRoomPage() {
             />
         </Dialog>
 
-        <div className="flex-grow flex flex-col gap-1 p-1 min-h-0"> 
+        <div className="flex-grow flex flex-col gap-1 p-1 min-h-0 overflow-y-auto"> {/* Scrollable content area */}
             
-            <div className="h-3/5 w-full flex-shrink-0 relative"> 
+            <div className="h-3/5 w-full flex-shrink-0 relative"> {/* DrawingCanvas container */}
               <DrawingCanvas
                 drawingData={memoizedDrawingData}
                 onDraw={handleDraw}
@@ -1699,7 +1698,7 @@ export default function GameRoomPage() {
               )}
             </div>
 
-            <div className="flex-grow flex flex-row gap-1 min-h-0 w-full"> 
+            <div className="flex-grow flex flex-row gap-1 min-h-0 w-full"> {/* PlayerList and ChatArea Container */}
                 <div className="w-1/2 h-full">
                     <PlayerList
                     players={playersArray}
@@ -1723,7 +1722,7 @@ export default function GameRoomPage() {
             </div>
         </div>
 
-        <div className="p-1 border-t bg-background w-full flex-shrink-0">
+        <div className="p-1 border-t bg-background w-full flex-shrink-0"> {/* GuessInput Container */}
             <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} isSubmittingGuess={isSubmittingGuess} />
         </div>
     </div>
@@ -1841,3 +1840,6 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     }
     return finalWords.slice(0, count);
 };
+
+
+    
