@@ -24,20 +24,21 @@ export default function ReferralRedirectPage() {
       }
       
       // Use object form for router.replace to robustly handle query params
+      // This ensures ?ref=CODE&action=signup is in the URL
       router.replace({
         pathname: '/auth',
         query: { ref: codeToProcess, action: 'signup' },
       });
 
-    } else if (params.shortCode !== undefined) { // If shortCode is defined but not a valid string (e.g. empty)
-      // Redirect to signup without any referral code.
+    } else if (params.shortCode !== undefined) { 
+      // If shortCode is defined but not a valid string (e.g. empty), redirect without ref.
       router.replace({
         pathname: '/auth',
         query: { action: 'signup'},
       });
     }
     // If params.shortCode is initially undefined, this effect will re-run when Next.js fully populates params.
-  }, [params, router]); // `params` and `router` are key dependencies here.
+  }, [params, router]); 
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-br from-primary/10 via-background to-secondary/10">
@@ -54,3 +55,4 @@ export default function ReferralRedirectPage() {
     </div>
   );
 }
+

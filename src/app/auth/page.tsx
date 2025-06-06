@@ -35,7 +35,7 @@ const generateShortAlphaNumericCode = (length: number): string => {
 };
 
 const LSTORAGE_PENDING_REFERRAL_KEY = "drawlyPendingReferralCode";
-const LSTORAGE_DEVICE_HAS_ACCOUNT_KEY = 'drawlyDeviceHasAccount'; // For device uniqueness simulation
+const LSTORAGE_DEVICE_HAS_ACCOUNT_KEY = 'drawlyDeviceHasAccount'; 
 const LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY = 'drawlyDeviceOriginalReferrerUid';
 
 
@@ -57,7 +57,7 @@ export default function AuthPage() {
     let finalReferralCode: string | null = null;
     let source: 'storage' | 'url' | null = null;
 
-    // Priority 1: Check localStorage
+    // Priority 1: Check localStorage for a "pending" referral code
     const codeFromStorage = localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY);
     if (codeFromStorage && codeFromStorage.trim() !== "") {
       finalReferralCode = codeFromStorage.trim().toUpperCase();
@@ -114,17 +114,12 @@ export default function AuthPage() {
       return;
     }
     
-    // Simulated UID - In a real app, Firebase Auth would provide this.
     const simulatedUid = `uid_${finalDisplayName.replace(/\s+/g, '_').toLowerCase()}_${Math.random().toString(36).substr(2, 9)}`;
 
     try {
       if (isSigningUp) {
-        // Device-level uniqueness check (simulation)
-        // if (localStorage.getItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY)) {
-        //   toast({ title: "Account Limit", description: "An account has already been registered on this device. Multiple accounts are not permitted for this prototype.", variant: "destructive" });
-        //   if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-        //   return;
-        // }
+        // Removed: Device-level uniqueness check block (localStorage.getItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY))
+        // User can now register multiple accounts from the same device.
 
         let newShortReferralCode = '';
         let codeExists = true;
@@ -149,21 +144,18 @@ export default function AuthPage() {
           userId: simulatedUid,
           displayName: finalDisplayName,
           email: finalEmail,
-          referralCode: simulatedUid, // Own UID, can be used internally
-          shortReferralCode: newShortReferralCode, // The one for sharing
+          referralCode: simulatedUid, 
+          shortReferralCode: newShortReferralCode, 
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
         };
 
-        // "One Device -> One Referrer Lock" Logic
         let actualReferrerUid: string | null = null;
         const deviceOriginalReferrerUid = localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY);
-        const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); // This is from the (potentially locked) input
+        const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); 
 
         if (deviceOriginalReferrerUid) {
           actualReferrerUid = deviceOriginalReferrerUid;
-          // If a short code was also provided (e.g., from URL that filled the input),
-          // check if it resolves to a *different* UID than the locked one.
           if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
             const mapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
             const mapSnap = await get(mapRef);
@@ -176,16 +168,14 @@ export default function AuthPage() {
             }
           }
         } else if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
-          // No device lock yet, try to use the current input's short code
           const referrerMapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
           const referrerMapSnap = await get(referrerMapRef);
           if (referrerMapSnap.exists()) {
             const foundReferrerUid = referrerMapSnap.val() as string;
-            if (foundReferrerUid === simulatedUid) { // Prevent self-referral
+            if (foundReferrerUid === simulatedUid) { 
                toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
             } else {
               actualReferrerUid = foundReferrerUid;
-              // Lock this referrer to the device
               localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid); 
               toast({title: "Referral Applied!", description: `You were successfully referred.`});
             }
@@ -196,7 +186,6 @@ export default function AuthPage() {
 
         if (actualReferrerUid) {
           newUserProfile.referredBy = actualReferrerUid;
-          // Record the referral in the referrer's node
           const referralsBranchRef = ref(database, `referrals/${actualReferrerUid}/${simulatedUid}`);
           await set(referralsBranchRef, {
             referredUserName: finalDisplayName,
@@ -205,15 +194,14 @@ export default function AuthPage() {
         }
         
         await set(ref(database, `users/${simulatedUid}`), newUserProfile);
-        await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid); // Map short code to new user's ID
+        await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid); 
         
-        // localStorage.setItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY, 'true'); // Set device has account flag
-        localStorage.removeItem(LSTORAGE_PENDING_REFERRAL_KEY); // Clear the pending code as it's now processed
+        // localStorage.setItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY, 'true'); // No longer setting this
+        localStorage.removeItem(LSTORAGE_PENDING_REFERRAL_KEY); 
 
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
       } else { // Login flow
-        // Simulated login: Find user by email
         let foundUser: UserProfile | null = null;
         let foundUid: string | null = null;
 
@@ -222,7 +210,7 @@ export default function AuthPage() {
         if (allUsersSnap.exists()) {
             const usersData = allUsersSnap.val();
             for (const uid_key in usersData) {
-                if (usersData[uid_key].email === finalEmail) { // Simple check for simulation
+                if (usersData[uid_key].email === finalEmail) { 
                     foundUser = usersData[uid_key] as UserProfile;
                     foundUid = uid_key;
                     break;
@@ -235,16 +223,13 @@ export default function AuthPage() {
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        // Successfully "logged in"
-        finalDisplayName = foundUser.displayName; // Use display name from DB
-        localStorage.setItem('drawlyUserUid', foundUid); // Store the actual UID
+        finalDisplayName = foundUser.displayName; 
+        localStorage.setItem('drawlyUserUid', foundUid); 
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
-      // Common post-auth actions
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
       localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-      // Ensure drawlyUserUid is set correctly for both signup and login
       localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) );
 
       const redirectPath = searchParams.get('redirect') || '/'; 
@@ -321,7 +306,8 @@ export default function AuthPage() {
                    <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
                 </Label>
                 <Input
-                  id="referralCode"
+                  id="referralCode" /* ID matches the user's example */
+                  name="referralCode" /* Name attribute added */
                   type="text"
                   value={referralCodeInput}
                   onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
