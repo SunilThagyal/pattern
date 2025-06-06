@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Timer, ListChecks, TextCursorInput, UserPlus,LogIn } from 'lucide-react';
+import Link from 'next/link';
 
 interface RoomFormProps {
   mode: 'create' | 'join';
@@ -37,7 +38,6 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   const [authDisplayName, setAuthDisplayName] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check for simulated auth state in localStorage
     const authStatus = localStorage.getItem('drawlyAuthStatus');
     const storedName = localStorage.getItem('drawlyUserDisplayName');
     const storedUid = localStorage.getItem('drawlyUserUid');
@@ -45,7 +45,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
     if (authStatus === 'loggedIn' && storedName && storedUid) {
       setIsAuthenticated(true);
       setAuthPlayerId(storedUid);
-      setPlayerName(storedName); // Pre-fill player name if authenticated
+      setPlayerName(storedName); 
       setAuthDisplayName(storedName);
     } else {
       const storedPlayerName = localStorage.getItem('patternPartyPlayerName');
@@ -135,7 +135,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       try {
         await set(ref(database, `rooms/${newRoomId}`), roomData);
         toast({ title: "Room Created!", description: `Room ${newRoomId} created successfully. You are the host.` });
-        localStorage.setItem('patternPartyCurrentRoomId', newRoomId); // Store current room
+        localStorage.setItem('patternPartyCurrentRoomId', newRoomId); 
         router.push(`/room/${newRoomId}`);
       } catch (error) {
         console.error("Error creating room:", error);
@@ -189,7 +189,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
             await set(child(roomRef, `players/${finalPlayerId}`), newPlayer);
           }
           toast({ title: "Joined Room!", description: `Successfully joined room ${roomId}.` });
-          localStorage.setItem('patternPartyCurrentRoomId', roomId); // Store current room
+          localStorage.setItem('patternPartyCurrentRoomId', roomId); 
           router.push(`/room/${roomId}`);
         } else {
           toast({ title: "Room Not Found", description: `Room ${roomId} does not exist.`, variant: "destructive" });
@@ -203,40 +203,6 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
     }
   };
   
-  const handleSimulatedLogin = () => {
-    if (isAuthenticated) {
-        toast({ title: "Already Logged In", description: "You are already logged in." });
-        return;
-    }
-
-    const email = window.prompt("Simulated Login: Enter your email (e.g., test@example.com)");
-    if (!email) {
-        toast({ title: "Login Cancelled", description: "Login process was cancelled.", variant: "default" });
-        return;
-    }
-
-    const password = window.prompt("Simulated Login: Enter your password (e.g., password123)");
-    if (!password) {
-        toast({ title: "Login Cancelled", description: "Login process was cancelled.", variant: "default" });
-        return;
-    }
-
-    const nameParts = email.split('@');
-    const dummyNameFromEmail = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : "User" + Math.floor(Math.random() * 1000);
-    const dummyUid = `uid_${Math.random().toString(36).substr(2, 9)}`;
-    
-    localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-    localStorage.setItem('drawlyUserDisplayName', dummyNameFromEmail);
-    localStorage.setItem('drawlyUserUid', dummyUid);
-    
-    setIsAuthenticated(true);
-    setAuthPlayerId(dummyUid);
-    setPlayerName(dummyNameFromEmail); // This is important for pre-filling
-    setAuthDisplayName(dummyNameFromEmail);
-    
-    toast({ title: "Logged In!", description: `Welcome, ${dummyNameFromEmail}!`});
-  };
-
 
   return (
     <Card className="w-full max-w-md shadow-xl animate-in fade-in-50 duration-500">
@@ -253,7 +219,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
           {!isAuthenticated && (
              <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-center">
                 <p className="text-sm text-blue-700 mb-2">Want to use referrals or save your progress? Login first!</p>
-                <Button type="button" variant="outline" size="sm" onClick={handleSimulatedLogin}>
+                <Button type="button" variant="outline" size="sm" onClick={() => router.push('/auth')}>
                    <LogIn className="mr-2 h-4 w-4"/> Login / Sign Up
                 </Button>
              </div>
@@ -299,7 +265,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   onChange={(e) => setReferralCode(e.target.value)}
                   placeholder="Enter referrer's User ID"
                   className="text-base py-3"
-                  maxLength={20} // UIDs can be longer
+                  maxLength={20} 
                   disabled={isLoading || !isAuthenticated}
                 />
                  <p className="text-xs text-muted-foreground">
@@ -353,7 +319,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
             </>
           )}
         </CardContent>
-        <CardFooter>
+        <CardFooter className="flex flex-col gap-2">
           <Button type="submit" className="w-full text-lg py-6" disabled={isLoading}>
             {isLoading ? (
               <>
@@ -361,9 +327,12 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                 {mode === 'create' ? 'Creating...' : 'Joining...'}
               </>
             ) : (
-              mode === 'create' ? 'Create Room &amp; Start Playing' : 'Join Room &amp; Play'
+              mode === 'create' ? 'Create Room & Start Playing' : 'Join Room & Play'
             )}
           </Button>
+          <Link href="/" className="text-sm text-muted-foreground hover:text-primary">
+            Back to Home
+          </Link>
         </CardFooter>
       </form>
     </Card>

@@ -21,7 +21,6 @@ export default function HomePage() {
   const [userUid, setUserUid] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check for simulated auth state in localStorage
     const authStatus = localStorage.getItem('drawlyAuthStatus');
     const storedName = localStorage.getItem('drawlyUserDisplayName');
     const storedUid = localStorage.getItem('drawlyUserUid');
@@ -33,37 +32,6 @@ export default function HomePage() {
     }
   }, []);
 
-  const handleSimulatedLogin = () => {
-    if (isAuthenticated) {
-        toast({ title: "Already Logged In", description: "You are already logged in." });
-        return;
-    }
-
-    const email = window.prompt("Simulated Login: Enter your email (e.g., test@example.com)");
-    if (!email) {
-        toast({ title: "Login Cancelled", description: "Login process was cancelled.", variant: "default" });
-        return;
-    }
-
-    const password = window.prompt("Simulated Login: Enter your password (e.g., password123)");
-    if (!password) {
-        toast({ title: "Login Cancelled", description: "Login process was cancelled.", variant: "default" });
-        return;
-    }
-    
-    const nameParts = email.split('@');
-    const dummyNameFromEmail = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : "User" + Math.floor(Math.random() * 1000);
-    const dummyUid = `uid_${Math.random().toString(36).substr(2, 9)}`;
-
-    localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-    localStorage.setItem('drawlyUserDisplayName', dummyNameFromEmail);
-    localStorage.setItem('drawlyUserUid', dummyUid);
-    setIsAuthenticated(true);
-    setUserDisplayName(dummyNameFromEmail);
-    setUserUid(dummyUid);
-    toast({ title: "Logged In!", description: `Welcome, ${dummyNameFromEmail}!`});
-  };
-
   const handleLogout = () => {
     localStorage.removeItem('drawlyAuthStatus');
     localStorage.removeItem('drawlyUserDisplayName');
@@ -74,7 +42,7 @@ export default function HomePage() {
     toast({ title: "Logged Out", description: "You have been logged out."});
   };
 
-  const handleNavigation = (path: string, type: 'create' | 'join') => {
+  const handleNavigation = (path: string, type: 'create' | 'join' | 'auth') => {
     if (type === 'create') setIsNavigatingCreate(true);
     if (type === 'join') setIsNavigatingJoin(true);
     router.push(path);
@@ -114,7 +82,7 @@ export default function HomePage() {
             <p className="text-sm text-muted-foreground mb-4">
               Sign up or log in to get your unique referral ID. Share it with friends and earn rewards when they play!
             </p>
-            <Button size="lg" className="w-full" onClick={handleSimulatedLogin}>
+            <Button size="lg" className="w-full" onClick={() => handleNavigation('/auth', 'auth')}>
               <LogIn className="mr-2 h-5 w-5" /> Login / Sign Up
             </Button>
           </CardContent>
