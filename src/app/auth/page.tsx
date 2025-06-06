@@ -35,7 +35,7 @@ const generateShortAlphaNumericCode = (length: number): string => {
 };
 
 const LSTORAGE_PENDING_REFERRAL_KEY = "drawlyPendingReferralCode";
-const LSTORAGE_DEVICE_HAS_ACCOUNT_KEY = 'drawlyDeviceHasAccount';
+const LSTORAGE_DEVICE_HAS_ACCOUNT_KEY = 'drawlyDeviceHasAccount'; // To be removed if not blocking new accounts
 const LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY = 'drawlyDeviceOriginalReferrerUid';
 
 
@@ -54,34 +54,34 @@ export default function AuthPage() {
   const [isReferralCodeLocked, setIsReferralCodeLocked] = useState(false);
 
  useEffect(() => {
-    // This effect handles pre-filling from localStorage or URL and setting auth mode.
-    // It runs once on mount and if searchParams change (for direct /auth?referralCode= links or action changes).
+    // This effect handles pre-filling referral code and setting auth mode.
+    // It runs once on mount and if searchParams change.
 
-    // Step 1: Attempt to load referral code from localStorage (highest priority)
+    // Priority 1: Check localStorage for a pending referral code
     const codeFromStorage = localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY);
     if (codeFromStorage && codeFromStorage.trim() !== "") {
       setReferralCodeInput(codeFromStorage.trim().toUpperCase());
       setIsReferralCodeLocked(true);
       setIsSigningUp(true); // Referrals always default to signup mode
-      return; // Found in storage, no need to check URL for referral code or action param for mode
+      return; // Found in storage, no need to check URL or action param
     }
 
-    // Step 2: If not in storage, check URL parameters for referralCode (fallback for direct links)
-    const codeFromUrl = searchParams.get('referralCode');
+    // Priority 2: If not in storage, check URL query parameter 'ref'
+    const codeFromUrl = searchParams.get('ref'); // Changed from 'referralCode' to 'ref'
     if (codeFromUrl && codeFromUrl.trim() !== "") {
       const urlCode = codeFromUrl.trim().toUpperCase();
       setReferralCodeInput(urlCode);
       setIsReferralCodeLocked(true);
       setIsSigningUp(true); // Referrals always default to signup mode
       // Also, set it in localStorage so it persists if user navigates away and back
-      // This ensures that even if they got here directly, the code "sticks" for this session
-      if (!localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY)) { 
+      // Only set if not already present from a previous /referral/SHORTCODE visit
+      if (!localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY)) {
           localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, urlCode);
       }
-      return; // Found in URL, no need to check action param for default mode
+      return; // Found in URL, no need to check action param
     }
 
-    // Step 3: If no referral code found from storage or URL, determine mode by 'action' param or default
+    // No referral code found from storage or URL, determine mode by 'action' param or default
     setIsReferralCodeLocked(false); // No referral code, so input is editable
     const actionFromUrl = searchParams.get('action');
     if (actionFromUrl === 'login') {
@@ -97,13 +97,8 @@ export default function AuthPage() {
     if (isGoogleAuth) setIsLoadingGoogle(true);
     else setIsLoadingEmail(true);
 
-    const deviceHasAccount = localStorage.getItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY);
-    if (isSigningUp && deviceHasAccount === 'true') {
-        // This check was removed based on "They can register, but They will always be tagged as referred by the original referrer"
-        // However, if the goal was to completely block new accounts, this is where it would be.
-        // For now, we allow multiple accounts but lock the referrer.
-    }
-
+    // The LSTORAGE_DEVICE_HAS_ACCOUNT_KEY check for blocking multiple accounts was removed
+    // as per requirement "They can register, but they will always be tagged as referred by the original referrer".
 
     let finalEmail = email;
     let finalDisplayName = displayName;
@@ -129,14 +124,6 @@ export default function AuthPage() {
 
     try {
       if (isSigningUp) {
-        // Check if device already has an account - this logic has been superseded by "one device -> one referrer"
-        // const deviceHasAccount = localStorage.getItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY);
-        // if (deviceHasAccount === 'true') {
-        //   toast({ title: "Account Exists", description: "An account has already been registered on this device. Multiple accounts are not permitted for this demonstration.", variant: "destructive" });
-        //   if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-        //   return;
-        // }
-
         let newShortReferralCode = '';
         let codeExists = true;
         let attempts = 0;
@@ -214,7 +201,6 @@ export default function AuthPage() {
         await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
         
         localStorage.removeItem(LSTORAGE_PENDING_REFERRAL_KEY); // Clear pending code after successful signup
-        // localStorage.setItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY, 'true'); // Mark device as having an account
 
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
@@ -222,7 +208,6 @@ export default function AuthPage() {
         let foundUser: UserProfile | null = null;
         let foundUid: string | null = null;
 
-        // Simulate checking DB for user by email (replace with actual Firebase Auth for real app)
         const allUsersRef = ref(database, 'users');
         const allUsersSnap = await get(allUsersRef);
         if (allUsersSnap.exists()) {
@@ -241,8 +226,8 @@ export default function AuthPage() {
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        finalDisplayName = foundUser.displayName; // Use display name from DB on login
-        localStorage.setItem('drawlyUserUid', foundUid); // Ensure UID from DB is stored
+        finalDisplayName = foundUser.displayName; 
+        localStorage.setItem('drawlyUserUid', foundUid); 
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
@@ -250,7 +235,7 @@ export default function AuthPage() {
       localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
       localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) );
 
-      const redirectPath = searchParams.get('redirect') || '/';
+      const redirectPath = searchParams.get('redirect') || '/'; // Keep 'redirect' param for post-auth navigation
       router.push(redirectPath);
 
     } catch (error) {
@@ -393,5 +378,3 @@ export default function AuthPage() {
     </div>
   );
 }
-
-    

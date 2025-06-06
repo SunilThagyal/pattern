@@ -21,11 +21,12 @@ export default function ReferralRedirectPage() {
         localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, shortCodeFromParams.trim().toUpperCase());
       }
       // Always redirect to auth page, which will pick up the code from localStorage
-      // Optionally, add action=signup to ensure it defaults to signup mode
-      router.replace(`/auth?action=signup`);
+      // Pass the shortCode in the 'ref' query parameter for potential direct link scenarios
+      // and ensure it defaults to signup mode.
+      router.replace(`/auth?ref=${shortCodeFromParams.trim().toUpperCase()}&action=signup`);
     } else if (params.shortCode !== undefined && params.shortCode !== null) {
       // shortCode resolved but was empty or invalid, redirect without referral
-      router.replace('/auth');
+      router.replace('/auth?action=signup'); // Default to signup even if code is invalid
     }
     // If params.shortCode is undefined/null, effect does nothing, waits for params to update.
   }, [params, router]);
