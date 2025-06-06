@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import ReferralManagementTab from '@/components/earnings/ReferralManagementTab';
 import WithdrawalManagementTab from '@/components/earnings/WithdrawalManagementTab';
 import TransactionHistoryTab from '@/components/earnings/TransactionHistoryTab';
-import { DollarSign, Users, CreditCard, History, Loader2 } from 'lucide-react';
+import { DollarSign, Users, CreditCard, History, Loader2, Home } from 'lucide-react';
 import { APP_NAME } from '@/lib/config';
 import { database } from '@/lib/firebase';
 import { ref, get } from 'firebase/database';
@@ -76,13 +76,21 @@ export default function EarningsDashboardPage() {
   return (
     <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8">
       <header className="mb-8">
-        <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground flex items-center">
-          <DollarSign className="mr-3 h-8 w-8 text-primary" />
-          {APP_NAME} Earnings Dashboard
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Welcome, {userProfile.displayName || 'Player'}! Track your referrals, manage earnings, and view transactions.
-        </p>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+                <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground flex items-center">
+                <DollarSign className="mr-3 h-8 w-8 text-primary" />
+                {APP_NAME} Earnings Dashboard
+                </h1>
+                <p className="text-muted-foreground mt-1">
+                Welcome, {userProfile.displayName || 'Player'}! Track your referrals, manage earnings, and view transactions.
+                </p>
+            </div>
+            <Button variant="outline" onClick={() => router.push('/')} className="self-start sm:self-center">
+                <Home className="mr-2 h-4 w-4" />
+                Back to Game Lobby
+            </Button>
+        </div>
       </header>
 
       <Tabs defaultValue="referrals" className="w-full">
