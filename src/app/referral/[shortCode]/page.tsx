@@ -1,27 +1,22 @@
 
 import { redirect } from 'next/navigation';
-import type { NextPage } from 'next';
 
-interface ReferralRedirectPageProps {
-  params: { shortCode: string };
-}
+// This is a Server Component and should not contain client-side hooks or logic.
 
-// This is a Server Component
-const ReferralRedirectPage: NextPage<ReferralRedirectPageProps> = ({ params }) => {
-  const { shortCode } = params;
+export default function ReferralRedirectPage({ params }: { params: { shortCode: string } }) {
+  const shortCodeParam = params.shortCode;
 
-  if (shortCode && typeof shortCode === 'string' && shortCode.trim() !== '') {
-    const processedCode = shortCode.trim().toUpperCase();
-    // Construct the URL for redirection with query parameters
-    const redirectUrl = `/auth?ref=${processedCode}&action=signup`;
-    redirect(redirectUrl);
+  if (shortCodeParam && typeof shortCodeParam === 'string' && shortCodeParam.trim() !== '') {
+    const processedCode = shortCodeParam.trim().toUpperCase();
+    // Forcefully construct the redirect URL with the ref query parameter
+    const targetUrl = `/auth?ref=${encodeURIComponent(processedCode)}&action=signup`;
+    redirect(targetUrl);
   } else {
-    // If no valid code, redirect to auth page default to signup
+    // Fallback if no valid shortCode is provided, still guide to signup
     redirect('/auth?action=signup');
   }
 
-  // This return is technically unreachable due to redirect, but good practice for Server Components
-  return null; 
-};
-
-export default ReferralRedirectPage;
+  // The redirect function throws an error, so this part is not reached.
+  // Returning null is a convention for components that only redirect.
+  return null;
+}
