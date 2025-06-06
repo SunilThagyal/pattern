@@ -10,7 +10,7 @@ import { useToast as useShadToast } from '@/hooks/use-toast'; // Renamed to avoi
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings, Sparkles, X } from 'lucide-react';
+import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings, Sparkles, X, Gift } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 
@@ -451,6 +451,11 @@ const PlayerList = React.memo(({
                         </span>
                         <br />
                         <span className="font-normal text-gray-600">{player.score || 0} points</span>
+                        {(player.referralRewardsThisSession || 0) > 0 && (
+                           <div className="text-xs text-yellow-600 flex items-center justify-center gap-1">
+                               <Gift size={12} /> +{player.referralRewardsThisSession} bonus
+                           </div>
+                        )}
                         </div>
                         <div className="w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center">
                             {player.id === currentPlayerId ? (
@@ -528,7 +533,7 @@ const ChatArea = React.memo(({
     return (
     <div className="flex flex-col h-full w-full bg-gray-50 border border-gray-300 rounded-sm">
         <div className="p-1.5 border-b border-black bg-gray-100">
-            <h3 className="text-xs sm:text-sm font-semibold text-gray-700">Guesses & Chat</h3>
+            <h3 className="text-xs sm:text-sm font-semibold text-gray-700">Guesses &amp; Chat</h3>
         </div>
         <div className="flex-grow min-h-0 max-h-full">
              <ScrollArea className="h-full pr-3">
@@ -549,6 +554,9 @@ const ChatArea = React.memo(({
                     } else if (g.text.startsWith("[[SYSTEM_LEFT]]")) {
                          messageContent = <span className="font-semibold text-orange-600">{g.playerName} left the room!</span>;
                         messageClasses = cn(messageClasses, "bg-orange-100");
+                    } else if (g.text.startsWith("[[SYSTEM_REFERRAL_REWARD]]")) {
+                        messageContent = <span className="font-semibold text-yellow-600 flex items-center gap-1"><Gift size={14}/> {g.playerName}</span>; // Assuming g.playerName holds the full message
+                        messageClasses = cn(messageClasses, "bg-yellow-100");
                     } else if (g.isCorrect) {
                         const isFirst = (correctGuessersThisRound?.[0] === g.playerId) && (g.playerId !== currentDrawerId);
                         messageContent = <span className="font-semibold text-green-700">{g.playerName} guessed the word! {isFirst ? <span className="font-bold text-yellow-500">(First!)</span> : ""}</span>;
@@ -906,7 +914,7 @@ export default function GameRoomPage() {
     try {
         await update(ref(database, `rooms/${roomId}`), updates);
         for (const pid of Object.keys(currentRoomData.players || {})) {
-           await update(ref(database, `rooms/${roomId}/players/${pid}`), { score: 0 });
+           await update(ref(database, `rooms/${roomId}/players/${pid}`), { score: 0, referralRewardsThisSession: 0 }); // Reset referral rewards too
         }
         addSystemMessage("[[SYSTEM_GAME_RESET]]");
         toast({ title: "Game Reset", description: "Scores have been reset. Ready for a new game."});
@@ -1571,7 +1579,7 @@ export default function GameRoomPage() {
     if (!memoizedGuesses || memoizedGuesses.length === 0 || !playerId) return;
 
     const latestGuess = memoizedGuesses[memoizedGuesses.length - 1];
-    if (!latestGuess) return; // Guard against empty latestGuess
+    if (!latestGuess) return; 
 
     const potentialToastId = `toast-${latestGuess.timestamp}-${latestGuess.playerId}-${(latestGuess.text || "").substring(0,10)}`;
 
@@ -1626,6 +1634,30 @@ export default function GameRoomPage() {
     }
   }, []);
 
+  useEffect(() => {
+    // Logic for referral rewards when game ends
+    if (room?.gameState === 'game_over' && playerId === room?.hostId) {
+        const players = room.players || {};
+        Object.values(players).forEach(async (p) => {
+            if (p.referredByPlayerId) {
+                const referrerId = p.referredByPlayerId;
+                const referrer = players[referrerId];
+                if (referrer && referrer.isOnline) { // Check if referrer is in the room and online
+                    const referrerRef = ref(database, `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`);
+                    try {
+                        await runTransaction(referrerRef, (currentRewards) => {
+                            return (currentRewards || 0) + 1;
+                        });
+                        addSystemMessage(`[[SYSTEM_REFERRAL_REWARD]]`, `${referrer.name} earned a referral reward because ${p.name} (referred by them) completed the game!`);
+                    } catch (e) {
+                        console.error("Error awarding referral reward:", e);
+                    }
+                }
+            }
+        });
+    }
+  }, [room?.gameState, room?.players, playerId, room?.hostId, roomId, addSystemMessage]);
+
 
   if (isLoading) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl text-foreground">Loading Room...</span></div>;
   if (error) return <div className="text-center text-destructive p-8 bg-destructive/10 border border-destructive/20 rounded-md h-screen flex flex-col justify-center items-center"><AlertCircle className="mx-auto h-12 w-12 mb-4" /> <h2 className="text-2xl font-semibold mb-2">Error Loading Room</h2><p>{error}</p><Button onClick={() => window.location.href = '/'} className="mt-4">Go Home</Button></div>;
@@ -1661,15 +1693,16 @@ export default function GameRoomPage() {
             onCopyLink={handleCopyLink}
             onLeaveRoom={handleLeaveRoom}
             isLeavingRoom={isLeavingRoom}
+            playerId={playerId} // Pass playerId here
         />
       </Dialog>
 
       <div className={cn(
           "flex-grow flex flex-col gap-1 p-1 min-h-0 overflow-y-auto",
-          isMobile && "pb-16" // Padding for fixed input on mobile
+          isMobile && "pb-16" 
       )}>
 
-        <div className="h-3/5 w-full flex-shrink-0 relative"> {/* DrawingCanvas container */}
+        <div className="h-3/5 w-full flex-shrink-0 relative"> 
           <DrawingCanvas
             drawingData={memoizedDrawingData}
             onDraw={handleDraw}
@@ -1705,7 +1738,7 @@ export default function GameRoomPage() {
           )}
         </div>
 
-        <div className="flex-grow flex flex-row gap-1 min-h-0 w-full"> {/* PlayerList and ChatArea Container */}
+        <div className="flex-grow flex flex-row gap-1 min-h-0 w-full"> 
             <div className="w-1/2 h-full">
                 <PlayerList
                 players={playersArray}

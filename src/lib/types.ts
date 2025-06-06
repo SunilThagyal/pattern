@@ -5,6 +5,8 @@ export interface Player {
   score: number;
   isOnline: boolean;
   isHost?: boolean;
+  referredByPlayerId?: string | null; // ID of the player who referred this player
+  referralRewardsThisSession?: number; // Conceptual rewards earned in this room session
 }
 
 export interface Guess {
@@ -58,3 +60,4 @@ export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameSta
   wordSelectionEndsAt?: null;
   aiSketchDataUri?: null; // Initialize new field
 };
+

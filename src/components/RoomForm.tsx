@@ -3,7 +3,7 @@
 
 import { useState, useEffect, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { ref, set, get, child, serverTimestamp } from 'firebase/database';
+import { ref, set, get, child, serverTimestamp, update } from 'firebase/database';
 import { database } from '@/lib/firebase';
 import type { Room, Player, RoomCreationData, RoomConfig } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Timer, ListChecks, TextCursorInput } from 'lucide-react'; 
+import { Loader2, Timer, ListChecks, TextCursorInput, UserPlus } from 'lucide-react';
 
 interface RoomFormProps {
   mode: 'create' | 'join';
@@ -21,6 +21,7 @@ interface RoomFormProps {
 export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   const [playerName, setPlayerName] = useState('');
   const [roomId, setRoomId] = useState(initialRoomId || '');
+  const [referralCode, setReferralCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
@@ -78,7 +79,14 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
 
     if (mode === 'create') {
       const newRoomId = Math.random().toString(36).substr(2, 6).toUpperCase();
-      const player: Player = { id: playerId, name: playerName, score: 0, isOnline: true, isHost: true };
+      const player: Player = { 
+        id: playerId, 
+        name: playerName, 
+        score: 0, 
+        isOnline: true, 
+        isHost: true,
+        referralRewardsThisSession: 0,
+      };
       
       const roomConfig: RoomConfig = {
         roundTimeoutSeconds: roundTimeoutSeconds,
@@ -119,19 +127,42 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         const snapshot = await get(roomRef);
         if (snapshot.exists()) {
           const room: Room = snapshot.val();
+          const playerUpdates: Partial<Player> = {
+            isOnline: true,
+            name: playerName,
+          };
+
+          if (referralCode.trim()) {
+            // Basic validation: check if referralCode is not the player's own ID
+            if (referralCode.trim() !== playerId) {
+                // We don't validate if the referrerId actually exists globally here for simplicity.
+                // In a full system, you'd check against a users table.
+                playerUpdates.referredByPlayerId = referralCode.trim();
+                toast({ title: "Referral Applied", description: "Referral code has been noted.", variant: "default" });
+            } else {
+                toast({ title: "Invalid Referral", description: "You cannot refer yourself.", variant: "destructive" });
+            }
+          }
+
+
           if (room.players[playerId]) { 
-             await set(child(roomRef, `players/${playerId}/isOnline`), true);
-             if (room.players[playerId].name !== playerName) {
-                await set(child(roomRef, `players/${playerId}/name`), playerName);
-             }
+             await update(child(roomRef, `players/${playerId}`), playerUpdates);
           } else { 
             if (Object.keys(room.players || {}).length >= 10) { 
                 toast({ title: "Room Full", description: "This room has reached its maximum player limit.", variant: "destructive" });
                 setIsLoading(false);
                 return;
             }
-            const player: Player = { id: playerId, name: playerName, score: 0, isOnline: true, isHost: false };
-            await set(child(roomRef, `players/${playerId}`), player);
+            const newPlayer: Player = { 
+                id: playerId, 
+                name: playerName, 
+                score: 0, 
+                isOnline: true, 
+                isHost: false,
+                referralRewardsThisSession: 0,
+                ...playerUpdates // includes referredByPlayerId if set
+            };
+            await set(child(roomRef, `players/${playerId}`), newPlayer);
           }
           toast({ title: "Joined Room!", description: `Successfully joined room ${roomId}.` });
           router.push(`/room/${roomId}`);
@@ -172,20 +203,38 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
             />
           </div>
           {mode === 'join' && (
-            <div className="space-y-2">
-              <Label htmlFor="roomId" className="text-lg">Room ID</Label>
-              <Input
-                id="roomId"
-                type="text"
-                value={roomId}
-                onChange={(e) => setRoomId(e.target.value.toUpperCase())}
-                placeholder="Enter 6-character Room ID"
-                required
-                disabled={!!initialRoomId || isLoading}
-                className="text-base py-6"
-                maxLength={6}
-              />
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="roomId" className="text-lg">Room ID</Label>
+                <Input
+                  id="roomId"
+                  type="text"
+                  value={roomId}
+                  onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                  placeholder="Enter 6-character Room ID"
+                  required
+                  disabled={!!initialRoomId || isLoading}
+                  className="text-base py-6"
+                  maxLength={6}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="referralCode" className="text-lg flex items-center">
+                  <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
+                </Label>
+                <Input
+                  id="referralCode"
+                  type="text"
+                  value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value)}
+                  placeholder="Enter referrer's ID"
+                  className="text-base py-3"
+                  maxLength={9}
+                  disabled={isLoading}
+                />
+                 <p className="text-xs text-muted-foreground">Ask your friend for their 9-character Player ID.</p>
+              </div>
+            </>
           )}
           {mode === 'create' && (
             <>
@@ -240,7 +289,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                 {mode === 'create' ? 'Creating...' : 'Joining...'}
               </>
             ) : (
-              mode === 'create' ? 'Create Room & Start Playing' : 'Join Room & Play'
+              mode === 'create' ? 'Create Room &amp; Start Playing' : 'Join Room &amp; Play'
             )}
           </Button>
         </CardFooter>
@@ -248,3 +297,4 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
     </Card>
   );
 }
+
