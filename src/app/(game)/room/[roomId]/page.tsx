@@ -33,6 +33,11 @@ import {
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
 
+// Scoring Constants
+const MaxGuesserPoints = 100;
+const BaseDrawerPointsPerGuess = 50;
+const FirstGuesserBonus = 10;
+
 
 const WordSelectionDialog = dynamic(() => import('@/components/game/WordSelectionDialog').then(mod => mod.WordSelectionDialog), {
   loading: () => <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-30"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>,
@@ -930,6 +935,7 @@ export default function GameRoomPage() {
         currentRoundNumber: 0,
         currentDrawerId: null,
         currentPattern: null,
+        roundStartedAt: null,
         roundEndsAt: null,
         wordSelectionEndsAt: null,
         guesses: [],
@@ -1034,12 +1040,13 @@ export default function GameRoomPage() {
         gameState: 'word_selection',
         currentDrawerId: newDrawer.id,
         currentPattern: null,
+        roundStartedAt: null,
         roundEndsAt: null,
         wordSelectionEndsAt: Date.now() + 15 * 1000,
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
         aiSketchDataUri: null,
-        guesses: currentRoomData.guesses || [], 
+        guesses: [], 
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection.slice(0,5),
         revealedPattern: [],
@@ -1068,9 +1075,12 @@ export default function GameRoomPage() {
     const initialRevealedPattern = word.split('').map(char => char === ' ' ? ' ' : '_');
     const newUsedWords = Array.from(new Set([...(currentRoomData.usedWords || []).map(w => w.toLowerCase()), word.toLowerCase()]));
 
+    const newRoundEndsAt = Date.now() + currentRoomData.config.roundTimeoutSeconds * 1000;
+
     const updatesForDrawingStart: Partial<Room> = {
         currentPattern: word,
-        roundEndsAt: Date.now() + currentRoomData.config.roundTimeoutSeconds * 1000,
+        roundStartedAt: serverTimestamp() as any, // Firebase will set this
+        roundEndsAt: newRoundEndsAt,
         selectableWords: [],
         wordSelectionEndsAt: null,
         correctGuessersThisRound: [],
@@ -1099,33 +1109,56 @@ export default function GameRoomPage() {
     if (!currentRoomSnapshot.exists()) return;
     const currentRoomData: Room = currentRoomSnapshot.val();
 
-    if (!currentRoomData || currentRoomData.gameState !== 'drawing' || !playerId || !currentRoomData.currentDrawerId ) {
+    if (!currentRoomData || currentRoomData.gameState !== 'drawing' || !playerId || !currentRoomData.currentDrawerId || !currentRoomData.config || !currentRoomData.roundStartedAt ) {
        return;
     }
 
-    const correctGuessers = currentRoomData.correctGuessersThisRound || [];
-    const drawerPointsEarned = correctGuessers.length * 20;
+    // Drawer Scoring
+    let totalDrawerPointsEarned = 0;
+    if (currentRoomData.roundStartedAt && currentRoomData.guesses) {
+        const roundStartedAt = currentRoomData.roundStartedAt;
+        const roundTimeLimit = currentRoomData.config.roundTimeoutSeconds;
 
-    if (drawerPointsEarned > 0) {
+        const correctGuessesForThisRound = (currentRoomData.guesses || []).filter(g => 
+            g.isCorrect && 
+            g.timestamp >= roundStartedAt && 
+            (currentRoomData.correctGuessersThisRound || []).includes(g.playerId)
+        );
+        
+        correctGuessesForThisRound.forEach(guess => {
+            const guessTimeSeconds = Math.max(0, (guess.timestamp - roundStartedAt) / 1000);
+            const clampedGuessTime = Math.min(guessTimeSeconds, roundTimeLimit);
+            const pointsForThisGuesser = Math.round(BaseDrawerPointsPerGuess * (clampedGuessTime / roundTimeLimit));
+            totalDrawerPointsEarned += pointsForThisGuesser;
+        });
+    }
+    
+    if (totalDrawerPointsEarned > 0) {
         const drawerPlayerRef = ref(database, `rooms/${roomId}/players/${currentRoomData.currentDrawerId}`);
-        const drawerPlayerSnap = await get(drawerPlayerRef);
-        if (drawerPlayerSnap.exists()) {
-            const drawerPlayerData = drawerPlayerSnap.val() as Player;
-            await update(drawerPlayerRef, { score: (drawerPlayerData.score || 0) + drawerPointsEarned });
+        try {
+            await runTransaction(drawerPlayerRef, (playerData: Player | null) => {
+                if (playerData) {
+                    playerData.score = (playerData.score || 0) + totalDrawerPointsEarned;
+                }
+                return playerData;
+            });
+        } catch (e) {
+            console.error("Error updating drawer score:", e);
         }
     }
+
 
     if (currentRoomData.hostId === playerId) {
         try {
             await update(ref(database, `rooms/${roomId}`), {
                 gameState: 'round_end',
                 wordSelectionEndsAt: null,
-                roundEndsAt: null
+                // roundEndsAt: null, // Keep roundEndsAt for potential display or review
             });
             if (currentRoomData.currentPattern) {
                  addSystemMessage(`[[SYSTEM_ROUND_END_WORD]]`, currentRoomData.currentPattern);
             }
-            if (correctGuessers.length === 0 && currentRoomData.gameState === 'drawing') {
+            if ((currentRoomData.correctGuessersThisRound || []).length === 0 && currentRoomData.gameState === 'drawing') {
                 addSystemMessage(`[[SYSTEM_NOBODY_GUESSED]]`, `Nobody guessed the word!`);
             }
             toast({ title: "Round Over!", description: `${reason} The word was: ${currentRoomData.currentPattern || "N/A"}`});
@@ -1143,23 +1176,26 @@ export default function GameRoomPage() {
         if (!currentRoomSnapshot.exists()) return;
         const currentRoom: Room = currentRoomSnapshot.val();
 
-        if (!currentRoom || !playerId || !playerName || currentRoom.currentDrawerId === playerId || currentRoom.gameState !== 'drawing' || !currentRoom.currentPattern) {
+        if (!currentRoom || !playerId || !playerName || currentRoom.currentDrawerId === playerId || currentRoom.gameState !== 'drawing' || !currentRoom.currentPattern || !currentRoom.config || !currentRoom.roundStartedAt) {
+            setIsSubmittingGuess(false);
             return;
         }
 
         if ((currentRoom.correctGuessersThisRound || []).includes(playerId)) {
             toast({title: "Already Guessed", description: "You've already guessed correctly this round!", variant: "default"});
+            setIsSubmittingGuess(false);
             return;
         }
 
         const isCorrect = guessText.toLowerCase() === currentRoom.currentPattern.toLowerCase();
+        const guessTimestampForScoring = Date.now(); // For immediate local calculation
 
         const newGuess: Guess = {
           playerId,
           playerName,
           text: guessText,
           isCorrect,
-          timestamp: serverTimestamp() as any
+          timestamp: serverTimestamp() as any // For DB record
         };
 
         const guessesRef = ref(database, `rooms/${roomId}/guesses`);
@@ -1173,32 +1209,55 @@ export default function GameRoomPage() {
             newCorrectGuessers.push(playerId);
             updates.correctGuessersThisRound = newCorrectGuessers;
 
-            const guesserPosition = newCorrectGuessers.length - 1;
             let pointsAwardedToGuesser = 0;
-            if (guesserPosition === 0) pointsAwardedToGuesser = 100;
-            else if (guesserPosition === 1) pointsAwardedToGuesser = 80;
-            else if (guesserPosition === 2) pointsAwardedToGuesser = 60;
-            else pointsAwardedToGuesser = 50;
+            const roundStartedAt = currentRoom.roundStartedAt;
+            const roundTimeLimit = currentRoom.config.roundTimeoutSeconds;
 
+            if (roundStartedAt && roundTimeLimit > 0) {
+                const guessTimeSeconds = Math.max(0, (guessTimestampForScoring - roundStartedAt) / 1000);
+                const clampedGuessTime = Math.min(guessTimeSeconds, roundTimeLimit);
+
+                pointsAwardedToGuesser = Math.round(MaxGuesserPoints * ((roundTimeLimit - clampedGuessTime) / roundTimeLimit));
+
+                if (newCorrectGuessers.length === 1) { // First correct guesser
+                    pointsAwardedToGuesser += FirstGuesserBonus;
+                }
+            }
+            
             const playerRef = ref(database, `rooms/${roomId}/players/${playerId}`);
             const currentPlayerData = currentRoom.players[playerId];
             if (currentPlayerData) {
-                 await update(playerRef, { score: (currentPlayerData.score || 0) + pointsAwardedToGuesser });
+                try {
+                    await runTransaction(playerRef, (playerData: Player | null) => {
+                        if (playerData) {
+                            playerData.score = (playerData.score || 0) + pointsAwardedToGuesser;
+                        }
+                        return playerData;
+                    });
+                } catch (e) {
+                    console.error("Error updating guesser score:", e);
+                }
             }
         }
 
         await update(ref(database, `rooms/${roomId}`), updates);
 
-        const updatedRoomSnapForEndRound = await get(ref(database, `rooms/${roomId}`));
-        if (!updatedRoomSnapForEndRound.exists()) return;
-        const updatedRoomDataForEndRound: Room = updatedRoomSnapForEndRound.val();
+        // Check if all non-drawing players have guessed correctly to end the round
+        if (currentRoom.hostId === playerId && isCorrect) { // Only host checks for auto-end
+            const updatedRoomSnapForEndRound = await get(ref(database, `rooms/${roomId}`));
+             if (!updatedRoomSnapForEndRound.exists()) {
+                setIsSubmittingGuess(false);
+                return;
+             }
+            const updatedRoomDataForEndRound: Room = updatedRoomSnapForEndRound.val();
 
-        if (updatedRoomDataForEndRound.gameState === 'drawing' && updatedRoomDataForEndRound.hostId === playerId) {
-            const onlineNonDrawingPlayers = Object.values(updatedRoomDataForEndRound.players || {}).filter(p => p.isOnline && p.id !== updatedRoomDataForEndRound.currentDrawerId);
-            const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (updatedRoomDataForEndRound.correctGuessersThisRound || []).includes(p.id));
+            if (updatedRoomDataForEndRound.gameState === 'drawing') {
+                const onlineNonDrawingPlayers = Object.values(updatedRoomDataForEndRound.players || {}).filter(p => p.isOnline && p.id !== updatedRoomDataForEndRound.currentDrawerId);
+                const allGuessed = onlineNonDrawingPlayers.length > 0 && onlineNonDrawingPlayers.every(p => (updatedRoomDataForEndRound.correctGuessersThisRound || []).includes(p.id));
 
-            if(allGuessed){
-                endCurrentRound("All players guessed correctly!");
+                if(allGuessed){
+                    endCurrentRound("All players guessed correctly!");
+                }
             }
         }
     } catch (error) {
@@ -1431,6 +1490,10 @@ export default function GameRoomPage() {
         if (roomData.aiSketchDataUri === undefined) {
             roomData.aiSketchDataUri = null;
         }
+        if (roomData.roundStartedAt === undefined) {
+            roomData.roundStartedAt = null;
+        }
+
 
         setRoom(roomData);
         setError(null);
@@ -1494,7 +1557,7 @@ export default function GameRoomPage() {
   }, [roomId, playerId, toast, isLoading, addSystemMessage, playerName, isAuthenticated]);
 
   useEffect(() => {
-    if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt) {
+    if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt && room?.roundStartedAt) {
       let roundTimer: NodeJS.Timeout | null = null;
 
       const onlineNonDrawingPlayers = Object.values(room.players || {}).filter(p => p.isOnline && p.id !== room?.currentDrawerId);
@@ -1512,7 +1575,7 @@ export default function GameRoomPage() {
                     }
                 }
             });
-        }, 500);
+        }, 500); // Short delay to allow final guess processing
       } else {
         const now = Date.now();
         const timeLeftMs = room.roundEndsAt - now;
@@ -1542,7 +1605,7 @@ export default function GameRoomPage() {
         if (roundTimer) clearTimeout(roundTimer);
       };
     }
-  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room?.currentDrawerId, room?.correctGuessersThisRound, roomId]);
+  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentRound, room?.players, room?.currentDrawerId, room?.correctGuessersThisRound, roomId, room?.roundStartedAt]);
 
 
   useEffect(() => {
@@ -1720,8 +1783,6 @@ export default function GameRoomPage() {
 
         const totalPlayersInGame = Object.keys(room.players).length;
         const totalConfiguredRounds = room.config.totalRounds;
-        // Ensure currentRoundNumber is considered if game_over can be triggered before all rounds finish.
-        // For now, we assume game_over means all configured rounds should have been intended to complete.
         const allRoundsCompleted = room.currentRoundNumber >= totalConfiguredRounds;
 
 
@@ -1739,7 +1800,6 @@ export default function GameRoomPage() {
                 if (referrerProfileSnap.exists()) { 
                   const referrerName = referrerProfileSnap.val().displayName || "Referrer";
                   
-                  // Apply new reward logic
                   let actualReward = 0;
                   if (!allRoundsCompleted) {
                       console.log(`[ReferralReward] Game for ${p.name} (referred) did not complete all ${totalConfiguredRounds} rounds. Current round: ${room.currentRoundNumber}. No reward.`);
@@ -1748,7 +1808,7 @@ export default function GameRoomPage() {
                   } else if (totalConfiguredRounds < MIN_ROUNDS_FOR_REWARD) {
                       console.log(`[ReferralReward] Game for ${p.name} (referred) had ${totalConfiguredRounds} rounds configured, less than min ${MIN_ROUNDS_FOR_REWARD}. No reward.`);
                   } else {
-                      const calculatedReward = REFERRAL_REWARD_BASE_RATE * totalPlayersInGame * totalConfiguredRounds * 1; // CompletionFactor is 1
+                      const calculatedReward = REFERRAL_REWARD_BASE_RATE * totalPlayersInGame * totalConfiguredRounds * 1; 
                       actualReward = Math.min(calculatedReward, MAX_REWARD_PER_GAME);
                   }
 

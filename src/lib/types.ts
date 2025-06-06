@@ -45,6 +45,7 @@ export interface Room {
   drawingData: DrawingPoint[];
   gameState: 'waiting' | 'word_selection' | 'drawing' | 'round_end' | 'game_over';
   currentRoundNumber: number;
+  roundStartedAt?: number | null; // Timestamp for when the current drawing round started
   roundEndsAt?: number | null;
   wordSelectionEndsAt?: number | null;
   correctGuessersThisRound?: string[];
@@ -59,6 +60,7 @@ export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameSta
   selectableWords?: string[];
   usedWords?: string[];
   wordSelectionEndsAt?: null;
+  roundStartedAt?: null; // Added for consistency
   aiSketchDataUri?: null;
 };
 

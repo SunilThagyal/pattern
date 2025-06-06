@@ -33,7 +33,7 @@ export function GameStateModals({
     ? { text: isStartingNextRoundOrGame ? 'Starting...' : 'Play Again', icon: isStartingNextRoundOrGame ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} /> }
     : null; 
 
-  const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] 
+  const currentDrawerName = room.currentDrawerId && room.players && room.players[room.currentDrawerId] 
     ? room.players[room.currentDrawerId].name 
     : 'N/A';
 
@@ -46,26 +46,14 @@ export function GameStateModals({
             <p className="text-md mb-2 text-center text-foreground">The word was: <strong className="font-mono text-primary">{room.currentPattern || "N/A"}</strong></p>
             <p className="text-md mb-3 text-center text-foreground">Drawer: {currentDrawerName}</p>
             
-            <h4 className="font-semibold mt-3 mb-1 text-center text-foreground">Scores This Round:</h4>
-            <ul className="space-y-1 max-h-32 overflow-y-auto text-sm text-center mb-3">
-              {players.map(player => {
-                let pointsEarnedThisRound = 0;
-                if (player.id === room.currentDrawerId) {
-                  pointsEarnedThisRound = (room.correctGuessersThisRound?.length || 0) * 20;
-                } else if (room.correctGuessersThisRound?.includes(player.id)) {
-                  const position = room.correctGuessersThisRound.indexOf(player.id);
-                  pointsEarnedThisRound = position === 0 ? 100 : position === 1 ? 80 : position === 2 ? 60 : 50;
-                }
-                return (
-                  <li key={player.id} className="text-muted-foreground">
-                    {player.name}: {pointsEarnedThisRound > 0 ? <span className="text-green-600 font-semibold">+{pointsEarnedThisRound}</span> : <span className="text-gray-500">+0</span>}
-                  </li>
-                );
-              })}
-            </ul>
-            {room.correctGuessersThisRound && room.correctGuessersThisRound.length === 0 &&
-              <p className="text-sm italic text-center text-muted-foreground">No one guessed it right this time!</p>
-            }
+            <p className="text-sm text-center text-muted-foreground mt-3">
+              { (room.correctGuessersThisRound && room.correctGuessersThisRound.length > 0)
+                ? `${room.correctGuessersThisRound.length} player(s) guessed correctly!`
+                : "No one guessed it right this time!"
+              }
+            </p>
+            <p className="text-sm text-center text-muted-foreground">Check the player list for updated scores.</p>
+
             {roundEndCountdown !== null && <p className="mt-4 text-center text-lg font-semibold text-primary animate-pulse">Next round in {roundEndCountdown}s...</p>}
           </>
         )}
