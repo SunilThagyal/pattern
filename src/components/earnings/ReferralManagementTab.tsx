@@ -12,6 +12,7 @@ import { database } from '@/lib/firebase';
 import { ref, get, query, orderByChild, equalTo } from 'firebase/database';
 import type { UserProfile, ReferralEntry } from '@/lib/types';
 import { format } from 'date-fns';
+import { APP_NAME } from '@/lib/config'; // Added import
 
 interface ReferralManagementTabProps {
   authUserUid: string | null;
@@ -75,8 +76,8 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
     totalReferrals: referrals.length,
     totalEarnings: totalEarnings,
     // GamesToday & ActiveReferrals would require more complex queries or backend aggregation.
-    gamesToday: "N/A (Backend needed)",
-    activeReferrals: "N/A (Backend needed)",
+    gamesToday: "N/A",
+    activeReferrals: "N/A",
   };
 
 
@@ -153,6 +154,9 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
             </CardContent>
           </Card>
         </div>
+         <p className="text-xs text-muted-foreground mt-2">
+            Note: "Games by Referrals Today" and "Active Referrals" stats require backend processing for accurate, real-time data and are illustrative here.
+          </p>
       </section>
 
       <section>
