@@ -36,6 +36,7 @@ const generateShortAlphaNumericCode = (length: number): string => {
 
 const LSTORAGE_PENDING_REFERRAL_KEY = "drawlyPendingReferralCode";
 const LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY = 'drawlyDeviceOriginalReferrerUid';
+const LSTORAGE_DEVICE_HAS_ACCOUNT_KEY = 'drawlyDeviceHasAccount';
 
 
 export default function AuthPage() {
@@ -55,6 +56,7 @@ export default function AuthPage() {
   useEffect(() => {
     let finalReferralCode: string | null = null;
     let forcedSignupDueToReferral = false;
+    let derivedActionIsSignup = isSigningUp; // Start with current state
 
     // Priority 1: Check localStorage for a "pending" referral code
     const codeFromStorage = localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY);
@@ -67,25 +69,30 @@ export default function AuthPage() {
     if (!finalReferralCode && codeFromUrl && codeFromUrl.trim() !== "") {
       finalReferralCode = codeFromUrl.trim().toUpperCase();
       // If code came from URL and wasn't in storage, store it to make it "stick"
-      localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, finalReferralCode);
+      if (!codeFromStorage) { // Only set to storage if it wasn't already there
+          localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, finalReferralCode);
+      }
     }
 
     if (finalReferralCode) {
       setReferralCodeInput(finalReferralCode);
       setIsReferralCodeLocked(true); // Lock the input
       forcedSignupDueToReferral = true;
+      derivedActionIsSignup = true; // If referral code is locked, force signup mode
     } else {
       setIsReferralCodeLocked(false);
     }
 
     // Determine signup/login mode
-    const actionFromUrl = searchParams.get('action');
     if (forcedSignupDueToReferral) {
       setIsSigningUp(true); // Force signup if a referral code is locked
-    } else if (actionFromUrl === 'login') {
-      setIsSigningUp(false);
     } else {
-      setIsSigningUp(true); // Default to signup
+      const actionFromUrl = searchParams.get('action');
+      if (actionFromUrl === 'login') {
+        setIsSigningUp(false);
+      } else {
+        setIsSigningUp(true); // Default to signup or if action=signup
+      }
     }
   }, [searchParams]);
 
@@ -118,6 +125,14 @@ export default function AuthPage() {
 
     try {
       if (isSigningUp) {
+        // Device has account simulation check (removed as per new reqs, but keeping the key for original referrer)
+        // const deviceHasAccount = localStorage.getItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY);
+        // if (deviceHasAccount === 'true') {
+        //   toast({ title: "Account Limit", description: "An account has already been registered on this device for this prototype.", variant: "default" });
+        //   if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+        //   return;
+        // }
+
         let newShortReferralCode = '';
         let codeExists = true;
         let attempts = 0;
@@ -149,7 +164,6 @@ export default function AuthPage() {
 
         let actualReferrerUid: string | null = null;
         const deviceOriginalReferrerUid = localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY);
-        // Use referralCodeInput state, which is prefilled from localStorage or URL 'ref'
         const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); 
 
         if (deviceOriginalReferrerUid) {
@@ -195,6 +209,7 @@ export default function AuthPage() {
         await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid); 
         
         localStorage.removeItem(LSTORAGE_PENDING_REFERRAL_KEY); // Clear the pending code after use
+        // localStorage.setItem(LSTORAGE_DEVICE_HAS_ACCOUNT_KEY, 'true'); // Mark device as having an account
 
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
@@ -302,12 +317,12 @@ export default function AuthPage() {
             </div>
             {isSigningUp && (
               <div className="space-y-2">
-                <Label htmlFor="referralCode" className="text-lg flex items-center">
+                <Label htmlFor="referral_code" className="text-lg flex items-center">
                    <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
                 </Label>
                 <Input
-                  id="referralCode" 
-                  name="referralCode" 
+                  id="referral_code" 
+                  name="referral_code" 
                   type="text"
                   value={referralCodeInput}
                   onChange={(e) => { if (!isReferralCodeLocked) setReferralCodeInput(e.target.value.toUpperCase())}}
