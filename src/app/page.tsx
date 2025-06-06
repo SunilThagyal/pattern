@@ -4,12 +4,16 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign, Copy } from 'lucide-react'; // Changed Link2 to Copy
+import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign, Copy } from 'lucide-react';
 import Image from 'next/image';
 import { APP_NAME } from '@/lib/config';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/hooks/use-toast';
+import { database } from '@/lib/firebase';
+import { ref, get } from 'firebase/database';
+import type { UserProfile } from '@/lib/types';
+
 
 export default function HomePage() {
   const [isNavigatingCreate, setIsNavigatingCreate] = useState(false);
@@ -21,6 +25,7 @@ export default function HomePage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
   const [userUid, setUserUid] = useState<string | null>(null);
+  const [shortReferralCode, setShortReferralCode] = useState<string | null>(null);
 
   useEffect(() => {
     const authStatus = localStorage.getItem('drawlyAuthStatus');
@@ -31,6 +36,14 @@ export default function HomePage() {
       setIsAuthenticated(true);
       setUserDisplayName(storedName);
       setUserUid(storedUid);
+      // Fetch shortReferralCode
+      const userProfileRef = ref(database, `users/${storedUid}`);
+      get(userProfileRef).then((snapshot) => {
+        if (snapshot.exists()) {
+          const profile = snapshot.val() as UserProfile;
+          setShortReferralCode(profile.shortReferralCode || null);
+        }
+      });
     }
   }, []);
 
@@ -41,6 +54,7 @@ export default function HomePage() {
     setIsAuthenticated(false);
     setUserDisplayName(null);
     setUserUid(null);
+    setShortReferralCode(null);
     toast({ title: "Logged Out", description: "You have been logged out."});
   };
 
@@ -53,11 +67,13 @@ export default function HomePage() {
   };
   
   const handleCopyReferralLink = () => {
-    if (userUid && typeof window !== 'undefined') {
-      const referralLink = `${window.location.origin}/referral/${userUid}`;
+    if (shortReferralCode && typeof window !== 'undefined') {
+      const referralLink = `${window.location.origin}/referral/${shortReferralCode}`;
       navigator.clipboard.writeText(referralLink)
         .then(() => toast({ title: "Referral Link Copied!", description: "Your Referral Link is copied to clipboard." }))
         .catch(() => toast({ title: "Error", description: "Could not copy Referral Link.", variant: "destructive" }));
+    } else if (userUid && typeof window !== 'undefined' && !shortReferralCode) {
+        toast({ title: "Referral Code Unavailable", description: "Your short referral code is not yet available. Please try again shortly or re-login.", variant: "default" });
     }
   };
 
@@ -95,7 +111,7 @@ export default function HomePage() {
         </Card>
       )}
 
-      {isAuthenticated && userDisplayName && userUid && (
+      {isAuthenticated && userDisplayName && (
         <Card className="mb-8 w-full max-w-md bg-green-50 border border-green-200">
           <CardHeader>
             <CardTitle className="text-xl text-green-700">Welcome back, {userDisplayName}!</CardTitle>
@@ -106,12 +122,18 @@ export default function HomePage() {
                 <Gift className="mr-2 h-5 w-5 text-yellow-500"/> Your Referral Code:
               </p>
               <div className="flex items-center justify-center gap-2 mt-1">
-                <span className="font-mono text-green-700 p-1 bg-green-100 rounded-sm break-all text-xs">
-                  {userUid}
-                </span>
-                <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="h-auto p-1 text-green-600 hover:bg-green-200">
-                  <Copy className="mr-1 h-3 w-3"/>Copy Link
-                </Button>
+                {shortReferralCode ? (
+                  <>
+                    <span className="font-mono text-green-700 p-1 bg-green-100 rounded-sm break-all text-base">
+                      {shortReferralCode}
+                    </span>
+                    <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="h-auto p-1 text-green-600 hover:bg-green-200">
+                      <Copy className="mr-1 h-3 w-3"/>Copy Link
+                    </Button>
+                  </>
+                ) : (
+                  <span className="text-xs text-gray-500">Loading code...</span>
+                )}
               </div>
               <p className="text-xs mt-1">Share your referral link (copied with the button) with friends. You'll earn rewards in-game when they complete games!</p>
             </div>
@@ -194,3 +216,4 @@ export default function HomePage() {
     </div>
   );
 }
+

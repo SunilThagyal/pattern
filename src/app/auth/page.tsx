@@ -24,12 +24,23 @@ const GoogleIcon = () => (
   </svg>
 );
 
+const generateShortAlphaNumericCode = (length: number): string => {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // Only uppercase for easier reading/typing
+  let result = '';
+  const charactersLength = characters.length;
+  for (let i = 0; i < length; i++) {
+    result += characters.charAt(Math.floor(Math.random() * charactersLength));
+  }
+  return result;
+};
+
+
 export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
-  const [isSigningUp, setIsSigningUp] = useState(true); 
+  const [isSigningUp, setIsSigningUp] = useState(true);
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
@@ -45,11 +56,11 @@ export default function AuthPage() {
     if (urlReferralCode) {
       setReferralCodeInput(urlReferralCode);
       setInitialReferralCodeFromUrl(urlReferralCode); // Store it to disable the field
-      setIsSigningUp(true); 
+      setIsSigningUp(true);
     } else if (action === 'login') {
       setIsSigningUp(false);
     } else {
-      setIsSigningUp(true); 
+      setIsSigningUp(true);
     }
   }, [searchParams]);
 
@@ -59,17 +70,16 @@ export default function AuthPage() {
 
     let finalEmail = email;
     let finalDisplayName = displayName;
-    let finalPassword = password; 
+    let finalPassword = password;
 
     if (isGoogleAuth) {
-      finalEmail = `user${Math.floor(Math.random() * 10000)}@gmail.com`; 
+      finalEmail = `user${Math.floor(Math.random() * 10000)}@example.com`;
       finalDisplayName = (finalEmail.split('@')[0] || "GoogleUser") + Math.floor(Math.random() * 100);
       finalPassword = "google_simulated_password";
       if (isSigningUp && !displayName.trim()) {
-        setDisplayName(finalDisplayName); 
+        setDisplayName(finalDisplayName);
       }
     }
-
 
     if (!finalEmail.trim() || (isSigningUp && !finalDisplayName.trim()) || !finalPassword.trim()) {
       toast({ title: "Error", description: "Please fill all required fields.", variant: "destructive" });
@@ -85,77 +95,106 @@ export default function AuthPage() {
 
       if (isSigningUp) {
         if (userSnapshot.exists()) {
-          toast({ title: "User Exists", description: "This email is already registered. Try logging in.", variant: "destructive" });
+          toast({ title: "User Exists", description: "This email might be associated with an existing user. Try logging in.", variant: "destructive" });
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
+        
+        let newShortReferralCode = '';
+        let codeExists = true;
+        let attempts = 0;
+        while(codeExists && attempts < 10) { // Max 10 attempts to find a unique code
+            newShortReferralCode = generateShortAlphaNumericCode(5);
+            const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
+            const shortCodeSnap = await get(shortCodeMapRef);
+            codeExists = shortCodeSnap.exists();
+            attempts++;
+        }
+        if (codeExists) { // Failed to generate a unique code after multiple attempts
+            toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again.", variant: "destructive" });
+            if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+            return;
+        }
+
 
         const newUserProfile: UserProfile = {
           userId: simulatedUid,
           displayName: finalDisplayName,
           email: finalEmail,
-          referralCode: simulatedUid, 
+          referralCode: simulatedUid, // Internal long code
+          shortReferralCode: newShortReferralCode, // New short code
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
         };
-        
-        const actualReferralCodeToUse = initialReferralCodeFromUrl || referralCodeInput.trim();
 
-        if (actualReferralCodeToUse) {
-          if (actualReferralCodeToUse === simulatedUid) {
-             toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
-          } else {
-            const referrerRef = ref(database, `users/${actualReferralCodeToUse}`);
-            const referrerSnapshot = await get(referrerRef);
-            if (referrerSnapshot.exists()) {
-              newUserProfile.referredBy = actualReferralCodeToUse;
-              const referrerDisplayName = referrerSnapshot.val().displayName || "Referrer";
-              
-              const referralsBranchRef = ref(database, `referrals/${actualReferralCodeToUse}/${simulatedUid}`);
+        const actualReferralShortCodeToUse = initialReferralCodeFromUrl || referralCodeInput.trim();
+
+        if (actualReferralShortCodeToUse) {
+          const referrerMapRef = ref(database, `shortCodeToUserIdMap/${actualReferralShortCodeToUse}`);
+          const referrerMapSnap = await get(referrerMapRef);
+
+          if (referrerMapSnap.exists()) {
+            const referrerUserId = referrerMapSnap.val();
+            if (referrerUserId === simulatedUid) { // Check if short code maps to self
+               toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
+            } else {
+              newUserProfile.referredBy = referrerUserId;
+              const referrerProfileRef = ref(database, `users/${referrerUserId}`);
+              const referrerProfileSnap = await get(referrerProfileRef);
+              const referrerDisplayName = referrerProfileSnap.exists() ? referrerProfileSnap.val().displayName : "Referrer";
+
+              const referralsBranchRef = ref(database, `referrals/${referrerUserId}/${simulatedUid}`);
               await set(referralsBranchRef, {
                 referredUserName: finalDisplayName,
                 timestamp: serverTimestamp() as number,
               });
               toast({title: "Referral Applied!", description: `You were successfully referred by ${referrerDisplayName}.`});
-            } else {
-              toast({ title: "Referral Code Invalid", description: "The referral code entered was not found. Proceeding without referral.", variant: "default" });
             }
+          } else {
+            toast({ title: "Referral Code Invalid", description: "The referral code entered was not found. Proceeding without referral.", variant: "default" });
           }
         }
         await set(userRef, newUserProfile);
+        // Store the mapping for the new user's own short code
+        await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
+
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
-      } else { 
+      } else {
         let foundUser = null;
+        let foundUid: string | null = null;
+
         if (userSnapshot.exists() && userSnapshot.val().email === finalEmail) {
             foundUser = userSnapshot.val();
+            foundUid = simulatedUid; // This case is unlikely due to UID generation
         } else {
             const allUsersRef = ref(database, 'users');
             const allUsersSnap = await get(allUsersRef);
             if (allUsersSnap.exists()) {
                 const usersData = allUsersSnap.val();
-                for (const uid in usersData) {
-                    if (usersData[uid].email === finalEmail) {
-                        foundUser = usersData[uid];
-                        localStorage.setItem('drawlyUserUid', uid); 
+                for (const uid_key in usersData) {
+                    if (usersData[uid_key].email === finalEmail) {
+                        foundUser = usersData[uid_key];
+                        foundUid = uid_key;
                         break;
                     }
                 }
             }
         }
 
-        if (!foundUser) {
+        if (!foundUser || !foundUid) {
           toast({ title: "Login Failed", description: "No account found with this email. Try signing up.", variant: "destructive" });
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        finalDisplayName = foundUser.displayName; 
+        finalDisplayName = foundUser.displayName;
+        localStorage.setItem('drawlyUserUid', foundUid); // Set the correct UID on login
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
       localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-      localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : localStorage.getItem('drawlyUserUid') || simulatedUid); 
-      
+      localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : localStorage.getItem('drawlyUserUid') || simulatedUid);
+
       router.push('/');
     } catch (error) {
       console.error("Auth error:", error);
@@ -231,10 +270,10 @@ export default function AuthPage() {
                   id="referralCode"
                   type="text"
                   value={referralCodeInput}
-                  onChange={(e) => setReferralCodeInput(e.target.value)}
-                  placeholder="Enter referrer's User ID"
+                  onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
+                  placeholder="Enter 5-character code"
                   className="text-base py-3"
-                  maxLength={30} 
+                  maxLength={5}
                   disabled={isLoadingEmail || isLoadingGoogle || !!initialReferralCodeFromUrl}
                 />
                 {initialReferralCodeFromUrl && (
@@ -248,7 +287,7 @@ export default function AuthPage() {
               {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
               {isLoadingEmail ? 'Processing...' : (isSigningUp ? 'Sign Up with Email' : 'Login with Email')}
             </Button>
-            
+
             <div className="relative w-full my-2">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t" />
@@ -260,10 +299,10 @@ export default function AuthPage() {
               </div>
             </div>
 
-            <Button 
-              variant="outline" 
-              className="w-full text-lg py-6" 
-              onClick={() => handleAuth(true)} 
+            <Button
+              variant="outline"
+              className="w-full text-lg py-6"
+              onClick={() => handleAuth(true)}
               disabled={isLoadingGoogle || isLoadingEmail}
               type="button"
             >
@@ -271,7 +310,7 @@ export default function AuthPage() {
               {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google' : 'Login with Google')}
             </Button>
 
-            <Button variant="link" onClick={() => setIsSigningUp(!isSigningUp)} className="mt-2" disabled={isLoadingEmail || isLoadingGoogle}>
+            <Button variant="link" onClick={() => setIsSigningUp(!isSigningUp)} className="mt-2" disabled={isLoadingEmail || isLoadingGoogle || !!initialReferralCodeFromUrl}>
               {isSigningUp ? "Already have an account? Login" : "Don't have an account? Sign Up"}
             </Button>
 
@@ -284,3 +323,4 @@ export default function AuthPage() {
     </div>
   );
 }
+

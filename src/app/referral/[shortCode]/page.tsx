@@ -6,24 +6,21 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'; 
 
-// Rename the file to [shortCode]/page.tsx if not already done by system
-// For this change, we assume the filename becomes src/app/referral/[shortCode]/page.tsx
-
 export default function ReferralRedirectPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams(); 
 
-  // The dynamic part of the URL is now the shortCode
   const shortCode = params.shortCode as string; 
 
   useEffect(() => {
     if (shortCode) {
       const existingQuery = new URLSearchParams(searchParams.toString());
-      existingQuery.set('referralCode', shortCode); // Pass the shortCode as referralCode query param
+      existingQuery.set('referralCode', shortCode); 
       existingQuery.set('action', 'signup'); 
       router.replace(`/auth?${existingQuery.toString()}`);
     } else {
+      // If no shortCode for some reason, just go to auth page or homepage
       router.replace('/auth');
     }
   }, [shortCode, router, searchParams]);

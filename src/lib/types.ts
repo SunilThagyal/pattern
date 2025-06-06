@@ -67,14 +67,15 @@ export interface UserProfile {
   userId: string;
   displayName: string;
   email?: string;
-  referralCode: string; // This is their own userId
+  referralCode: string; // This is their own userId (kept for potential internal use)
+  shortReferralCode?: string; // The new 5-character shareable code
   totalEarnings: number;
   referredBy?: string | null; // UID of the user who referred them
   createdAt: number;
 }
 
 export interface ReferralEntry {
-  referredUserId: string;
+  // referredUserId: string; // No longer needed here, key is the referredUserId
   referredUserName: string;
   timestamp: number;
 }
@@ -103,3 +104,4 @@ export interface WithdrawalRequest {
   processedDate?: number; // Timestamp
   adminNotes?: string;
 }
+

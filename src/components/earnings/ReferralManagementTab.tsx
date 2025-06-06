@@ -28,8 +28,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   const [isLoading, setIsLoading] = useState(true);
   const [referrals, setReferrals] = useState<DisplayReferral[]>([]);
   const [totalEarnings, setTotalEarnings] = useState(0);
-  // referralLink state is not directly used for display now, but kept for copy logic
-  // const [referralLink, setReferralLink] = useState(''); 
+  const [shortReferralCode, setShortReferralCode] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authUserUid || !userProfile) {
@@ -38,6 +37,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
     }
 
     setTotalEarnings(userProfile.totalEarnings || 0);
+    setShortReferralCode(userProfile.shortReferralCode || null);
 
     const referralsRef = ref(database, `referrals/${authUserUid}`);
     get(referralsRef).then((snapshot) => {
@@ -61,11 +61,13 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   }, [authUserUid, userProfile, toast]);
 
   const handleCopyReferralLink = () => {
-    if (authUserUid && typeof window !== 'undefined') {
-      const fullReferralLink = `${window.location.origin}/referral/${authUserUid}`;
+    if (shortReferralCode && typeof window !== 'undefined') {
+      const fullReferralLink = `${window.location.origin}/referral/${shortReferralCode}`;
       navigator.clipboard.writeText(fullReferralLink)
         .then(() => toast({ title: "Referral Link Copied!", description: "Your Referral Link is copied to clipboard." }))
         .catch(() => toast({ title: "Error", description: "Could not copy Referral Link.", variant: "destructive" }));
+    } else {
+        toast({ title: "Referral Code Unavailable", description: "Your short referral code is not available.", variant: "default" });
     }
   };
 
@@ -75,7 +77,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   
   const summaryStats = {
     totalReferrals: referrals.length,
-    totalEarningsFromReferrals: totalEarnings, // Renamed for clarity
+    totalEarningsFromReferrals: totalEarnings, 
     gamesToday: "N/A", 
     activeReferrals: "N/A", 
   };
@@ -83,7 +85,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
 
   return (
     <div className="space-y-6">
-      {authUserUid && (
+      {shortReferralCode && (
         <Card className="bg-primary/10 border-primary/30">
           <CardHeader>
             <CardTitle className="text-lg flex items-center text-primary-foreground">
@@ -91,7 +93,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <p className="font-mono text-primary-foreground bg-primary/20 px-2 py-1 rounded-sm text-xs break-all">{authUserUid}</p>
+            <p className="font-mono text-primary-foreground bg-primary/20 px-2 py-1 rounded-sm text-lg break-all">{shortReferralCode}</p>
             <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="text-primary-foreground hover:bg-primary/30 mt-2 sm:mt-0 self-start sm:self-center">
               <Copy className="mr-2 h-4 w-4" /> Copy Link
             </Button>
@@ -101,6 +103,19 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
           </CardDescription>
         </Card>
       )}
+      {!shortReferralCode && authUserUid && (
+         <Card className="bg-muted/50 border-border">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center text-muted-foreground">
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading Your Referral Code...
+            </CardTitle>
+          </CardHeader>
+           <CardContent>
+            <p className="text-sm text-muted-foreground">Your short referral code is being prepared. Please check back shortly or try re-logging if it doesn't appear.</p>
+           </CardContent>
+         </Card>
+      )}
+
 
       <section>
         <h2 className="text-2xl font-semibold mb-4 text-foreground">Referral Summary</h2>
@@ -203,3 +218,4 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
     </div>
   );
 }
+

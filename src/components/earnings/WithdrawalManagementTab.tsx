@@ -11,14 +11,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from '@/hooks/use-toast';
 import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2 } from 'lucide-react';
 import { database } from '@/lib/firebase';
-import { ref, push, serverTimestamp, runTransaction, get } from 'firebase/database';
+import { ref, push, serverTimestamp, runTransaction, get, onValue } from 'firebase/database'; // Import onValue from firebase/database
 import type { Transaction, WithdrawalRequest, UserProfile } from '@/lib/types';
 
 const MIN_WITHDRAWAL_AMOUNT = 50;
 
 interface WithdrawalManagementTabProps {
   authUserUid: string | null;
-  initialBalance: number;
+  initialBalance: number; // This prop might be less relevant if we're listening in real-time
 }
 
 export default function WithdrawalManagementTab({ authUserUid, initialBalance }: WithdrawalManagementTabProps) {
@@ -41,9 +41,13 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       const unsubscribe = onValue(userBalanceRef, (snapshot) => {
         setCurrentBalance(snapshot.val() || 0);
       });
+      // Cleanup subscription on component unmount
       return () => unsubscribe();
+    } else {
+        // If authUserUid is not available, reset balance or use initialBalance
+        setCurrentBalance(initialBalance);
     }
-  }, [authUserUid]);
+  }, [authUserUid, initialBalance]);
 
 
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
@@ -97,8 +101,8 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
 
     const transactionData: Transaction = {
       date: serverTimestamp() as number,
-      description: `Withdrawal Request (${withdrawalMethod.toUpperCase()})`,
-      amount: -amount,
+      description: `Withdrawal Request (${withdrawalMethod.toUpperCase()}) - (Simulation)`,
+      amount: -amount, // Representing a debit
       type: 'withdrawal',
       status: 'Pending',
     };
@@ -110,14 +114,11 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       const transactionsRef = ref(database, `transactions/${authUserUid}`);
       await push(transactionsRef, transactionData);
       
-      // Note: For a real app, deducting from totalEarnings upon request might not be ideal.
-      // It's better to have a separate "available_for_withdrawal" balance or handle this server-side.
-      // For this prototype, we will optimistically update client-side, but Firebase will be source of truth.
-      // This client-side update is temporary, actual balance is fetched via useEffect.
-      // setCurrentBalance(prev => prev - amount); 
+      // Important: For a real app, deducting from totalEarnings upon request is complex.
+      // This should ideally be handled server-side or via Cloud Functions upon approval.
+      // The client-side balance is updated by the onValue listener to the actual totalEarnings.
 
-
-      toast({ title: "Withdrawal Requested", description: `Your request to withdraw ₹${amount} is pending.`, variant: "default" });
+      toast({ title: "Withdrawal Requested (Simulation)", description: `Your request to withdraw ₹${amount} is pending. This is a simulation.`, variant: "default" });
       setWithdrawalAmount('');
       setWithdrawalMethod('');
       setUpiId('');
@@ -140,6 +141,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           <CardTitle className="text-xl font-semibold flex items-center">
             <Banknote className="mr-2 h-5 w-5 text-primary" /> Current Available Balance
           </CardTitle>
+           <CardDescription>This balance is fetched in real-time from your user profile.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-baseline justify-between">
           <p className="text-4xl font-bold text-foreground">₹{currentBalance.toFixed(2)}</p>
@@ -151,9 +153,10 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle className="text-xl">Request Withdrawal</DialogTitle>
+                <DialogTitle className="text-xl">Request Withdrawal (Simulation)</DialogTitle>
                 <DialogDescription>
                   Enter the amount and select your preferred method. Minimum withdrawal: ₹{MIN_WITHDRAWAL_AMOUNT}.
+                  Withdrawal requests are simulated and not actually processed.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleWithdrawalSubmit} className="space-y-4 mt-4">
@@ -212,7 +215,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                 )}
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isWithdrawing}>Cancel</Button>
-                  <Button type="submit" disabled={isWithdrawing || !withdrawalAmount || !withdrawalMethod}>
+                  <Button type="submit" disabled={isWithdrawing || !withdrawalAmount || !withdrawalMethod || parseFloat(withdrawalAmount) > currentBalance || parseFloat(withdrawalAmount) < MIN_WITHDRAWAL_AMOUNT}>
                     {isWithdrawing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Request Withdrawal
                   </Button>
@@ -224,38 +227,33 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       </Card>
 
       {currentBalance < MIN_WITHDRAWAL_AMOUNT && (
-        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-700 flex items-center">
-          <AlertTriangle className="mr-3 h-5 w-5" />
-          <p className="text-sm">
-            Your current balance is below the minimum withdrawal threshold of ₹{MIN_WITHDRAWAL_AMOUNT}.
-            Keep referring and earning!
-          </p>
+        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-700 flex items-start">
+          <AlertTriangle className="mr-3 h-5 w-5 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold">Minimum Withdrawal Not Met</p>
+            <p className="text-xs">
+              Your current balance (₹{currentBalance.toFixed(2)}) is below the minimum withdrawal threshold of ₹{MIN_WITHDRAWAL_AMOUNT}.
+              Keep referring and earning!
+            </p>
+          </div>
         </div>
       )}
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg font-medium">Withdrawal Instructions</CardTitle>
+          <CardTitle className="text-lg font-medium">Withdrawal Instructions (Simulation)</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
           <p><strong>Minimum Withdrawal:</strong> You can request a withdrawal once your balance reaches at least ₹{MIN_WITHDRAWAL_AMOUNT}.</p>
-          <p><strong>Processing Time:</strong> Withdrawal requests are typically reviewed within 3-5 business days.</p>
-          <p><strong>Verification:</strong> For security, we may require identity verification before processing withdrawals.</p>
-          <p><strong>Fees:</strong> Standard transaction fees from payment processors may apply.</p>
+          <p><strong>Processing Time:</strong> In a real system, requests are typically reviewed within 3-5 business days. This is currently a simulation.</p>
+          <p><strong>Verification:</strong> For security, identity verification might be required by a real system.</p>
+          <p><strong>Fees:</strong> Standard transaction fees from payment processors may apply in a real system.</p>
         </CardContent>
       </Card>
+       <p className="text-xs text-muted-foreground text-center mt-4">
+        Developer Note: This withdrawal system is a UI prototype. Real financial transactions, balance deductions, and request processing
+        would require a secure backend implementation (e.g., Firebase Cloud Functions) and integration with payment gateways.
+      </p>
     </div>
   );
-}
-
-// Helper for onValue listener, since it's not directly available in withdrawal tab.
-// If not using onValue here, this helper is not needed.
-// For now, balance is passed as initialBalance and updated by onValue in parent.
-function onValue(query: any, callback: (snapshot: any) => void) {
-    const dbRef = query; // query is already a Ref
-    const listener = (snapshot: any) => {
-        callback(snapshot);
-    };
-    dbRef.on('value', listener);
-    return () => dbRef.off('value', listener);
 }

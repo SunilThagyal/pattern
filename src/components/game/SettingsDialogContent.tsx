@@ -3,16 +3,19 @@
 
 import { Button } from '@/components/ui/button';
 import { DialogHeader, DialogTitle, DialogDescription, DialogContent } from '@/components/ui/dialog';
-import { Share2, LogOut, Loader2, Gift, UserCircle, Copy } from 'lucide-react'; // Removed Link2, kept Copy
+import { Share2, LogOut, Loader2, Gift, UserCircle, Copy } from 'lucide-react'; 
 import { useToast } from '@/hooks/use-toast';
 import { useState, useEffect } from 'react'; 
+import { database } from '@/lib/firebase';
+import { ref, get } from 'firebase/database';
+import type { UserProfile } from '@/lib/types';
 
 interface SettingsDialogContentProps {
   onCopyLink: () => void; 
   onLeaveRoom: () => void;
   isLeavingRoom?: boolean;
   isAuthenticated?: boolean; 
-  authPlayerId?: string | null; 
+  authPlayerId?: string | null; // This is the UID
 }
 
 export function SettingsDialogContent({ 
@@ -23,21 +26,31 @@ export function SettingsDialogContent({
   authPlayerId 
 }: SettingsDialogContentProps) {
   const { toast } = useToast();
-  // referralLink state is no longer needed here directly for display
-  // const [referralLink, setReferralLink] = useState('');
+  const [shortReferralCode, setShortReferralCode] = useState<string | null>(null);
+  const [isLoadingCode, setIsLoadingCode] = useState(false);
 
-  // useEffect(() => {
-  //   if (isAuthenticated && authPlayerId && typeof window !== 'undefined') {
-  //     setReferralLink(`${window.location.origin}/referral/${authPlayerId}`);
-  //   }
-  // }, [isAuthenticated, authPlayerId]);
+  useEffect(() => {
+    if (isAuthenticated && authPlayerId) {
+      setIsLoadingCode(true);
+      const userProfileRef = ref(database, `users/${authPlayerId}`);
+      get(userProfileRef).then((snapshot) => {
+        if (snapshot.exists()) {
+          const profile = snapshot.val() as UserProfile;
+          setShortReferralCode(profile.shortReferralCode || null);
+        }
+        setIsLoadingCode(false);
+      }).catch(() => setIsLoadingCode(false));
+    }
+  }, [isAuthenticated, authPlayerId]);
 
-  const handleCopyReferralLink = () => {
-    if (isAuthenticated && authPlayerId && typeof window !== 'undefined') {
-      const fullReferralLink = `${window.location.origin}/referral/${authPlayerId}`;
+  const handleCopyReferralLinkFromDialog = () => {
+    if (isAuthenticated && shortReferralCode && typeof window !== 'undefined') {
+      const fullReferralLink = `${window.location.origin}/referral/${shortReferralCode}`;
       navigator.clipboard.writeText(fullReferralLink)
         .then(() => toast({ title: "Referral Link Copied!", description: "Your Referral Link has been copied to the clipboard." }))
         .catch(() => toast({ title: "Error", description: "Could not copy Referral Link.", variant: "destructive" }));
+    } else {
+        toast({ title: "Referral Code Unavailable", description: "Your short referral code is not ready.", variant: "default" });
     }
   };
 
@@ -54,8 +67,14 @@ export function SettingsDialogContent({
               <Gift className="mr-2 h-4 w-4 text-primary" /> Your Referral Code:
             </p>
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-mono text-primary break-all">{authPlayerId}</p>
-              <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="text-xs">
+              {isLoadingCode ? (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/>
+              ) : shortReferralCode ? (
+                 <p className="text-sm font-mono text-primary break-all">{shortReferralCode}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">N/A</p>
+              )}
+              <Button variant="ghost" size="sm" onClick={handleCopyReferralLinkFromDialog} className="text-xs" disabled={isLoadingCode || !shortReferralCode}>
                 <Copy className="mr-1 h-3 w-3"/>Copy Link
               </Button>
             </div>
@@ -81,3 +100,4 @@ export function SettingsDialogContent({
     </DialogContent>
   );
 }
+
