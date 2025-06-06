@@ -40,7 +40,7 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
-  const [isSigningUp, setIsSigningUp] = useState(true); // Default to Sign Up
+  const [isSigningUp, setIsSigningUp] = useState(true); 
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
@@ -53,14 +53,14 @@ export default function AuthPage() {
     const urlReferralCode = searchParams.get('referralCode');
     const action = searchParams.get('action');
 
-    if (urlReferralCode) {
+    if (urlReferralCode && urlReferralCode.trim() !== "") {
       setReferralCodeInput(urlReferralCode.toUpperCase());
       setIsReferralCodeFromUrl(true);
-      setIsSigningUp(true); // Force sign-up mode if referral code is in URL
+      setIsSigningUp(true); 
     } else if (action === 'login') {
       setIsSigningUp(false);
     } else {
-      setIsSigningUp(true); // Default to signup if no action specified and no referral code
+      setIsSigningUp(true); 
     }
   }, [searchParams]);
 
@@ -72,7 +72,6 @@ export default function AuthPage() {
     let finalDisplayName = displayName;
     let finalPassword = password;
 
-    // Simulated device account check for sign-up
     if (isSigningUp) {
       const deviceHasAccount = localStorage.getItem('drawlyDeviceHasAccount');
       if (deviceHasAccount === 'true') {
@@ -88,13 +87,12 @@ export default function AuthPage() {
 
 
     if (isGoogleAuth) {
-      // Simulate Google providing email and deriving display name
       const randomNum = Math.floor(Math.random() * 10000);
-      finalEmail = `user${randomNum}.google@example.com`;
-      finalDisplayName = `GoogleUser${randomNum}`;
-      finalPassword = "google_simulated_password"; // Not actually used for auth, just placeholder
+      finalEmail = `user${randomNum}.google@example.com`; // Simulate Google providing email
+      finalDisplayName = `GoogleUser${randomNum}`; // Simulate Google deriving display name
+      finalPassword = "google_simulated_password"; 
       if (isSigningUp && !displayName.trim()) {
-        setDisplayName(finalDisplayName); // Update state for UI if display name was empty
+        setDisplayName(finalDisplayName); 
       }
     }
 
@@ -108,10 +106,12 @@ export default function AuthPage() {
 
     try {
       const userRef = ref(database, `users/${simulatedUid}`);
-      const userSnapshot = await get(userRef); // Check if this specific UID exists (unlikely with random generation)
+      // For login, we'd ideally fetch by email, but for simulation this is simpler.
+      // For signup, we check if this *specific* UID exists (unlikely with random generation).
+      const userSnapshot = await get(userRef); 
 
       if (isSigningUp) {
-        if (userSnapshot.exists()) { // Extremely unlikely, but good practice
+        if (userSnapshot.exists()) { 
           toast({ title: "User ID Conflict", description: "A user with this ID somehow already exists. Please try again.", variant: "destructive" });
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
@@ -120,18 +120,22 @@ export default function AuthPage() {
         let newShortReferralCode = '';
         let codeExists = true;
         let attempts = 0;
-        while(codeExists && attempts < 10) {
+        const MAX_CODE_GEN_ATTEMPTS = 10; 
+
+        while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
             newShortReferralCode = generateShortAlphaNumericCode(5);
             const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
             const shortCodeSnap = await get(shortCodeMapRef);
             codeExists = shortCodeSnap.exists();
             attempts++;
         }
-        if (codeExists) {
-            toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again.", variant: "destructive" });
+
+        if (codeExists) { // Still exists after attempts
+            toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again later.", variant: "destructive" });
             if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
             return;
         }
+
 
         const newUserProfile: UserProfile = {
           userId: simulatedUid,
@@ -172,14 +176,14 @@ export default function AuthPage() {
         }
         await set(userRef, newUserProfile);
         await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
-        localStorage.setItem('drawlyDeviceHasAccount', 'true'); // Set device account flag
+        localStorage.setItem('drawlyDeviceHasAccount', 'true');
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
       } else { // Logging In
         let foundUser: UserProfile | null = null;
         let foundUid: string | null = null;
 
-        // Attempt to find user by email (more realistic login simulation)
+        // Simulate finding user by email (more realistic login simulation)
         const allUsersRef = ref(database, 'users');
         const allUsersSnap = await get(allUsersRef);
         if (allUsersSnap.exists()) {
@@ -198,15 +202,15 @@ export default function AuthPage() {
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        finalDisplayName = foundUser.displayName; // Use display name from found user profile
-        // Ensure simulatedUid is set to the foundUid for localStorage
-        localStorage.setItem('drawlyUserUid', foundUid);
+        // For login, ensure finalDisplayName is from the found user, not potentially from Google's simulation if the Google button was clicked for login
+        finalDisplayName = foundUser.displayName; 
+        localStorage.setItem('drawlyUserUid', foundUid); // Store the actual UID found
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
       localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-      // For sign-up, simulatedUid is new. For login, it's from the foundUid.
+      // For sign-up, simulatedUid is new. For login, it's the foundUid.
       localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) );
 
 
@@ -327,10 +331,10 @@ export default function AuthPage() {
               {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google' : 'Login with Google')}
             </Button>
 
-            <Button 
-                variant="link" 
-                onClick={() => setIsSigningUp(!isSigningUp)} 
-                className="mt-2" 
+            <Button
+                variant="link"
+                onClick={() => setIsSigningUp(!isSigningUp)}
+                className="mt-2"
                 disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeFromUrl}
                 type="button"
             >
