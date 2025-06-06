@@ -25,7 +25,7 @@ const GoogleIcon = () => (
 );
 
 const generateShortAlphaNumericCode = (length: number): string => {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // Only uppercase for easier reading/typing
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
   const charactersLength = characters.length;
   for (let i = 0; i < length; i++) {
@@ -40,27 +40,27 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
-  const [isSigningUp, setIsSigningUp] = useState(true);
+  const [isSigningUp, setIsSigningUp] = useState(true); // Default to Sign Up
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
   const searchParams = useSearchParams();
-  const [initialReferralCodeFromUrl, setInitialReferralCodeFromUrl] = useState<string | null>(null);
+  const [isReferralCodeFromUrl, setIsReferralCodeFromUrl] = useState(false);
 
   useEffect(() => {
     const urlReferralCode = searchParams.get('referralCode');
     const action = searchParams.get('action');
 
     if (urlReferralCode) {
-      setReferralCodeInput(urlReferralCode);
-      setInitialReferralCodeFromUrl(urlReferralCode); // Store it to disable the field
-      setIsSigningUp(true);
+      setReferralCodeInput(urlReferralCode.toUpperCase());
+      setIsReferralCodeFromUrl(true);
+      setIsSigningUp(true); // Force sign-up mode if referral code is in URL
     } else if (action === 'login') {
       setIsSigningUp(false);
     } else {
-      setIsSigningUp(true);
+      setIsSigningUp(true); // Default to signup if no action specified and no referral code
     }
   }, [searchParams]);
 
@@ -72,12 +72,29 @@ export default function AuthPage() {
     let finalDisplayName = displayName;
     let finalPassword = password;
 
+    // Simulated device account check for sign-up
+    if (isSigningUp) {
+      const deviceHasAccount = localStorage.getItem('drawlyDeviceHasAccount');
+      if (deviceHasAccount === 'true') {
+        toast({
+          title: "Account Exists on Device",
+          description: "An account has already been registered on this device. Multiple accounts are not permitted for this demonstration.",
+          variant: "destructive",
+        });
+        if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+        return;
+      }
+    }
+
+
     if (isGoogleAuth) {
-      finalEmail = `user${Math.floor(Math.random() * 10000)}@example.com`;
-      finalDisplayName = (finalEmail.split('@')[0] || "GoogleUser") + Math.floor(Math.random() * 100);
-      finalPassword = "google_simulated_password";
+      // Simulate Google providing email and deriving display name
+      const randomNum = Math.floor(Math.random() * 10000);
+      finalEmail = `user${randomNum}.google@example.com`;
+      finalDisplayName = `GoogleUser${randomNum}`;
+      finalPassword = "google_simulated_password"; // Not actually used for auth, just placeholder
       if (isSigningUp && !displayName.trim()) {
-        setDisplayName(finalDisplayName);
+        setDisplayName(finalDisplayName); // Update state for UI if display name was empty
       }
     }
 
@@ -91,11 +108,11 @@ export default function AuthPage() {
 
     try {
       const userRef = ref(database, `users/${simulatedUid}`);
-      const userSnapshot = await get(userRef);
+      const userSnapshot = await get(userRef); // Check if this specific UID exists (unlikely with random generation)
 
       if (isSigningUp) {
-        if (userSnapshot.exists()) {
-          toast({ title: "User Exists", description: "This email might be associated with an existing user. Try logging in.", variant: "destructive" });
+        if (userSnapshot.exists()) { // Extremely unlikely, but good practice
+          toast({ title: "User ID Conflict", description: "A user with this ID somehow already exists. Please try again.", variant: "destructive" });
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
@@ -103,31 +120,30 @@ export default function AuthPage() {
         let newShortReferralCode = '';
         let codeExists = true;
         let attempts = 0;
-        while(codeExists && attempts < 10) { // Max 10 attempts to find a unique code
+        while(codeExists && attempts < 10) {
             newShortReferralCode = generateShortAlphaNumericCode(5);
             const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
             const shortCodeSnap = await get(shortCodeMapRef);
             codeExists = shortCodeSnap.exists();
             attempts++;
         }
-        if (codeExists) { // Failed to generate a unique code after multiple attempts
+        if (codeExists) {
             toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again.", variant: "destructive" });
             if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
             return;
         }
 
-
         const newUserProfile: UserProfile = {
           userId: simulatedUid,
           displayName: finalDisplayName,
           email: finalEmail,
-          referralCode: simulatedUid, // Internal long code
-          shortReferralCode: newShortReferralCode, // New short code
+          referralCode: simulatedUid, 
+          shortReferralCode: newShortReferralCode,
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
         };
 
-        const actualReferralShortCodeToUse = initialReferralCodeFromUrl || referralCodeInput.trim();
+        const actualReferralShortCodeToUse = referralCodeInput.trim().toUpperCase();
 
         if (actualReferralShortCodeToUse) {
           const referrerMapRef = ref(database, `shortCodeToUserIdMap/${actualReferralShortCodeToUse}`);
@@ -135,7 +151,7 @@ export default function AuthPage() {
 
           if (referrerMapSnap.exists()) {
             const referrerUserId = referrerMapSnap.val();
-            if (referrerUserId === simulatedUid) { // Check if short code maps to self
+            if (referrerUserId === simulatedUid) {
                toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
             } else {
               newUserProfile.referredBy = referrerUserId;
@@ -155,47 +171,48 @@ export default function AuthPage() {
           }
         }
         await set(userRef, newUserProfile);
-        // Store the mapping for the new user's own short code
         await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
-
+        localStorage.setItem('drawlyDeviceHasAccount', 'true'); // Set device account flag
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
-      } else {
-        let foundUser = null;
+
+      } else { // Logging In
+        let foundUser: UserProfile | null = null;
         let foundUid: string | null = null;
 
-        if (userSnapshot.exists() && userSnapshot.val().email === finalEmail) {
-            foundUser = userSnapshot.val();
-            foundUid = simulatedUid; // This case is unlikely due to UID generation
-        } else {
-            const allUsersRef = ref(database, 'users');
-            const allUsersSnap = await get(allUsersRef);
-            if (allUsersSnap.exists()) {
-                const usersData = allUsersSnap.val();
-                for (const uid_key in usersData) {
-                    if (usersData[uid_key].email === finalEmail) {
-                        foundUser = usersData[uid_key];
-                        foundUid = uid_key;
-                        break;
-                    }
+        // Attempt to find user by email (more realistic login simulation)
+        const allUsersRef = ref(database, 'users');
+        const allUsersSnap = await get(allUsersRef);
+        if (allUsersSnap.exists()) {
+            const usersData = allUsersSnap.val();
+            for (const uid_key in usersData) {
+                if (usersData[uid_key].email === finalEmail) {
+                    foundUser = usersData[uid_key] as UserProfile;
+                    foundUid = uid_key;
+                    break;
                 }
             }
         }
 
         if (!foundUser || !foundUid) {
-          toast({ title: "Login Failed", description: "No account found with this email. Try signing up.", variant: "destructive" });
+          toast({ title: "Login Failed", description: "No account found with this email. Please check your credentials or sign up.", variant: "destructive" });
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        finalDisplayName = foundUser.displayName;
-        localStorage.setItem('drawlyUserUid', foundUid); // Set the correct UID on login
+        finalDisplayName = foundUser.displayName; // Use display name from found user profile
+        // Ensure simulatedUid is set to the foundUid for localStorage
+        localStorage.setItem('drawlyUserUid', foundUid);
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
       localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-      localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : localStorage.getItem('drawlyUserUid') || simulatedUid);
+      // For sign-up, simulatedUid is new. For login, it's from the foundUid.
+      localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) );
 
-      router.push('/');
+
+      const redirectPath = searchParams.get('redirect') || '/';
+      router.push(redirectPath);
+
     } catch (error) {
       console.error("Auth error:", error);
       toast({ title: "Authentication Error", description: "Something went wrong. Please try again.", variant: "destructive" });
@@ -274,9 +291,9 @@ export default function AuthPage() {
                   placeholder="Enter 5-character code"
                   className="text-base py-3"
                   maxLength={5}
-                  disabled={isLoadingEmail || isLoadingGoogle || !!initialReferralCodeFromUrl}
+                  disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeFromUrl}
                 />
-                {initialReferralCodeFromUrl && (
+                {isReferralCodeFromUrl && (
                     <p className="text-xs text-green-600">Referral code applied from link.</p>
                 )}
               </div>
@@ -284,7 +301,7 @@ export default function AuthPage() {
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full text-lg py-6" disabled={isLoadingEmail || isLoadingGoogle}>
-              {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
+              {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />)}
               {isLoadingEmail ? 'Processing...' : (isSigningUp ? 'Sign Up with Email' : 'Login with Email')}
             </Button>
 
@@ -310,7 +327,13 @@ export default function AuthPage() {
               {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google' : 'Login with Google')}
             </Button>
 
-            <Button variant="link" onClick={() => setIsSigningUp(!isSigningUp)} className="mt-2" disabled={isLoadingEmail || isLoadingGoogle || !!initialReferralCodeFromUrl}>
+            <Button 
+                variant="link" 
+                onClick={() => setIsSigningUp(!isSigningUp)} 
+                className="mt-2" 
+                disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeFromUrl}
+                type="button"
+            >
               {isSigningUp ? "Already have an account? Login" : "Don't have an account? Sign Up"}
             </Button>
 
@@ -320,7 +343,10 @@ export default function AuthPage() {
           </CardFooter>
         </form>
       </Card>
+      <p className="text-xs text-muted-foreground mt-6 max-w-md text-center">
+        Note: Account creation and login are simulated for this prototype. The 'one account per device' check is also a client-side simulation and can be bypassed. Real-world applications require robust backend security.
+      </p>
     </div>
   );
 }
-
+    

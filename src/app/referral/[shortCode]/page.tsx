@@ -16,11 +16,10 @@ export default function ReferralRedirectPage() {
   useEffect(() => {
     if (shortCode) {
       const existingQuery = new URLSearchParams(searchParams.toString());
-      existingQuery.set('referralCode', shortCode); 
-      existingQuery.set('action', 'signup'); 
+      existingQuery.set('referralCode', shortCode.toUpperCase()); // Ensure shortCode is uppercase consistent with generation
+      existingQuery.set('action', 'signup'); // Force signup mode for referral links
       router.replace(`/auth?${existingQuery.toString()}`);
     } else {
-      // If no shortCode for some reason, just go to auth page or homepage
       router.replace('/auth');
     }
   }, [shortCode, router, searchParams]);
@@ -40,4 +39,4 @@ export default function ReferralRedirectPage() {
     </div>
   );
 }
-
+    
