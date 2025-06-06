@@ -10,7 +10,7 @@ import { useToast as useShadToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings, Sparkles, X, Gift } from 'lucide-react';
+import { AlertCircle, Copy, LogOut, Send, Palette, Eraser, Users, Clock, Loader2, Share2, CheckCircle, Trophy, Play, SkipForward, RotateCcw, Lightbulb, Edit3, ChevronUp, ChevronDown, Brush, Settings, Sparkles, X, Gift, Link2 } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 
@@ -606,8 +606,17 @@ ChatArea.displayName = 'ChatArea';
 
 const TimerDisplay = React.memo(({ targetTime, defaultSeconds, compact, gameState }: { targetTime?: number | null, defaultSeconds: number, compact?: boolean, gameState?: Room['gameState'] }) => {
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [hasMounted, setHasMounted] = useState(false);
 
   useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasMounted) {
+      return; // Don't run timer logic until client has mounted
+    }
+
     if (!targetTime || targetTime <= Date.now()) {
       setTimeLeft(Math.max(0, defaultSeconds));
       return;
@@ -619,17 +628,27 @@ const TimerDisplay = React.memo(({ targetTime, defaultSeconds, compact, gameStat
       setTimeLeft(remaining);
     };
 
-    calculateTimeLeft();
+    calculateTimeLeft(); // Calculate immediately on mount or when targetTime/defaultSeconds change
     const interval = setInterval(calculateTimeLeft, 1000);
     return () => clearInterval(interval);
-  }, [targetTime, defaultSeconds]);
+  }, [targetTime, defaultSeconds, hasMounted]); // Add hasMounted to dependency array
 
-
-  if (timeLeft === null && (gameState === 'drawing' || gameState === 'word_selection')) {
-      return <div className={cn("font-bold", compact ? "text-xs" : "text-base")}>...</div>;
+  if (!hasMounted) {
+    // Server and initial client render path
+    // This output must exactly match what the server would produce given timeLeft is null initially.
+    if (gameState === 'drawing' || gameState === 'word_selection') {
+        return <div className={cn("font-bold", compact ? "text-xs" : "text-base")}>...</div>;
+    }
+    return <div className={cn("font-bold text-xs", compact ? "text-[9px]" : "text-xs")}>--</div>;
   }
 
+  // Client render path after mount and timeLeft might have been calculated
   if (timeLeft === null) {
+      // This might still be hit if targetTime condition leads to setting timeLeft to defaultSeconds,
+      // or if calculation hasn't completed yet immediately after mount.
+      if (gameState === 'drawing' || gameState === 'word_selection') {
+          return <div className={cn("font-bold", compact ? "text-xs" : "text-base")}>...</div>;
+      }
       return <div className={cn("font-bold text-xs", compact ? "text-[9px]" : "text-xs")}>--</div>;
   }
 
@@ -1981,3 +2000,4 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     }
     return finalWords.slice(0, count);
 };
+
