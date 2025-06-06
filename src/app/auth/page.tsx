@@ -34,35 +34,58 @@ const generateShortAlphaNumericCode = (length: number): string => {
   return result;
 };
 
+const LSTORAGE_PENDING_REFERRAL_KEY = "drawlyPendingReferralCode";
+const LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY = 'drawlyDeviceOriginalReferrerUid';
 
 export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
-  const [isSigningUp, setIsSigningUp] = useState(true); 
+  const [isSigningUp, setIsSigningUp] = useState(true);
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
   const searchParams = useSearchParams();
-  const [isReferralCodeFromUrl, setIsReferralCodeFromUrl] = useState(false);
+  const [isReferralCodeLocked, setIsReferralCodeLocked] = useState(false); // True if code is from storage or URL
 
   useEffect(() => {
-    const urlReferralCode = searchParams.get('referralCode');
-    const action = searchParams.get('action');
+    // Check localStorage for a pending referral code first
+    const codeFromStorage = localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY);
+    const actionFromUrl = searchParams.get('action');
 
-    if (urlReferralCode && urlReferralCode.trim() !== "") {
-      setReferralCodeInput(urlReferralCode.trim().toUpperCase());
-      setIsReferralCodeFromUrl(true); // This will disable the input
-      setIsSigningUp(true); // Force signup mode for referral links
-    } else if (action === 'login') {
-      setIsSigningUp(false);
+    if (codeFromStorage && codeFromStorage.trim() !== "") {
+      setReferralCodeInput(codeFromStorage.trim().toUpperCase());
+      setIsReferralCodeLocked(true);
+      setIsSigningUp(true); // Force signup mode for referral
     } else {
-      setIsSigningUp(true); 
+      // Fallback to URL param if no localStorage code (e.g., direct link to /auth?referralCode=...)
+      const codeFromUrl = searchParams.get('referralCode');
+      if (codeFromUrl && codeFromUrl.trim() !== "") {
+        setReferralCodeInput(codeFromUrl.trim().toUpperCase());
+        setIsReferralCodeLocked(true);
+        setIsSigningUp(true); // Force signup mode
+        // Optionally, set it in localStorage if it came from URL and wasn't already there
+        // This scenario is less likely given the /referral/[shortCode] flow
+        if (!localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY)) {
+             localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, codeFromUrl.trim().toUpperCase());
+        }
+      }
     }
+    
+    // Handle ?action=login or ?action=signup from URL if no referral code dictates mode
+    if (!isReferralCodeLocked) {
+        if (actionFromUrl === 'login') {
+            setIsSigningUp(false);
+        } else { // Default to signup if action is 'signup' or not specified
+            setIsSigningUp(true);
+        }
+    }
+
   }, [searchParams]);
+
 
   const handleAuth = async (isGoogleAuth: boolean = false) => {
     if (isGoogleAuth) setIsLoadingGoogle(true);
@@ -75,10 +98,10 @@ export default function AuthPage() {
     if (isGoogleAuth) {
       const randomNum = Math.floor(Math.random() * 10000);
       finalEmail = `user${randomNum}.google@example.com`;
-      finalDisplayName = `GoogleUser${randomNum}`; 
-      finalPassword = "google_simulated_password"; 
+      finalDisplayName = `GoogleUser${randomNum}`;
+      finalPassword = "google_simulated_password";
       if (isSigningUp && !displayName.trim()) {
-        setDisplayName(finalDisplayName); 
+        setDisplayName(finalDisplayName);
       }
     }
 
@@ -92,16 +115,12 @@ export default function AuthPage() {
 
     try {
       const userRef = ref(database, `users/${simulatedUid}`);
-      const userSnapshot = await get(userRef); 
 
       if (isSigningUp) {
-        // Removed: "One account per device" blocking logic. Users can sign up multiple times.
-        // The referral lock will handle the referral aspect.
-
         let newShortReferralCode = '';
         let codeExists = true;
         let attempts = 0;
-        const MAX_CODE_GEN_ATTEMPTS = 10; 
+        const MAX_CODE_GEN_ATTEMPTS = 10;
 
         while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
             newShortReferralCode = generateShortAlphaNumericCode(5);
@@ -111,7 +130,7 @@ export default function AuthPage() {
             attempts++;
         }
 
-        if (codeExists) { 
+        if (codeExists) {
             toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again later.", variant: "destructive" });
             if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
             return;
@@ -121,27 +140,30 @@ export default function AuthPage() {
           userId: simulatedUid,
           displayName: finalDisplayName,
           email: finalEmail,
-          referralCode: simulatedUid, // User's own UID for potential internal use
+          referralCode: simulatedUid, // User's own UID
           shortReferralCode: newShortReferralCode,
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
         };
 
-        // "One Device -> One Referrer Lock" logic
-        let finalReferrerUid: string | null = null;
-        const deviceOriginalReferrerUid = localStorage.getItem('drawlyDeviceOriginalReferrerUid');
-        const currentReferralShortCodeAttempt = referralCodeInput.trim().toUpperCase();
+        let actualReferrerUid: string | null = null;
+        const deviceOriginalReferrerUid = localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY);
+        const currentReferralShortCodeAttempt = referralCodeInput.trim().toUpperCase(); // This comes from state, prefilled by localStorage or URL
 
         if (deviceOriginalReferrerUid) {
-          finalReferrerUid = deviceOriginalReferrerUid;
-          if (currentReferralShortCodeAttempt) {
-            toast({
-              title: "Referral Applied",
-              description: "This device is already linked to a referrer. The original referral has been applied.",
-              variant: "default"
-            });
+          actualReferrerUid = deviceOriginalReferrerUid;
+          if (currentReferralShortCodeAttempt && referralCodeInput !== '') { // Check if user was trying to use a different code
+            const mapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeAttempt}`);
+            const mapSnap = await get(mapRef);
+            if (mapSnap.exists() && mapSnap.val() !== deviceOriginalReferrerUid) {
+                 toast({
+                    title: "Referral Overridden",
+                    description: "This device is already linked to a referrer. The original referral has been applied.",
+                    variant: "default"
+                 });
+            }
           }
-        } else if (currentReferralShortCodeAttempt) {
+        } else if (currentReferralShortCodeAttempt && currentReferralShortCodeAttempt !== '') {
           const referrerMapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeAttempt}`);
           const referrerMapSnap = await get(referrerMapRef);
           if (referrerMapSnap.exists()) {
@@ -149,32 +171,28 @@ export default function AuthPage() {
             if (foundReferrerUid === simulatedUid) {
                toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
             } else {
-              finalReferrerUid = foundReferrerUid;
-              localStorage.setItem('drawlyDeviceOriginalReferrerUid', foundReferrerUid); // Lock this referrer to the device
+              actualReferrerUid = foundReferrerUid;
+              localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid); // Lock this referrer to the device
               toast({title: "Referral Applied!", description: `You were successfully referred.`});
             }
           } else {
-            toast({ title: "Referral Code Invalid", description: "The referral code entered was not found. Proceeding without referral.", variant: "default" });
+            toast({ title: "Referral Code Invalid", description: "The referral code was not found. Proceeding without referral.", variant: "default" });
           }
         }
 
-        if (finalReferrerUid) {
-          newUserProfile.referredBy = finalReferrerUid;
-          const referrerProfileRef = ref(database, `users/${finalReferrerUid}`);
-          const referrerProfileSnap = await get(referrerProfileRef);
-          const referrerDisplayName = referrerProfileSnap.exists() ? referrerProfileSnap.val().displayName : "Referrer";
-
-          const referralsBranchRef = ref(database, `referrals/${finalReferrerUid}/${simulatedUid}`);
+        if (actualReferrerUid) {
+          newUserProfile.referredBy = actualReferrerUid;
+          const referralsBranchRef = ref(database, `referrals/${actualReferrerUid}/${simulatedUid}`);
           await set(referralsBranchRef, {
             referredUserName: finalDisplayName,
             timestamp: serverTimestamp() as number,
           });
-          // Toast for referral applied is handled above based on new or existing device lock
         }
-        
+
         await set(userRef, newUserProfile);
         await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
-        // localStorage.setItem('drawlyDeviceHasAccount', 'true'); // No longer needed to block, deviceOriginalReferrerUid serves a related purpose
+        localStorage.removeItem(LSTORAGE_PENDING_REFERRAL_KEY); // Clear pending code after successful signup
+
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
       } else { // Logging In
@@ -186,7 +204,7 @@ export default function AuthPage() {
         if (allUsersSnap.exists()) {
             const usersData = allUsersSnap.val();
             for (const uid_key in usersData) {
-                if (usersData[uid_key].email === finalEmail) {
+                if (usersData[uid_key].email === finalEmail) { // Simple email check for login
                     foundUser = usersData[uid_key] as UserProfile;
                     foundUid = uid_key;
                     break;
@@ -199,8 +217,8 @@ export default function AuthPage() {
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        finalDisplayName = foundUser.displayName; 
-        localStorage.setItem('drawlyUserUid', foundUid); 
+        finalDisplayName = foundUser.displayName;
+        localStorage.setItem('drawlyUserUid', foundUid);
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
@@ -289,10 +307,10 @@ export default function AuthPage() {
                   placeholder="Enter 5-character code"
                   className="text-base py-3"
                   maxLength={5}
-                  disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeFromUrl}
+                  disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeLocked}
                 />
-                {isReferralCodeFromUrl && (
-                    <p className="text-xs text-green-600">Referral code applied from link.</p>
+                {isReferralCodeLocked && (
+                    <p className="text-xs text-green-600">Referral code applied.</p>
                 )}
               </div>
             )}
@@ -328,15 +346,15 @@ export default function AuthPage() {
             <Button
                 variant="link"
                 onClick={() => {
-                    if (!isReferralCodeFromUrl) { // Allow toggle only if not from referral link
+                    if (!isReferralCodeLocked) { // Allow toggle only if not from referral link
                         setIsSigningUp(!isSigningUp);
                     }
                 }}
                 className="mt-2"
-                disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeFromUrl}
+                disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeLocked}
                 type="button"
             >
-              {isSigningUp ? (isReferralCodeFromUrl ? "Complete Sign Up" : "Already have an account? Login") : "Don't have an account? Sign Up"}
+              {isSigningUp ? (isReferralCodeLocked ? "Complete Sign Up" : "Already have an account? Login") : "Don't have an account? Sign Up"}
             </Button>
 
             <Link href="/" className="text-sm text-muted-foreground hover:text-primary mt-2">
@@ -351,6 +369,3 @@ export default function AuthPage() {
     </div>
   );
 }
-    
-
-    
