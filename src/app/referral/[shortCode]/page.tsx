@@ -6,36 +6,38 @@ import { useParams, useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
+const LSTORAGE_PENDING_REFERRAL_KEY = "drawlyPendingReferralCode";
+
 export default function ReferralRedirectPage() {
   const params = useParams();
   const router = useRouter();
 
   useEffect(() => {
-    // params.shortCode can be a string or string[] or undefined.
-    // We expect a single string.
     const shortCodeFromParams = Array.isArray(params.shortCode) ? params.shortCode[0] : params.shortCode;
 
     if (typeof shortCodeFromParams === 'string' && shortCodeFromParams.trim() !== '') {
-      const LSTORAGE_PENDING_REFERRAL_KEY = "drawlyPendingReferralCode";
       const codeToProcess = shortCodeFromParams.trim().toUpperCase();
-
+      
       // Attempt to set localStorage only if it's not already set (first link wins)
       if (!localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY)) {
         localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, codeToProcess);
       }
       
-      // CRITICAL: Ensure redirect URL includes the 'ref' parameter
-      const redirectUrl = `/auth?ref=${codeToProcess}&action=signup`;
-      router.replace(redirectUrl);
+      // Use object form for router.replace to robustly handle query params
+      router.replace({
+        pathname: '/auth',
+        query: { ref: codeToProcess, action: 'signup' },
+      });
 
-    } else if (params.shortCode !== undefined) {
-      // This case means params.shortCode was resolved but was not a valid non-empty string.
+    } else if (params.shortCode !== undefined) { // If shortCode is defined but not a valid string (e.g. empty)
       // Redirect to signup without any referral code.
-      router.replace('/auth?action=signup');
+      router.replace({
+        pathname: '/auth',
+        query: { action: 'signup'},
+      });
     }
     // If params.shortCode is initially undefined, this effect will re-run when Next.js fully populates params.
-    // No explicit 'else' needed here as the conditions cover resolved states.
-  }, [params, router]); // `params` is a key dependency here to re-run when shortCode is resolved.
+  }, [params, router]); // `params` and `router` are key dependencies here.
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-br from-primary/10 via-background to-secondary/10">
