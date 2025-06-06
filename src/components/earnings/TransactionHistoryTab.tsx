@@ -59,11 +59,11 @@ export default function TransactionHistoryTab() {
     switch (status) {
       case 'Approved':
       case 'Earned':
-        return 'default'; // Greenish
+        return 'default'; 
       case 'Pending':
-        return 'secondary'; // Bluish/Yellowish
+        return 'secondary'; 
       case 'Rejected':
-        return 'destructive'; // Reddish
+        return 'destructive'; 
       default:
         return 'outline';
     }
@@ -88,8 +88,8 @@ export default function TransactionHistoryTab() {
       <Card>
         <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <CardTitle className="text-xl font-semibold">Transaction History</CardTitle>
-            <CardDescription>View all your earnings and withdrawal activities.</CardDescription>
+            <CardTitle className="text-xl font-semibold">Transaction History (Mock Data)</CardTitle>
+            <CardDescription>View all your earnings and withdrawal activities. (This data is illustrative and not live).</CardDescription>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
             <Popover>
@@ -177,11 +177,15 @@ export default function TransactionHistoryTab() {
              <div className="text-center py-10">
                 <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">No transactions found for the selected filters.</p>
-                <p className="text-sm text-muted-foreground mt-1">Try adjusting your date range or status filter.</p>
+                <p className="text-sm text-muted-foreground mt-1">Try adjusting your date range or status filter. (Note: Data is illustrative).</p>
               </div>
           )}
         </CardContent>
       </Card>
+      <div className="p-3 mt-4 bg-blue-50 border border-blue-200 rounded-md text-blue-700 text-sm">
+        <AlertTriangle className="inline-block mr-2 h-5 w-5" />
+        <strong>Developer Note:</strong> This entire dashboard is a UI prototype. All data displayed (referrals, earnings, transactions) is mock or illustrative. A real implementation requires a backend system for data storage, user account management, and secure transaction processing.
+      </div>
     </div>
   );
 }

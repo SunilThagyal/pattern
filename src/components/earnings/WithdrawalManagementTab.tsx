@@ -12,10 +12,11 @@ import { useToast } from '@/hooks/use-toast';
 import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2 } from 'lucide-react';
 
 const MIN_WITHDRAWAL_AMOUNT = 50; // Example: ₹50
+const MOCK_BALANCE = 275.50; // Mock balance for demonstration
 
 export default function WithdrawalManagementTab() {
   // Mock data - in a real app, this would come from user's account data
-  const [currentBalance, setCurrentBalance] = useState(275.50); 
+  const [currentBalance, setCurrentBalance] = useState(MOCK_BALANCE); 
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
@@ -53,7 +54,6 @@ export default function WithdrawalManagementTab() {
       setIsWithdrawing(false);
       return;
     }
-    // Add validation for method-specific details
     if (withdrawalMethod === 'upi' && !upiId.trim()) {
         toast({ title: "UPI ID Required", description: "Please enter your UPI ID.", variant: "destructive" });
         setIsWithdrawing(false); return;
@@ -67,10 +67,9 @@ export default function WithdrawalManagementTab() {
         setIsWithdrawing(false); return;
     }
 
-
     // Simulate API call
     setTimeout(() => {
-      toast({ title: "Withdrawal Requested", description: `Your request to withdraw ₹${amount} via ${withdrawalMethod.toUpperCase()} is being processed.`, variant: "default" });
+      toast({ title: "Withdrawal Requested (Simulation)", description: `Your request to withdraw ₹${amount} via ${withdrawalMethod.toUpperCase()} is being processed. This is a simulation.`, variant: "default" });
       // Deduct from balance (mock)
       setCurrentBalance(prev => prev - amount);
       // Reset form
@@ -90,8 +89,11 @@ export default function WithdrawalManagementTab() {
       <Card>
         <CardHeader>
           <CardTitle className="text-xl font-semibold flex items-center">
-            <Banknote className="mr-2 h-5 w-5 text-primary" /> Current Available Balance
+            <Banknote className="mr-2 h-5 w-5 text-primary" /> Current Available Balance (Mock)
           </CardTitle>
+           <CardDescription className="text-xs">
+            This balance is for demonstration purposes. A real application would track this server-side.
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex items-baseline justify-between">
           <p className="text-4xl font-bold text-foreground">₹{currentBalance.toFixed(2)}</p>
@@ -103,9 +105,10 @@ export default function WithdrawalManagementTab() {
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle className="text-xl">Request Withdrawal</DialogTitle>
+                <DialogTitle className="text-xl">Request Withdrawal (Simulation)</DialogTitle>
                 <DialogDescription>
                   Enter the amount and select your preferred method. Minimum withdrawal: ₹{MIN_WITHDRAWAL_AMOUNT}.
+                  (Withdrawal requests are simulated and not actually processed).
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleWithdrawalSubmit} className="space-y-4 mt-4">
@@ -180,7 +183,7 @@ export default function WithdrawalManagementTab() {
           <AlertTriangle className="mr-3 h-5 w-5" />
           <p className="text-sm">
             Your current balance is below the minimum withdrawal threshold of ₹{MIN_WITHDRAWAL_AMOUNT}.
-            Keep referring and earning!
+            Keep referring and earning! (Balance shown is illustrative).
           </p>
         </div>
       )}
@@ -191,7 +194,7 @@ export default function WithdrawalManagementTab() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
           <p><strong>Minimum Withdrawal:</strong> You can request a withdrawal once your balance reaches at least ₹{MIN_WITHDRAWAL_AMOUNT}.</p>
-          <p><strong>Processing Time:</strong> Withdrawal requests are typically processed within 3-5 business days.</p>
+          <p><strong>Processing Time:</strong> Withdrawal requests are typically processed within 3-5 business days (simulated).</p>
           <p><strong>Verification:</strong> For larger amounts or first-time withdrawals, we may require additional verification.</p>
           <p><strong>Fees:</strong> Standard transaction fees may apply depending on the chosen withdrawal method (we'll notify you if any).</p>
         </CardContent>

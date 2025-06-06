@@ -4,7 +4,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"; // Added CardContent
+import { Button } from "@/components/ui/button"; // Added Button
 import ReferralManagementTab from '@/components/earnings/ReferralManagementTab';
 import WithdrawalManagementTab from '@/components/earnings/WithdrawalManagementTab';
 import TransactionHistoryTab from '@/components/earnings/TransactionHistoryTab';
@@ -15,19 +16,23 @@ export default function EarningsDashboardPage() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
+  const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
+  const [userUid, setUserUid] = useState<string | null>(null);
 
   useEffect(() => {
     const authStatus = localStorage.getItem('drawlyAuthStatus');
-    if (authStatus === 'loggedIn') {
+    const storedName = localStorage.getItem('drawlyUserDisplayName');
+    const storedUid = localStorage.getItem('drawlyUserUid');
+
+    if (authStatus === 'loggedIn' && storedName && storedUid) {
       setIsAuthenticated(true);
+      setUserDisplayName(storedName);
+      setUserUid(storedUid);
     } else {
       setIsAuthenticated(false);
-      // Optional: Redirect to login if not authenticated, or show a message.
-      // For now, let's allow viewing the structure but real data would be guarded.
-      // router.push('/auth'); 
     }
     setIsLoading(false);
-  }, [router]);
+  }, []);
 
   if (isLoading || isAuthenticated === undefined) {
     return (
@@ -62,7 +67,7 @@ export default function EarningsDashboardPage() {
           {APP_NAME} Earnings Dashboard
         </h1>
         <p className="text-muted-foreground mt-1">
-          Track your referrals, manage your earnings, and view your transaction history.
+          Welcome, {userDisplayName || 'Player'}! Track your referrals, manage earnings, and view transactions.
         </p>
       </header>
 
@@ -80,7 +85,7 @@ export default function EarningsDashboardPage() {
         </TabsList>
 
         <TabsContent value="referrals">
-          <ReferralManagementTab />
+          <ReferralManagementTab authUserUid={userUid} />
         </TabsContent>
         <TabsContent value="withdrawals">
           <WithdrawalManagementTab />
