@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign } from 'lucide-react'; // Added DollarSign
+import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign, Link2 } from 'lucide-react'; // Added Link2
 import Image from 'next/image';
 import { APP_NAME } from '@/lib/config';
 import { useState, useEffect } from 'react';
@@ -15,7 +15,7 @@ export default function HomePage() {
   const [isNavigatingCreate, setIsNavigatingCreate] = useState(false);
   const [isNavigatingJoin, setIsNavigatingJoin] = useState(false);
   const [isNavigatingAuth, setIsNavigatingAuth] = useState(false);
-  const [isNavigatingEarnings, setIsNavigatingEarnings] = useState(false); // New state
+  const [isNavigatingEarnings, setIsNavigatingEarnings] = useState(false);
   const router = useRouter();
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -48,15 +48,16 @@ export default function HomePage() {
     if (type === 'create') setIsNavigatingCreate(true);
     if (type === 'join') setIsNavigatingJoin(true);
     if (type === 'auth') setIsNavigatingAuth(true);
-    if (type === 'earnings') setIsNavigatingEarnings(true); // Set new loading state
+    if (type === 'earnings') setIsNavigatingEarnings(true);
     router.push(path);
   };
   
-  const handleCopyReferralId = () => {
-    if (userUid) {
-      navigator.clipboard.writeText(userUid)
-        .then(() => toast({ title: "Referral ID Copied!", description: "Your Referral ID is copied to clipboard." }))
-        .catch(() => toast({ title: "Error", description: "Could not copy Referral ID.", variant: "destructive" }));
+  const handleCopyReferralLink = () => {
+    if (userUid && typeof window !== 'undefined') {
+      const referralLink = `${window.location.origin}/referral/${userUid}`;
+      navigator.clipboard.writeText(referralLink)
+        .then(() => toast({ title: "Referral Link Copied!", description: "Your Referral Link is copied to clipboard." }))
+        .catch(() => toast({ title: "Error", description: "Could not copy Referral Link.", variant: "destructive" }));
     }
   };
 
@@ -84,9 +85,9 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground mb-4">
-              Sign up or log in to get your unique referral ID. Share it with friends and earn rewards when they play!
+              Sign up or log in to get your unique referral link. Share it with friends and earn rewards when they play!
             </p>
-            <Button size="lg" className="w-full" onClick={() => handleNavigation('/auth', 'auth')} disabled={isNavigatingAuth}>
+            <Button size="lg" className="w-full" onClick={() => router.push('/auth')} disabled={isNavigatingAuth}>
               {isNavigatingAuth ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
               {isNavigatingAuth ? 'Loading...' : 'Login / Sign Up'}
             </Button>
@@ -102,13 +103,17 @@ export default function HomePage() {
           <CardContent className="space-y-3">
             <div className="text-sm text-muted-foreground">
               <p className="font-semibold text-green-600 flex items-center justify-center">
-                <Gift className="mr-2 h-5 w-5 text-yellow-500"/> Your Referral ID:
+                <Gift className="mr-2 h-5 w-5 text-yellow-500"/> Your Referral Link:
               </p>
               <div className="flex items-center justify-center gap-2 mt-1">
-                <span className="font-mono text-green-700 p-1 bg-green-100 rounded-sm">{userUid}</span>
-                <Button variant="ghost" size="sm" onClick={handleCopyReferralId} className="h-auto p-1 text-green-600 hover:bg-green-200">Copy</Button>
+                <span className="font-mono text-green-700 p-1 bg-green-100 rounded-sm break-all text-xs">
+                  {typeof window !== 'undefined' ? `${window.location.origin}/referral/${userUid}` : `/referral/${userUid}`}
+                </span>
+                <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="h-auto p-1 text-green-600 hover:bg-green-200">
+                  <Link2 className="mr-1 h-3 w-3"/>Copy
+                </Button>
               </div>
-              <p className="text-xs mt-1">Share this ID with friends. You'll earn rewards in-game when they complete games!</p>
+              <p className="text-xs mt-1">Share this link with friends. You'll earn rewards in-game when they complete games!</p>
             </div>
              <Button 
               variant="outline" 

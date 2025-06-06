@@ -7,12 +7,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from '@/hooks/use-toast';
-import { Users, TrendingUp, Gamepad2, AlertTriangle, Gift, Copy, Loader2 } from "lucide-react";
+import { Users, TrendingUp, Gamepad2, AlertTriangle, Gift, Copy, Loader2, Link2 } from "lucide-react"; // Added Link2
 import { database } from '@/lib/firebase';
 import { ref, get, query, orderByChild, equalTo } from 'firebase/database';
 import type { UserProfile, ReferralEntry } from '@/lib/types';
 import { format } from 'date-fns';
-import { APP_NAME } from '@/lib/config'; // Added import
+import { APP_NAME } from '@/lib/config';
 
 interface ReferralManagementTabProps {
   authUserUid: string | null;
@@ -21,7 +21,6 @@ interface ReferralManagementTabProps {
 
 interface DisplayReferral extends ReferralEntry {
     id: string; // referredUserId
-    // Add other stats if calculable client-side, e.g. totalGames (hard)
 }
 
 export default function ReferralManagementTab({ authUserUid, userProfile }: ReferralManagementTabProps) {
@@ -29,11 +28,18 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   const [isLoading, setIsLoading] = useState(true);
   const [referrals, setReferrals] = useState<DisplayReferral[]>([]);
   const [totalEarnings, setTotalEarnings] = useState(0);
+  const [referralLink, setReferralLink] = useState('');
 
   useEffect(() => {
     if (!authUserUid || !userProfile) {
       setIsLoading(false);
       return;
+    }
+
+    if (typeof window !== 'undefined') {
+      setReferralLink(`${window.location.origin}/referral/${authUserUid}`);
+    } else {
+      setReferralLink(`/referral/${authUserUid}`); // Fallback for SSR or non-browser env
     }
 
     setTotalEarnings(userProfile.totalEarnings || 0);
@@ -59,11 +65,11 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
 
   }, [authUserUid, userProfile, toast]);
 
-  const handleCopyReferralId = () => {
-    if (authUserUid) {
-      navigator.clipboard.writeText(authUserUid)
-        .then(() => toast({ title: "Referral ID Copied!", description: "Your Referral ID is copied to clipboard." }))
-        .catch(() => toast({ title: "Error", description: "Could not copy Referral ID.", variant: "destructive" }));
+  const handleCopyReferralLink = () => {
+    if (referralLink) {
+      navigator.clipboard.writeText(referralLink)
+        .then(() => toast({ title: "Referral Link Copied!", description: "Your Referral Link is copied to clipboard." }))
+        .catch(() => toast({ title: "Error", description: "Could not copy Referral Link.", variant: "destructive" }));
     }
   };
 
@@ -71,33 +77,31 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
     return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
   
-  // Summary stats (some are still conceptual for client-side)
   const summaryStats = {
     totalReferrals: referrals.length,
     totalEarnings: totalEarnings,
-    // GamesToday & ActiveReferrals would require more complex queries or backend aggregation.
-    gamesToday: "N/A",
-    activeReferrals: "N/A",
+    gamesToday: "N/A", // Placeholder
+    activeReferrals: "N/A", // Placeholder
   };
 
 
   return (
     <div className="space-y-6">
-      {authUserUid && (
+      {authUserUid && referralLink && (
         <Card className="bg-primary/10 border-primary/30">
           <CardHeader>
             <CardTitle className="text-lg flex items-center text-primary-foreground">
-              <Gift className="mr-2 h-5 w-5 text-yellow-400" /> Your Unique Referral ID
+              <Link2 className="mr-2 h-5 w-5 text-yellow-400" /> Your Unique Referral Link
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex items-center justify-between gap-2">
-            <p className="font-mono text-primary-foreground bg-primary/20 px-2 py-1 rounded-sm text-sm break-all">{authUserUid}</p>
-            <Button variant="ghost" size="sm" onClick={handleCopyReferralId} className="text-primary-foreground hover:bg-primary/30">
-              <Copy className="mr-2 h-4 w-4" /> Copy ID
+          <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <p className="font-mono text-primary-foreground bg-primary/20 px-2 py-1 rounded-sm text-xs break-all">{referralLink}</p>
+            <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="text-primary-foreground hover:bg-primary/30 mt-2 sm:mt-0 self-start sm:self-center">
+              <Copy className="mr-2 h-4 w-4" /> Copy Link
             </Button>
           </CardContent>
            <CardDescription className="px-6 pb-4 text-xs text-primary-foreground/80">
-            Share this ID with friends. When they sign up using your ID and complete games, you'll earn rewards!
+            Share this link with friends. When they sign up using your link and complete games, you'll earn rewards!
           </CardDescription>
         </Card>
       )}
@@ -155,7 +159,8 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
           </Card>
         </div>
          <p className="text-xs text-muted-foreground mt-2">
-            Note: "Games by Referrals Today" and "Active Referrals" stats require backend processing for accurate, real-time data and are illustrative here.
+            Developer Note: "Referral Summary" data is based on available client-side information.
+            "Games by Referrals Today" and "Active Referrals" stats are illustrative and require backend processing for accuracy.
           </p>
       </section>
 
@@ -189,12 +194,16 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
               <div className="text-center py-10">
                 <Users className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">You haven't referred anyone yet.</p>
-                <p className="text-sm text-muted-foreground mt-1">Share your referral ID to start earning!</p>
+                <p className="text-sm text-muted-foreground mt-1">Share your referral link to start earning!</p>
               </div>
             )}
           </CardContent>
         </Card>
       </section>
+      <p className="text-xs text-muted-foreground text-center mt-4">
+        Developer Note: This dashboard is a UI prototype. Real data fetching, aggregation, and financial transactions
+        would require a secure backend implementation and Firebase Cloud Functions for robust operations.
+      </p>
     </div>
   );
 }
