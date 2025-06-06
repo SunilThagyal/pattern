@@ -54,9 +54,9 @@ export default function AuthPage() {
     const action = searchParams.get('action');
 
     if (urlReferralCode && urlReferralCode.trim() !== "") {
-      setReferralCodeInput(urlReferralCode.toUpperCase());
-      setIsReferralCodeFromUrl(true);
-      setIsSigningUp(true); 
+      setReferralCodeInput(urlReferralCode.trim().toUpperCase());
+      setIsReferralCodeFromUrl(true); // This will disable the input
+      setIsSigningUp(true); // Force signup mode for referral links
     } else if (action === 'login') {
       setIsSigningUp(false);
     } else {
@@ -72,24 +72,10 @@ export default function AuthPage() {
     let finalDisplayName = displayName;
     let finalPassword = password;
 
-    if (isSigningUp) {
-      const deviceHasAccount = localStorage.getItem('drawlyDeviceHasAccount');
-      if (deviceHasAccount === 'true') {
-        toast({
-          title: "Account Exists on Device",
-          description: "An account has already been registered on this device. Multiple accounts are not permitted for this demonstration.",
-          variant: "destructive",
-        });
-        if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-        return;
-      }
-    }
-
-
     if (isGoogleAuth) {
       const randomNum = Math.floor(Math.random() * 10000);
-      finalEmail = `user${randomNum}.google@example.com`; // Simulate Google providing email
-      finalDisplayName = `GoogleUser${randomNum}`; // Simulate Google deriving display name
+      finalEmail = `user${randomNum}.google@example.com`;
+      finalDisplayName = `GoogleUser${randomNum}`; 
       finalPassword = "google_simulated_password"; 
       if (isSigningUp && !displayName.trim()) {
         setDisplayName(finalDisplayName); 
@@ -106,17 +92,12 @@ export default function AuthPage() {
 
     try {
       const userRef = ref(database, `users/${simulatedUid}`);
-      // For login, we'd ideally fetch by email, but for simulation this is simpler.
-      // For signup, we check if this *specific* UID exists (unlikely with random generation).
       const userSnapshot = await get(userRef); 
 
       if (isSigningUp) {
-        if (userSnapshot.exists()) { 
-          toast({ title: "User ID Conflict", description: "A user with this ID somehow already exists. Please try again.", variant: "destructive" });
-          if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-          return;
-        }
-        
+        // Removed: "One account per device" blocking logic. Users can sign up multiple times.
+        // The referral lock will handle the referral aspect.
+
         let newShortReferralCode = '';
         let codeExists = true;
         let attempts = 0;
@@ -130,60 +111,76 @@ export default function AuthPage() {
             attempts++;
         }
 
-        if (codeExists) { // Still exists after attempts
+        if (codeExists) { 
             toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again later.", variant: "destructive" });
             if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
             return;
         }
 
-
         const newUserProfile: UserProfile = {
           userId: simulatedUid,
           displayName: finalDisplayName,
           email: finalEmail,
-          referralCode: simulatedUid, 
+          referralCode: simulatedUid, // User's own UID for potential internal use
           shortReferralCode: newShortReferralCode,
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
         };
 
-        const actualReferralShortCodeToUse = referralCodeInput.trim().toUpperCase();
+        // "One Device -> One Referrer Lock" logic
+        let finalReferrerUid: string | null = null;
+        const deviceOriginalReferrerUid = localStorage.getItem('drawlyDeviceOriginalReferrerUid');
+        const currentReferralShortCodeAttempt = referralCodeInput.trim().toUpperCase();
 
-        if (actualReferralShortCodeToUse) {
-          const referrerMapRef = ref(database, `shortCodeToUserIdMap/${actualReferralShortCodeToUse}`);
+        if (deviceOriginalReferrerUid) {
+          finalReferrerUid = deviceOriginalReferrerUid;
+          if (currentReferralShortCodeAttempt) {
+            toast({
+              title: "Referral Applied",
+              description: "This device is already linked to a referrer. The original referral has been applied.",
+              variant: "default"
+            });
+          }
+        } else if (currentReferralShortCodeAttempt) {
+          const referrerMapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeAttempt}`);
           const referrerMapSnap = await get(referrerMapRef);
-
           if (referrerMapSnap.exists()) {
-            const referrerUserId = referrerMapSnap.val();
-            if (referrerUserId === simulatedUid) {
+            const foundReferrerUid = referrerMapSnap.val() as string;
+            if (foundReferrerUid === simulatedUid) {
                toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
             } else {
-              newUserProfile.referredBy = referrerUserId;
-              const referrerProfileRef = ref(database, `users/${referrerUserId}`);
-              const referrerProfileSnap = await get(referrerProfileRef);
-              const referrerDisplayName = referrerProfileSnap.exists() ? referrerProfileSnap.val().displayName : "Referrer";
-
-              const referralsBranchRef = ref(database, `referrals/${referrerUserId}/${simulatedUid}`);
-              await set(referralsBranchRef, {
-                referredUserName: finalDisplayName,
-                timestamp: serverTimestamp() as number,
-              });
-              toast({title: "Referral Applied!", description: `You were successfully referred by ${referrerDisplayName}.`});
+              finalReferrerUid = foundReferrerUid;
+              localStorage.setItem('drawlyDeviceOriginalReferrerUid', foundReferrerUid); // Lock this referrer to the device
+              toast({title: "Referral Applied!", description: `You were successfully referred.`});
             }
           } else {
             toast({ title: "Referral Code Invalid", description: "The referral code entered was not found. Proceeding without referral.", variant: "default" });
           }
         }
+
+        if (finalReferrerUid) {
+          newUserProfile.referredBy = finalReferrerUid;
+          const referrerProfileRef = ref(database, `users/${finalReferrerUid}`);
+          const referrerProfileSnap = await get(referrerProfileRef);
+          const referrerDisplayName = referrerProfileSnap.exists() ? referrerProfileSnap.val().displayName : "Referrer";
+
+          const referralsBranchRef = ref(database, `referrals/${finalReferrerUid}/${simulatedUid}`);
+          await set(referralsBranchRef, {
+            referredUserName: finalDisplayName,
+            timestamp: serverTimestamp() as number,
+          });
+          // Toast for referral applied is handled above based on new or existing device lock
+        }
+        
         await set(userRef, newUserProfile);
         await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
-        localStorage.setItem('drawlyDeviceHasAccount', 'true');
+        // localStorage.setItem('drawlyDeviceHasAccount', 'true'); // No longer needed to block, deviceOriginalReferrerUid serves a related purpose
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
       } else { // Logging In
         let foundUser: UserProfile | null = null;
         let foundUid: string | null = null;
 
-        // Simulate finding user by email (more realistic login simulation)
         const allUsersRef = ref(database, 'users');
         const allUsersSnap = await get(allUsersRef);
         if (allUsersSnap.exists()) {
@@ -202,17 +199,14 @@ export default function AuthPage() {
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        // For login, ensure finalDisplayName is from the found user, not potentially from Google's simulation if the Google button was clicked for login
         finalDisplayName = foundUser.displayName; 
-        localStorage.setItem('drawlyUserUid', foundUid); // Store the actual UID found
+        localStorage.setItem('drawlyUserUid', foundUid); 
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
       localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-      // For sign-up, simulatedUid is new. For login, it's the foundUid.
       localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) );
-
 
       const redirectPath = searchParams.get('redirect') || '/';
       router.push(redirectPath);
@@ -333,12 +327,16 @@ export default function AuthPage() {
 
             <Button
                 variant="link"
-                onClick={() => setIsSigningUp(!isSigningUp)}
+                onClick={() => {
+                    if (!isReferralCodeFromUrl) { // Allow toggle only if not from referral link
+                        setIsSigningUp(!isSigningUp);
+                    }
+                }}
                 className="mt-2"
                 disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeFromUrl}
                 type="button"
             >
-              {isSigningUp ? "Already have an account? Login" : "Don't have an account? Sign Up"}
+              {isSigningUp ? (isReferralCodeFromUrl ? "Complete Sign Up" : "Already have an account? Login") : "Don't have an account? Sign Up"}
             </Button>
 
             <Link href="/" className="text-sm text-muted-foreground hover:text-primary mt-2">
@@ -348,9 +346,11 @@ export default function AuthPage() {
         </form>
       </Card>
       <p className="text-xs text-muted-foreground mt-6 max-w-md text-center">
-        Note: Account creation and login are simulated for this prototype. The 'one account per device' check is also a client-side simulation and can be bypassed. Real-world applications require robust backend security.
+        Note: Account creation and login are simulated for this prototype. The 'one device → one original referrer' check is also a client-side simulation and can be bypassed. Real-world applications require robust backend security.
       </p>
     </div>
   );
 }
+    
+
     
