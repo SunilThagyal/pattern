@@ -34,11 +34,11 @@ const generateShortAlphaNumericCode = (length: number): string => {
   return result;
 };
 
-const LSTORAGE_PENDING_REFERRAL_KEY = "drawlyPendingReferralCode";
+// This constant is for the "one device -> one original referrer" lock
 const LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY = 'drawlyDeviceOriginalReferrerUid';
 
 interface AuthFormProps {
-  passedReferralCodeProp?: string | null; // From URL segment (for /referral/[code]) or query param 'ref' (for /auth?ref=...)
+  passedReferralCodeProp?: string | null; // From URL query param 'ref' (for /auth?ref=...) OR from path segment (for /referral/[shortCode])
   initialActionProp?: string | null; // 'login' or 'signup' (from /auth?action=...)
   forceSignupFromPath?: boolean; // True if rendered by /referral/[shortCode]
   redirectAfterAuth?: string | null;
@@ -56,60 +56,40 @@ export default function AuthForm({
   const [referralCodeInput, setReferralCodeInput] = useState(''); // State for the referral code input field
 
   const [isSigningUp, setIsSigningUp] = useState(true); // Controls Login/Signup mode
-  const [isReferralCodeLocked, setIsReferralCodeLocked] = useState(false); // If true, referral input is disabled/readonly
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
 
+  // This effect handles setting the initial state based on props (URL params or path segments)
   useEffect(() => {
-    let finalCodeToUse: string | null = null;
-    let shouldLockInput = false;
-    let forceSignupModeDueToReferral = false;
+    let codeToSet = '';
+    let shouldForceSignupView = false; // Determines if the view should be forced to signup
 
-    // --- Logic to determine the referral code and lock state ---
-
-    // Case 1: Direct referral path (/referral/[shortCode])
     if (forceSignupFromPath && passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
-      const codeFromPath = passedReferralCodeProp.trim().toUpperCase();
-      finalCodeToUse = codeFromPath;
-      shouldLockInput = true;
-      forceSignupModeDueToReferral = true;
-      // Try to "stick" this code if no other code is pending
-      if (typeof window !== 'undefined' && !localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY)) {
-        localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, codeFromPath);
-      }
-    } else {
-      // Case 2: Navigating to /auth (potentially with ?ref=... or code in localStorage)
-      if (typeof window !== 'undefined') {
-        const codeFromStorage = localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY);
-        if (codeFromStorage) {
-          finalCodeToUse = codeFromStorage;
-          shouldLockInput = true;
-          forceSignupModeDueToReferral = true; // If code is in storage, assume signup intent
-        } else if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
-          // This 'passedReferralCodeProp' is from /auth?ref=...
-          const codeFromUrlRef = passedReferralCodeProp.trim().toUpperCase();
-          finalCodeToUse = codeFromUrlRef;
-          shouldLockInput = true;
-          // Stick this code from URL if storage was empty
-          localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, codeFromUrlRef);
-          // If code from URL ref, respect initialActionProp unless it's overridden later
-          forceSignupModeDueToReferral = initialActionProp !== 'login';
-        }
+      // Case 1: Form rendered directly on /referral/[shortCode] path
+      codeToSet = passedReferralCodeProp.trim().toUpperCase();
+      shouldForceSignupView = true;
+    } else if (!forceSignupFromPath && passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
+      // Case 2: Form rendered on /auth page and 'ref' query param is present
+      codeToSet = passedReferralCodeProp.trim().toUpperCase();
+      // If 'ref' is present, guide towards signup unless 'action=login' was explicit
+      if (initialActionProp !== 'login') {
+        shouldForceSignupView = true;
       }
     }
 
-    // --- Update component state based on determined referral code ---
-    setReferralCodeInput(finalCodeToUse || '');
-    setIsReferralCodeLocked(shouldLockInput);
+    setReferralCodeInput(codeToSet); // Pre-fill the input field
 
-    if (shouldLockInput) {
-      setIsSigningUp(true); // If a referral code is locked, always force signup mode
+    // Set the form mode (Login/Signup)
+    if (shouldForceSignupView) {
+      setIsSigningUp(true);
+    } else if (initialActionProp === 'login') {
+      setIsSigningUp(false);
     } else {
-      // If not locked by referral, set mode based on initialActionProp or default to signup
-      setIsSigningUp(initialActionProp === 'login' ? false : true);
+      // Default to signup if no specific action and no referral forcing it
+      setIsSigningUp(true);
     }
 
   }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
@@ -129,7 +109,7 @@ export default function AuthForm({
       finalDisplayName = `GoogleUser${randomNum}`;
       finalPassword = "google_simulated_password";
       if (isSigningUp && !displayName.trim()) {
-        setDisplayName(finalDisplayName);
+        setDisplayName(finalDisplayName); // Pre-fill display name for simulated Google auth
       }
     }
 
@@ -166,15 +146,15 @@ export default function AuthForm({
           userId: simulatedUid,
           displayName: finalDisplayName,
           email: finalEmail,
-          referralCode: simulatedUid,
-          shortReferralCode: newShortReferralCode,
+          referralCode: simulatedUid, // Own UID as referral code
+          shortReferralCode: newShortReferralCode, // Generated 5-char code
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
         };
 
         let actualReferrerUid: string | null = null;
         const deviceOriginalReferrerUid = typeof window !== 'undefined' ? localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY) : null;
-        const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase();
+        const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); // Use the current (editable) input
 
         if (deviceOriginalReferrerUid) {
           actualReferrerUid = deviceOriginalReferrerUid;
@@ -194,7 +174,7 @@ export default function AuthForm({
           const referrerMapSnap = await get(referrerMapRef);
           if (referrerMapSnap.exists()) {
             const foundReferrerUid = referrerMapSnap.val() as string;
-            if (foundReferrerUid === simulatedUid) {
+            if (foundReferrerUid === simulatedUid) { // Prevent self-referral
                toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
             } else {
               actualReferrerUid = foundReferrerUid;
@@ -218,11 +198,8 @@ export default function AuthForm({
         }
 
         await set(ref(database, `users/${simulatedUid}`), newUserProfile);
-        await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
+        await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid); // Map the new short code
 
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem(LSTORAGE_PENDING_REFERRAL_KEY);
-        }
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
       } else { // Login flow
@@ -247,17 +224,18 @@ export default function AuthForm({
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        finalDisplayName = foundUser.displayName;
+        finalDisplayName = foundUser.displayName; // Use display name from DB
         if (typeof window !== 'undefined') {
-          localStorage.setItem('drawlyUserUid', foundUid);
+          localStorage.setItem('drawlyUserUid', foundUid); // Store the correct UID for login
         }
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
+      // Common success logic
       if (typeof window !== 'undefined') {
         localStorage.setItem('drawlyAuthStatus', 'loggedIn');
         localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-        localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) );
+        localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) ); // Ensure UID is set
       }
       router.push(redirectAfterAuth || '/');
 
@@ -273,6 +251,10 @@ export default function AuthForm({
     e.preventDefault();
     handleAuth(false);
   };
+
+  // Determine if the login/signup toggle should be disabled
+  const disableToggle = isLoadingEmail || isLoadingGoogle || forceSignupFromPath || 
+                       (!forceSignupFromPath && !!(passedReferralCodeProp && passedReferralCodeProp.trim() !== ""));
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-12">
@@ -331,24 +313,21 @@ export default function AuthForm({
             </div>
             {isSigningUp && (
               <div className="space-y-2">
-                <Label htmlFor="referral_code_auth_form" className="text-lg flex items-center">
+                <Label htmlFor="referral_code" className="text-lg flex items-center">
                    <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
                 </Label>
                 <Input
-                  id="referral_code_auth_form"
-                  name="referral_code"
+                  id="referral_code" // Matched to your example
+                  name="referral_code" // Matched to your example
                   type="text"
                   value={referralCodeInput} // Bound to state
-                  onChange={(e) => { if (!isReferralCodeLocked) setReferralCodeInput(e.target.value.toUpperCase())}}
+                  onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())} // Editable
                   placeholder="Enter 5-character code"
                   className="text-base py-3"
                   maxLength={5}
-                  disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeLocked}
-                  readOnly={isReferralCodeLocked} // Use readOnly if locked
+                  disabled={isLoadingEmail || isLoadingGoogle} // Not locked, just disabled during load
+                  // No readOnly, field is editable
                 />
-                {isReferralCodeLocked && (
-                    <p className="text-xs text-green-600">Referral code applied.</p>
-                )}
               </div>
             )}
           </CardContent>
@@ -383,16 +362,18 @@ export default function AuthForm({
             <Button
                 variant="link"
                 onClick={() => {
-                    if (!isReferralCodeLocked) {
+                    if (!disableToggle) {
                         setIsSigningUp(!isSigningUp);
                     }
                 }}
                 className="mt-2"
-                disabled={isLoadingEmail || isLoadingGoogle || isReferralCodeLocked}
+                disabled={disableToggle}
                 type="button"
             >
               {isSigningUp
-                ? (isReferralCodeLocked ? "Complete Sign Up with Referral" : "Already have an account? Login")
+                ? (disableToggle && (forceSignupFromPath || (passedReferralCodeProp && passedReferralCodeProp.trim() !== ""))) // Text if toggle is disabled due to referral
+                    ? "Complete Sign Up with Referral" 
+                    : "Already have an account? Login"
                 : "Don't have an account? Sign Up"}
             </Button>
 
@@ -410,4 +391,3 @@ export default function AuthForm({
     </div>
   );
 }
-    
