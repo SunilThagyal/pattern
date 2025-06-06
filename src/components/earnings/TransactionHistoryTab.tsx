@@ -14,7 +14,7 @@ import { format, subDays, parseISO } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from '@/lib/utils';
 import { database } from '@/lib/firebase';
-import { ref, get, query, orderByChild, startAt, endAt } from 'firebase/database';
+import { ref, get, query /* Removed orderByChild */ } from 'firebase/database';
 import type { Transaction, TransactionStatus } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -40,12 +40,13 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
       return;
     }
     const transactionsRef = ref(database, `transactions/${authUserUid}`);
-    get(query(transactionsRef, orderByChild('date'))).then((snapshot) => {
+    // Removed orderByChild('date') from the query. Client-side sort will handle ordering.
+    get(query(transactionsRef)).then((snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
         const loadedTransactions: Transaction[] = Object.keys(data)
           .map(key => ({ id: key, ...data[key] }))
-          .sort((a, b) => b.date - a.date); // Sort descending by date
+          .sort((a, b) => b.date - a.date); // Sort descending by date (client-side)
         setAllTransactions(loadedTransactions);
         setFilteredTransactions(loadedTransactions); // Initially show all
       } else {
@@ -217,3 +218,4 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     </div>
   );
 }
+
