@@ -206,7 +206,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   
   const handleSimulatedLogin = () => {
     // Simulate login
-    const dummyName = "DemoUser";
+    const dummyName = "User" + Math.floor(Math.random() * 1000);
     const dummyUid = `uid_${Math.random().toString(36).substr(2, 9)}`;
     localStorage.setItem('drawlyAuthStatus', 'loggedIn');
     localStorage.setItem('drawlyUserDisplayName', dummyName);
@@ -235,7 +235,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
              <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-center">
                 <p className="text-sm text-blue-700 mb-2">Want to use referrals or save your progress? Login first!</p>
                 <Button type="button" variant="outline" size="sm" onClick={handleSimulatedLogin}>
-                   <LogIn className="mr-2 h-4 w-4"/> Login / Sign Up (Demo)
+                   <LogIn className="mr-2 h-4 w-4"/> Login / Sign Up
                 </Button>
              </div>
           )}

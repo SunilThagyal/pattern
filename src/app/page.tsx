@@ -34,7 +34,7 @@ export default function HomePage() {
 
   const handleSimulatedLogin = () => {
     // Simulate login
-    const dummyName = "DemoUser";
+    const dummyName = "User" + Math.floor(Math.random() * 1000); // More varied dummy name
     const dummyUid = `uid_${Math.random().toString(36).substr(2, 9)}`;
     localStorage.setItem('drawlyAuthStatus', 'loggedIn');
     localStorage.setItem('drawlyUserDisplayName', dummyName);
@@ -95,7 +95,7 @@ export default function HomePage() {
               Sign up or log in to get your unique referral ID. Share it with friends and earn rewards when they play!
             </p>
             <Button size="lg" className="w-full" onClick={handleSimulatedLogin}>
-              <LogIn className="mr-2 h-5 w-5" /> Login / Sign Up (Demo)
+              <LogIn className="mr-2 h-5 w-5" /> Login / Sign Up
             </Button>
           </CardContent>
         </Card>
