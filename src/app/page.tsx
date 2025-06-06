@@ -12,7 +12,8 @@ import { useRouter } from 'next/navigation';
 import { toast } from '@/hooks/use-toast';
 
 export default function HomePage() {
-  const [isNavigating, setIsNavigating] = useState(false);
+  const [isNavigatingCreate, setIsNavigatingCreate] = useState(false);
+  const [isNavigatingJoin, setIsNavigatingJoin] = useState(false);
   const router = useRouter();
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -33,16 +34,34 @@ export default function HomePage() {
   }, []);
 
   const handleSimulatedLogin = () => {
-    // Simulate login
-    const dummyName = "User" + Math.floor(Math.random() * 1000); // More varied dummy name
+    if (isAuthenticated) {
+        toast({ title: "Already Logged In", description: "You are already logged in." });
+        return;
+    }
+
+    const email = window.prompt("Simulated Login: Enter your email (e.g., test@example.com)");
+    if (!email) {
+        toast({ title: "Login Cancelled", description: "Login process was cancelled.", variant: "default" });
+        return;
+    }
+
+    const password = window.prompt("Simulated Login: Enter your password (e.g., password123)");
+    if (!password) {
+        toast({ title: "Login Cancelled", description: "Login process was cancelled.", variant: "default" });
+        return;
+    }
+    
+    const nameParts = email.split('@');
+    const dummyNameFromEmail = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : "User" + Math.floor(Math.random() * 1000);
     const dummyUid = `uid_${Math.random().toString(36).substr(2, 9)}`;
+
     localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-    localStorage.setItem('drawlyUserDisplayName', dummyName);
+    localStorage.setItem('drawlyUserDisplayName', dummyNameFromEmail);
     localStorage.setItem('drawlyUserUid', dummyUid);
     setIsAuthenticated(true);
-    setUserDisplayName(dummyName);
+    setUserDisplayName(dummyNameFromEmail);
     setUserUid(dummyUid);
-    toast({ title: "Logged In!", description: `Welcome back, ${dummyName}!`});
+    toast({ title: "Logged In!", description: `Welcome, ${dummyNameFromEmail}!`});
   };
 
   const handleLogout = () => {
@@ -55,8 +74,9 @@ export default function HomePage() {
     toast({ title: "Logged Out", description: "You have been logged out."});
   };
 
-  const handleNavigation = (path: string) => {
-    setIsNavigating(true);
+  const handleNavigation = (path: string, type: 'create' | 'join') => {
+    if (type === 'create') setIsNavigatingCreate(true);
+    if (type === 'join') setIsNavigatingJoin(true);
     router.push(path);
   };
   
@@ -128,29 +148,29 @@ export default function HomePage() {
         <Button
           size="lg"
           className="w-full py-8 text-lg shadow-lg hover:shadow-xl transition-shadow"
-          onClick={() => handleNavigation('/create-room')}
-          disabled={isNavigating}
+          onClick={() => handleNavigation('/create-room', 'create')}
+          disabled={isNavigatingCreate}
         >
-          {isNavigating ? (
+          {isNavigatingCreate ? (
             <Loader2 className="mr-2 h-6 w-6 animate-spin" />
           ) : (
             <Paintbrush className="mr-2 h-6 w-6" />
           )}
-          {isNavigating ? 'Loading...' : 'Create New Room'}
+          {isNavigatingCreate ? 'Loading...' : 'Create New Room'}
         </Button>
         <Button
           variant="secondary"
           size="lg"
           className="w-full py-8 text-lg shadow-lg hover:shadow-xl transition-shadow"
-          onClick={() => handleNavigation('/join')}
-          disabled={isNavigating}
+          onClick={() => handleNavigation('/join', 'join')}
+          disabled={isNavigatingJoin}
         >
-          {isNavigating ? (
+          {isNavigatingJoin ? (
             <Loader2 className="mr-2 h-6 w-6 animate-spin" />
           ) : (
             <Users className="mr-2 h-6 w-6" />
           )}
-          {isNavigating ? 'Loading...' : 'Join Existing Room'}
+          {isNavigatingJoin ? 'Loading...' : 'Join Existing Room'}
         </Button>
       </div>
 

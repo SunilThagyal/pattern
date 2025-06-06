@@ -157,10 +157,9 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
             isAnonymous: !isAuthenticated,
           };
 
-          if (referralCode.trim() && isAuthenticated) { // Only allow referral codes if joining user is authenticated
-            // Basic validation: check if referralCode is not the player's own ID
+          if (referralCode.trim() && isAuthenticated) { 
             if (referralCode.trim() !== finalPlayerId) {
-                playerUpdates.referredByPlayerId = referralCode.trim(); // This should be a UID
+                playerUpdates.referredByPlayerId = referralCode.trim(); 
                 toast({ title: "Referral Applied", description: "Referral code has been noted.", variant: "default" });
             } else {
                 toast({ title: "Invalid Referral", description: "You cannot refer yourself.", variant: "destructive" });
@@ -205,17 +204,37 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   };
   
   const handleSimulatedLogin = () => {
-    // Simulate login
-    const dummyName = "User" + Math.floor(Math.random() * 1000);
+    if (isAuthenticated) {
+        toast({ title: "Already Logged In", description: "You are already logged in." });
+        return;
+    }
+
+    const email = window.prompt("Simulated Login: Enter your email (e.g., test@example.com)");
+    if (!email) {
+        toast({ title: "Login Cancelled", description: "Login process was cancelled.", variant: "default" });
+        return;
+    }
+
+    const password = window.prompt("Simulated Login: Enter your password (e.g., password123)");
+    if (!password) {
+        toast({ title: "Login Cancelled", description: "Login process was cancelled.", variant: "default" });
+        return;
+    }
+
+    const nameParts = email.split('@');
+    const dummyNameFromEmail = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : "User" + Math.floor(Math.random() * 1000);
     const dummyUid = `uid_${Math.random().toString(36).substr(2, 9)}`;
+    
     localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-    localStorage.setItem('drawlyUserDisplayName', dummyName);
+    localStorage.setItem('drawlyUserDisplayName', dummyNameFromEmail);
     localStorage.setItem('drawlyUserUid', dummyUid);
+    
     setIsAuthenticated(true);
     setAuthPlayerId(dummyUid);
-    setPlayerName(dummyName);
-    setAuthDisplayName(dummyName);
-    toast({ title: "Logged In!", description: `Welcome, ${dummyName}!`});
+    setPlayerName(dummyNameFromEmail); // This is important for pre-filling
+    setAuthDisplayName(dummyNameFromEmail);
+    
+    toast({ title: "Logged In!", description: `Welcome, ${dummyNameFromEmail}!`});
   };
 
 
@@ -251,7 +270,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
               className="text-base py-6"
               disabled={isLoading || (isAuthenticated && !!authDisplayName)}
             />
-            {isAuthenticated && <p className="text-xs text-muted-foreground">Logged in as {authDisplayName}.</p>}
+            {isAuthenticated && <p className="text-xs text-muted-foreground">Logged in as {authDisplayName}. Name is linked to your account.</p>}
           </div>
           {mode === 'join' && (
             <>
