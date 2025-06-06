@@ -4,31 +4,72 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Paintbrush, Users, Zap, Loader2 } from 'lucide-react';
+import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift } from 'lucide-react';
 import Image from 'next/image';
 import { APP_NAME } from '@/lib/config';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from '@/hooks/use-toast';
 
 export default function HomePage() {
-  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
-  const [isJoiningRoom, setIsJoiningRoom] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const router = useRouter();
 
-  const handleCreateRoomClick = () => {
-    setIsCreatingRoom(true);
-    router.push('/create-room');
-    // No need to set isCreatingRoom to false here as the component will unmount on navigation.
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
+  const [userUid, setUserUid] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check for simulated auth state in localStorage
+    const authStatus = localStorage.getItem('drawlyAuthStatus');
+    const storedName = localStorage.getItem('drawlyUserDisplayName');
+    const storedUid = localStorage.getItem('drawlyUserUid');
+
+    if (authStatus === 'loggedIn' && storedName && storedUid) {
+      setIsAuthenticated(true);
+      setUserDisplayName(storedName);
+      setUserUid(storedUid);
+    }
+  }, []);
+
+  const handleSimulatedLogin = () => {
+    // Simulate login
+    const dummyName = "DemoUser";
+    const dummyUid = `uid_${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+    localStorage.setItem('drawlyUserDisplayName', dummyName);
+    localStorage.setItem('drawlyUserUid', dummyUid);
+    setIsAuthenticated(true);
+    setUserDisplayName(dummyName);
+    setUserUid(dummyUid);
+    toast({ title: "Logged In!", description: `Welcome back, ${dummyName}!`});
   };
 
-  const handleJoinRoomClick = () => {
-    setIsJoiningRoom(true);
-    router.push('/join');
-    // No need to set isJoiningRoom to false here.
+  const handleLogout = () => {
+    localStorage.removeItem('drawlyAuthStatus');
+    localStorage.removeItem('drawlyUserDisplayName');
+    localStorage.removeItem('drawlyUserUid');
+    setIsAuthenticated(false);
+    setUserDisplayName(null);
+    setUserUid(null);
+    toast({ title: "Logged Out", description: "You have been logged out."});
+  };
+
+  const handleNavigation = (path: string) => {
+    setIsNavigating(true);
+    router.push(path);
+  };
+  
+  const handleCopyReferralId = () => {
+    if (userUid) {
+      navigator.clipboard.writeText(userUid)
+        .then(() => toast({ title: "Referral ID Copied!", description: "Your Referral ID is copied to clipboard." }))
+        .catch(() => toast({ title: "Error", description: "Could not copy Referral ID.", variant: "destructive" }));
+    }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center text-center w-full max-w-3xl animate-in fade-in duration-500">
+    <div className="flex flex-col items-center justify-center text-center w-full max-w-3xl animate-in fade-in duration-500 py-8 px-4">
       <Image
         src="/placehold.jpg"
         alt={`${APP_NAME} game banner`}
@@ -40,37 +81,76 @@ export default function HomePage() {
       <h1 className="text-5xl font-extrabold tracking-tight mb-4">
         Welcome to <span className="text-primary">{APP_NAME}</span>!
       </h1>
-      <p className="text-lg text-muted-foreground mb-10 max-w-xl">
-        Unleash your inner artist! Draw, challenge your friends, and guess your way to victory in this exciting real-time multiplayer game, now with AI-powered word suggestions and sketch assistance!
+      <p className="text-lg text-muted-foreground mb-6 max-w-xl">
+        Unleash your inner artist! Draw, challenge your friends, and guess your way to victory in this exciting real-time multiplayer game.
       </p>
+
+      {!isAuthenticated && (
+        <Card className="mb-8 w-full max-w-md bg-secondary/30">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-center text-xl"><UserPlus className="mr-2 text-accent" /> Join {APP_NAME} &amp; Refer Friends!</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              Sign up or log in to get your unique referral ID. Share it with friends and earn rewards when they play!
+            </p>
+            <Button size="lg" className="w-full" onClick={handleSimulatedLogin}>
+              <LogIn className="mr-2 h-5 w-5" /> Login / Sign Up (Demo)
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {isAuthenticated && userDisplayName && userUid && (
+        <Card className="mb-8 w-full max-w-md bg-green-50 border border-green-200">
+          <CardHeader>
+            <CardTitle className="text-xl text-green-700">Welcome back, {userDisplayName}!</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              <p className="font-semibold text-green-600 flex items-center justify-center">
+                <Gift className="mr-2 h-5 w-5 text-yellow-500"/> Your Referral ID:
+              </p>
+              <div className="flex items-center justify-center gap-2 mt-1">
+                <span className="font-mono text-green-700 p-1 bg-green-100 rounded-sm">{userUid}</span>
+                <Button variant="ghost" size="sm" onClick={handleCopyReferralId} className="h-auto p-1 text-green-600 hover:bg-green-200">Copy</Button>
+              </div>
+              <p className="text-xs mt-1">Share this ID with friends. You'll earn rewards in-game when they complete games!</p>
+            </div>
+            <Button variant="outline" size="sm" className="w-full" onClick={handleLogout}>
+              <LogOut className="mr-2 h-4 w-4" /> Logout
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12 w-full max-w-md">
         <Button
           size="lg"
           className="w-full py-8 text-lg shadow-lg hover:shadow-xl transition-shadow"
-          onClick={handleCreateRoomClick}
-          disabled={isCreatingRoom || isJoiningRoom}
+          onClick={() => handleNavigation('/create-room')}
+          disabled={isNavigating}
         >
-          {isCreatingRoom ? (
+          {isNavigating ? (
             <Loader2 className="mr-2 h-6 w-6 animate-spin" />
           ) : (
             <Paintbrush className="mr-2 h-6 w-6" />
           )}
-          {isCreatingRoom ? 'Creating...' : 'Create New Room'}
+          {isNavigating ? 'Loading...' : 'Create New Room'}
         </Button>
         <Button
           variant="secondary"
           size="lg"
           className="w-full py-8 text-lg shadow-lg hover:shadow-xl transition-shadow"
-          onClick={handleJoinRoomClick}
-          disabled={isJoiningRoom || isCreatingRoom}
+          onClick={() => handleNavigation('/join')}
+          disabled={isNavigating}
         >
-          {isJoiningRoom ? (
+          {isNavigating ? (
             <Loader2 className="mr-2 h-6 w-6 animate-spin" />
           ) : (
             <Users className="mr-2 h-6 w-6" />
           )}
-          {isJoiningRoom ? 'Joining...' : 'Join Existing Room'}
+          {isNavigating ? 'Loading...' : 'Join Existing Room'}
         </Button>
       </div>
 

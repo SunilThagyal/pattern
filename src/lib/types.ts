@@ -1,12 +1,13 @@
 
 export interface Player {
-  id: string;
+  id: string; // If authenticated, this is the User UID. If anonymous, this is patternPartyPlayerId.
   name: string;
   score: number;
   isOnline: boolean;
   isHost?: boolean;
-  referredByPlayerId?: string | null; // ID of the player who referred this player
+  referredByPlayerId?: string | null; // UID of the authenticated player who referred this player
   referralRewardsThisSession?: number; // Conceptual rewards earned in this room session
+  isAnonymous?: boolean; // Flag to indicate if the player is anonymous
 }
 
 export interface Guess {
@@ -33,7 +34,7 @@ export interface RoomConfig {
 
 export interface Room {
   id: string;
-  hostId: string;
+  hostId: string; // UID of the authenticated host, or patternPartyPlayerId if host is anonymous
   players: { [playerId: string]: Player };
   config: RoomConfig;
   currentDrawerId?: string | null;
@@ -60,4 +61,3 @@ export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameSta
   wordSelectionEndsAt?: null;
   aiSketchDataUri?: null; // Initialize new field
 };
-

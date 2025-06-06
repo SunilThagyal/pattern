@@ -752,6 +752,8 @@ const MobileTopBar = React.memo(({
   setIsSettingsDialogOpen,
   onDrawerLetterClick,
   isLeavingRoom,
+  authPlayerId, // Added
+  isAuthenticated, // Added
 }: {
   room: Room;
   playerId: string;
@@ -759,6 +761,8 @@ const MobileTopBar = React.memo(({
   setIsSettingsDialogOpen: (open: boolean) => void;
   onDrawerLetterClick: (char: string, index: number) => void;
   isLeavingRoom?: boolean;
+  authPlayerId?: string | null; // Added
+  isAuthenticated?: boolean; // Added
 }) => {
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const hasPlayerGuessedCorrectly = (room.correctGuessersThisRound || []).includes(playerId);
@@ -826,8 +830,11 @@ export default function GameRoomPage() {
   const isMobile = useIsMobile();
 
   const [room, setRoom] = useState<Room | null>(null);
-  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [playerId, setPlayerId] = useState<string | null>(null); // Can be UID or patternPartyPlayerId
   const [playerName, setPlayerName] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false); // Simulated auth state
+  const [authPlayerId, setAuthPlayerId] = useState<string | null>(null); // UID if authenticated
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -1267,6 +1274,7 @@ export default function GameRoomPage() {
         addSystemMessage(`[[SYSTEM_LEFT]]`, playerName);
         await update(playerRef, { isOnline: false });
         setIsSettingsDialogOpenLocal(false);
+        localStorage.removeItem('patternPartyCurrentRoomId');
         toast({ title: "Left Room", description: "You have left the room." });
         window.location.href = '/';
     } catch (err) {
@@ -1329,15 +1337,53 @@ export default function GameRoomPage() {
 
 
   useEffect(() => {
-    const pId = localStorage.getItem('patternPartyPlayerId');
-    const pName = localStorage.getItem('patternPartyPlayerName');
-    if (!pId || !pName) {
-      toast({ title: "Error", description: "Player identity not found. Please rejoin.", variant: "destructive" });
-      window.location.href = `/join/${roomId}`;
+    const authStatus = localStorage.getItem('drawlyAuthStatus');
+    const storedUid = localStorage.getItem('drawlyUserUid');
+    const storedDisplayName = localStorage.getItem('drawlyUserDisplayName');
+    const localPlayerId = localStorage.getItem('patternPartyPlayerId');
+    const localPlayerName = localStorage.getItem('patternPartyPlayerName');
+    const currentRoomIdInStorage = localStorage.getItem('patternPartyCurrentRoomId');
+
+
+    let finalPlayerId: string | null = null;
+    let finalPlayerName: string | null = null;
+    let finalIsAuthenticated = false;
+
+    if (authStatus === 'loggedIn' && storedUid && storedDisplayName) {
+      finalPlayerId = storedUid;
+      finalPlayerName = storedDisplayName;
+      finalIsAuthenticated = true;
+      setAuthPlayerId(storedUid); // Store UID for settings
+    } else if (localPlayerId && localPlayerName) {
+      finalPlayerId = localPlayerId;
+      finalPlayerName = localPlayerName;
+    }
+
+    if (!finalPlayerId || !finalPlayerName) {
+      toast({ title: "Error", description: "Player identity not found. Please rejoin or log in.", variant: "destructive" });
+      if(currentRoomIdInStorage === roomId) { // Only redirect if this is the room they were in
+        window.location.href = `/join/${roomId}`;
+      } else {
+        window.location.href = `/`;
+      }
       return;
     }
-    setPlayerId(pId);
-    setPlayerName(pName);
+    if (currentRoomIdInStorage !== roomId) {
+       // If user manually navigates to a different room URL than stored, clear old patternPartyPlayerId and name
+       // to force re-entry or use auth details if they are now in a new room.
+       // This handles cases where they might copy a URL to a new room.
+       // We keep auth details as those are global.
+       if (!finalIsAuthenticated) { // Only clear if they were anonymous
+           localStorage.removeItem('patternPartyPlayerId');
+           localStorage.removeItem('patternPartyPlayerName');
+       }
+       localStorage.setItem('patternPartyCurrentRoomId', roomId); // Update to current room
+    }
+
+
+    setPlayerId(finalPlayerId);
+    setPlayerName(finalPlayerName);
+    setIsAuthenticated(finalIsAuthenticated);
   }, [roomId, toast]);
 
   useEffect(() => {
@@ -1374,6 +1420,7 @@ export default function GameRoomPage() {
         setRoom(null);
         if (!isLoading) {
             toast({ title: "Room Error", description: "This room no longer exists.", variant: "destructive" });
+            localStorage.removeItem('patternPartyCurrentRoomId');
              window.location.href = '/';
         }
       }
@@ -1404,6 +1451,19 @@ export default function GameRoomPage() {
         get(child(ref(database, `rooms/${roomId}`), `players/${playerId}`)).then(playerSnap => {
           if (playerSnap.exists()) {
             update(child(ref(database, `rooms/${roomId}`), `players/${playerId}`), { isOnline: true });
+          } else if (playerName) { // Player might not exist if they are new to this room
+            const newPlayerEntry: Player = {
+                id: playerId,
+                name: playerName,
+                score: 0,
+                isOnline: true,
+                isHost: false, // Assume not host if joining this way, host is set on creation
+                isAnonymous: !isAuthenticated,
+                referralRewardsThisSession: 0,
+            };
+            set(child(ref(database, `rooms/${roomId}`), `players/${playerId}`), newPlayerEntry).then(() => {
+                addSystemMessage(`[[SYSTEM_JOINED]]`, playerName);
+            });
           }
         });
     }
@@ -1412,7 +1472,7 @@ export default function GameRoomPage() {
       off(roomRefVal, 'value', onRoomValueChange);
       off(playerConnectionsRef, 'value', onConnectedChange);
     };
-  }, [roomId, playerId, toast, isLoading, addSystemMessage, playerName]);
+  }, [roomId, playerId, toast, isLoading, addSystemMessage, playerName, isAuthenticated]);
 
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt) {
@@ -1585,13 +1645,14 @@ export default function GameRoomPage() {
 
 
     if (
-        latestGuess.playerId !== playerId &&
-        latestGuess.playerId !== 'system' &&
-        !(latestGuess.text || "").startsWith('[[SYSTEM_')
+        latestGuess.playerId !== playerId && // Don't show own messages as toast
+        latestGuess.playerId !== 'system' && // Don't show system messages as toast
+        !(latestGuess.text || "").startsWith('[[SYSTEM_') // Double check for system messages
     ) {
         
         setToastMessages(prevToasts => {
-            if (prevToasts.some(t => t.uniqueId === potentialToastId)) {
+            // Check if this exact message instance (by content and timestamp) is already being toasted
+            if (prevToasts.some(t => t.timestamp === latestGuess.timestamp && t.playerId === latestGuess.playerId && t.text === latestGuess.text)) {
                 return prevToasts; 
             }
 
@@ -1599,14 +1660,16 @@ export default function GameRoomPage() {
             const newToastIdWithCounter = `${potentialToastId}-${toastIdCounter.current}`;
             const newToastMessage = { ...latestGuess, uniqueId: newToastIdWithCounter };
 
-            let updatedToasts = [newToastMessage, ...prevToasts];
+            let updatedToasts = [newToastMessage, ...prevToasts]; // Add new toast to the beginning
             let removedToasts: Array<Guess & { uniqueId: string }> = [];
             
+            // If we exceed max count, remove the oldest ones from the end
             if (updatedToasts.length > TOAST_MAX_COUNT) {
                 removedToasts = updatedToasts.slice(TOAST_MAX_COUNT);
                 updatedToasts = updatedToasts.slice(0, TOAST_MAX_COUNT);
             }
             
+            // Clear timeouts for any toasts that were removed from the display list
             removedToasts.forEach(rt => {
                 if (toastTimeoutsRef.current[rt.uniqueId]) {
                     clearTimeout(toastTimeoutsRef.current[rt.uniqueId]);
@@ -1614,20 +1677,22 @@ export default function GameRoomPage() {
                 }
             });
             
+            // Set timeout for the new toast
             const timeoutId = setTimeout(() => {
                 setToastMessages(currentToasts => currentToasts.filter(t => t.uniqueId !== newToastIdWithCounter));
-                if (toastTimeoutsRef.current[newToastIdWithCounter]) {
+                if (toastTimeoutsRef.current[newToastIdWithCounter]) { // Check if still exists (might have been manually closed)
                     delete toastTimeoutsRef.current[newToastIdWithCounter];
                 }
-            }, 3000);
+            }, 3000); // 3 second lifespan
             toastTimeoutsRef.current[newToastIdWithCounter] = timeoutId;
 
-            return updatedToasts;
+            return updatedToasts; // Return the new array of toasts
         });
     }
   }, [memoizedGuesses, playerId]);
 
   useEffect(() => {
+    // Cleanup all toast timeouts when the component unmounts
     return () => {
         Object.values(toastTimeoutsRef.current).forEach(clearTimeout);
         toastTimeoutsRef.current = {};
@@ -1636,13 +1701,15 @@ export default function GameRoomPage() {
 
   useEffect(() => {
     // Logic for referral rewards when game ends
-    if (room?.gameState === 'game_over' && playerId === room?.hostId) {
-        const players = room.players || {};
-        Object.values(players).forEach(async (p) => {
-            if (p.referredByPlayerId) {
-                const referrerId = p.referredByPlayerId;
-                const referrer = players[referrerId];
-                if (referrer && referrer.isOnline) { // Check if referrer is in the room and online
+    if (room?.gameState === 'game_over' && playerId === room?.hostId && room.players) {
+        const playersInRoom = room.players;
+        Object.values(playersInRoom).forEach(async (p) => {
+            if (p.id && p.referredByPlayerId && !p.isAnonymous) { // Only for non-anonymous referred players
+                const referrerId = p.referredByPlayerId; // This is a UID
+                const referrer = playersInRoom[referrerId];
+                
+                // Check if referrer exists, is authenticated (not anonymous), and is online
+                if (referrer && referrer.id && !referrer.isAnonymous && referrer.isOnline) { 
                     const referrerRef = ref(database, `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`);
                     try {
                         await runTransaction(referrerRef, (currentRewards) => {
@@ -1688,12 +1755,15 @@ export default function GameRoomPage() {
             setIsSettingsDialogOpen={setIsSettingsDialogOpenLocal}
             onDrawerLetterClick={handleDrawerLetterClick}
             isLeavingRoom={isLeavingRoom}
+            authPlayerId={authPlayerId}
+            isAuthenticated={isAuthenticated}
         />
         <SettingsDialogContent
             onCopyLink={handleCopyLink}
             onLeaveRoom={handleLeaveRoom}
             isLeavingRoom={isLeavingRoom}
-            playerId={playerId} // Pass playerId here
+            isAuthenticated={isAuthenticated}
+            authPlayerId={authPlayerId}
         />
       </Dialog>
 
@@ -1715,7 +1785,7 @@ export default function GameRoomPage() {
             isHost={room.hostId === playerId}
             onStartGame={manageGameStart}
             startButtonInfo={startButtonInfo}
-            canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players).filter((p:any)=>p.isOnline).length >= 1}
+            canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players || {}).filter((p:any)=>p.isOnline).length >= 1}
             isStartingNextRoundOrGame={isStartingNextRoundOrGame}
             aiSketchDataUri={room.aiSketchDataUri}
             onDrawWithAI={isCurrentPlayerDrawing ? handleDrawWithAI : undefined}
@@ -1732,6 +1802,15 @@ export default function GameRoomPage() {
                   )}
                 >
                   <span className="font-semibold">{message.playerName}:</span> {message.text}
+                  {/* Manual close button removed as per latest instructions to auto-dismiss only
+                  <button
+                    onClick={() => handleManualCloseToast(message.uniqueId)}
+                    className="absolute top-0 right-0 p-0.5 text-muted-foreground hover:text-foreground"
+                    aria-label="Close toast"
+                  >
+                    <X size={12} />
+                  </button>
+                  */}
                 </div>
               ))}
             </div>
@@ -1766,8 +1845,8 @@ export default function GameRoomPage() {
         className={cn(
           "p-1 border-t bg-background w-full",
           isMobile
-            ? "fixed bottom-0 left-0 right-0 z-30"
-            : "flex-shrink-0"
+            ? "fixed bottom-0 left-0 right-0 z-30" // Ensures it's above other content and fixed
+            : "flex-shrink-0" // Default desktop behavior
         )}
       >
           <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} isSubmittingGuess={isSubmittingGuess} />
@@ -1791,7 +1870,7 @@ export default function GameRoomPage() {
             players={playersArray}
             isHost={room.hostId === playerId}
             onPlayAgain={manageGameStart}
-            canPlayAgain={Object.values(room.players).filter(p=>p.isOnline).length >= 1}
+            canPlayAgain={Object.values(room.players || {}).filter(p=>p.isOnline).length >= 1}
             roundEndCountdown={roundEndCountdown}
             isStartingNextRoundOrGame={isStartingNextRoundOrGame}
         />
@@ -1887,4 +1966,3 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     }
     return finalWords.slice(0, count);
 };
-

@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Timer, ListChecks, TextCursorInput, UserPlus } from 'lucide-react';
+import { Loader2, Timer, ListChecks, TextCursorInput, UserPlus,LogIn } from 'lucide-react';
 
 interface RoomFormProps {
   mode: 'create' | 'join';
@@ -31,21 +31,40 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
   const [totalRounds, setTotalRounds] = useState(5);
   const [maxWordLength, setMaxWordLength] = useState(20);
 
+  // Simulated Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authPlayerId, setAuthPlayerId] = useState<string | null>(null);
+  const [authDisplayName, setAuthDisplayName] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedPlayerName = localStorage.getItem('patternPartyPlayerName');
-    if (storedPlayerName) {
-      setPlayerName(storedPlayerName);
+    // Check for simulated auth state in localStorage
+    const authStatus = localStorage.getItem('drawlyAuthStatus');
+    const storedName = localStorage.getItem('drawlyUserDisplayName');
+    const storedUid = localStorage.getItem('drawlyUserUid');
+    
+    if (authStatus === 'loggedIn' && storedName && storedUid) {
+      setIsAuthenticated(true);
+      setAuthPlayerId(storedUid);
+      setPlayerName(storedName); // Pre-fill player name if authenticated
+      setAuthDisplayName(storedName);
+    } else {
+      const storedPlayerName = localStorage.getItem('patternPartyPlayerName');
+      if (storedPlayerName) {
+        setPlayerName(storedPlayerName);
+      }
     }
   }, []);
 
-  const getPlayerId = (): string => {
-    let playerId = localStorage.getItem('patternPartyPlayerId');
-    if (!playerId) {
-      playerId = Math.random().toString(36).substr(2, 9);
-      localStorage.setItem('patternPartyPlayerId', playerId);
+  const getPlayerIdForFirebase = (): string => {
+    if (isAuthenticated && authPlayerId) {
+      return authPlayerId;
     }
-    return playerId;
+    let localPlayerId = localStorage.getItem('patternPartyPlayerId');
+    if (!localPlayerId) {
+      localPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`;
+      localStorage.setItem('patternPartyPlayerId', localPlayerId);
+    }
+    return localPlayerId;
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -73,19 +92,22 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         }
     }
 
-
-    localStorage.setItem('patternPartyPlayerName', playerName);
-    const playerId = getPlayerId();
+    if (!isAuthenticated) {
+        localStorage.setItem('patternPartyPlayerName', playerName);
+    }
+    
+    const finalPlayerId = getPlayerIdForFirebase();
 
     if (mode === 'create') {
       const newRoomId = Math.random().toString(36).substr(2, 6).toUpperCase();
       const player: Player = { 
-        id: playerId, 
+        id: finalPlayerId, 
         name: playerName, 
         score: 0, 
         isOnline: true, 
         isHost: true,
         referralRewardsThisSession: 0,
+        isAnonymous: !isAuthenticated,
       };
       
       const roomConfig: RoomConfig = {
@@ -96,8 +118,8 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       
       const roomData: RoomCreationData = {
         id: newRoomId,
-        hostId: playerId,
-        players: { [playerId]: player },
+        hostId: finalPlayerId,
+        players: { [finalPlayerId]: player },
         gameState: 'waiting',
         createdAt: serverTimestamp() as unknown as number,
         drawingData: [],
@@ -113,6 +135,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       try {
         await set(ref(database, `rooms/${newRoomId}`), roomData);
         toast({ title: "Room Created!", description: `Room ${newRoomId} created successfully. You are the host.` });
+        localStorage.setItem('patternPartyCurrentRoomId', newRoomId); // Store current room
         router.push(`/room/${newRoomId}`);
       } catch (error) {
         console.error("Error creating room:", error);
@@ -127,44 +150,47 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         const snapshot = await get(roomRef);
         if (snapshot.exists()) {
           const room: Room = snapshot.val();
+          
           const playerUpdates: Partial<Player> = {
             isOnline: true,
             name: playerName,
+            isAnonymous: !isAuthenticated,
           };
 
-          if (referralCode.trim()) {
+          if (referralCode.trim() && isAuthenticated) { // Only allow referral codes if joining user is authenticated
             // Basic validation: check if referralCode is not the player's own ID
-            if (referralCode.trim() !== playerId) {
-                // We don't validate if the referrerId actually exists globally here for simplicity.
-                // In a full system, you'd check against a users table.
-                playerUpdates.referredByPlayerId = referralCode.trim();
+            if (referralCode.trim() !== finalPlayerId) {
+                playerUpdates.referredByPlayerId = referralCode.trim(); // This should be a UID
                 toast({ title: "Referral Applied", description: "Referral code has been noted.", variant: "default" });
             } else {
                 toast({ title: "Invalid Referral", description: "You cannot refer yourself.", variant: "destructive" });
             }
+          } else if (referralCode.trim() && !isAuthenticated) {
+            toast({ title: "Login Required for Referral", description: "Please login/signup to use a referral code.", variant: "default" });
           }
 
 
-          if (room.players[playerId]) { 
-             await update(child(roomRef, `players/${playerId}`), playerUpdates);
+          if (room.players && room.players[finalPlayerId]) { 
+             await update(child(roomRef, `players/${finalPlayerId}`), playerUpdates);
           } else { 
-            if (Object.keys(room.players || {}).length >= 10) { 
+            if (room.players && Object.keys(room.players).length >= 10) { 
                 toast({ title: "Room Full", description: "This room has reached its maximum player limit.", variant: "destructive" });
                 setIsLoading(false);
                 return;
             }
             const newPlayer: Player = { 
-                id: playerId, 
+                id: finalPlayerId, 
                 name: playerName, 
                 score: 0, 
                 isOnline: true, 
                 isHost: false,
                 referralRewardsThisSession: 0,
-                ...playerUpdates // includes referredByPlayerId if set
+                ...playerUpdates 
             };
-            await set(child(roomRef, `players/${playerId}`), newPlayer);
+            await set(child(roomRef, `players/${finalPlayerId}`), newPlayer);
           }
           toast({ title: "Joined Room!", description: `Successfully joined room ${roomId}.` });
+          localStorage.setItem('patternPartyCurrentRoomId', roomId); // Store current room
           router.push(`/room/${roomId}`);
         } else {
           toast({ title: "Room Not Found", description: `Room ${roomId} does not exist.`, variant: "destructive" });
@@ -177,6 +203,21 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       }
     }
   };
+  
+  const handleSimulatedLogin = () => {
+    // Simulate login
+    const dummyName = "DemoUser";
+    const dummyUid = `uid_${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+    localStorage.setItem('drawlyUserDisplayName', dummyName);
+    localStorage.setItem('drawlyUserUid', dummyUid);
+    setIsAuthenticated(true);
+    setAuthPlayerId(dummyUid);
+    setPlayerName(dummyName);
+    setAuthDisplayName(dummyName);
+    toast({ title: "Logged In!", description: `Welcome, ${dummyName}!`});
+  };
+
 
   return (
     <Card className="w-full max-w-md shadow-xl animate-in fade-in-50 duration-500">
@@ -190,6 +231,14 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
       </CardHeader>
       <form onSubmit={handleSubmit}>
         <CardContent className="space-y-6">
+          {!isAuthenticated && (
+             <div className="p-3 bg-blue-50 border border-blue-200 rounded-md text-center">
+                <p className="text-sm text-blue-700 mb-2">Want to use referrals or save your progress? Login first!</p>
+                <Button type="button" variant="outline" size="sm" onClick={handleSimulatedLogin}>
+                   <LogIn className="mr-2 h-4 w-4"/> Login / Sign Up (Demo)
+                </Button>
+             </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="playerName" className="text-lg">Your Name</Label>
             <Input
@@ -200,7 +249,9 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
               placeholder="Enter your display name"
               required
               className="text-base py-6"
+              disabled={isLoading || (isAuthenticated && !!authDisplayName)}
             />
+            {isAuthenticated && <p className="text-xs text-muted-foreground">Logged in as {authDisplayName}.</p>}
           </div>
           {mode === 'join' && (
             <>
@@ -227,12 +278,14 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   type="text"
                   value={referralCode}
                   onChange={(e) => setReferralCode(e.target.value)}
-                  placeholder="Enter referrer's ID"
+                  placeholder="Enter referrer's User ID"
                   className="text-base py-3"
-                  maxLength={9}
-                  disabled={isLoading}
+                  maxLength={20} // UIDs can be longer
+                  disabled={isLoading || !isAuthenticated}
                 />
-                 <p className="text-xs text-muted-foreground">Ask your friend for their 9-character Player ID.</p>
+                 <p className="text-xs text-muted-foreground">
+                   {isAuthenticated ? "Ask your friend for their User ID (from their homepage)." : "Log in to use a referral code."}
+                 </p>
               </div>
             </>
           )}
@@ -297,4 +350,3 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
     </Card>
   );
 }
-
