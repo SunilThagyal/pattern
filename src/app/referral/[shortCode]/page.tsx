@@ -12,10 +12,11 @@ const ReferralRedirectPage: NextPage<ReferralRedirectPageProps> = ({ params }) =
 
   if (shortCode && typeof shortCode === 'string' && shortCode.trim() !== '') {
     const processedCode = shortCode.trim().toUpperCase();
-    // Redirect to the auth page, passing the referral code as 'ref' and forcing signup action
-    redirect(`/auth?ref=${processedCode}&action=signup`);
+    // Construct the URL for redirection with query parameters
+    const redirectUrl = `/auth?ref=${processedCode}&action=signup`;
+    redirect(redirectUrl);
   } else {
-    // If no valid code, redirect to auth page without ref, default to signup
+    // If no valid code, redirect to auth page default to signup
     redirect('/auth?action=signup');
   }
 
