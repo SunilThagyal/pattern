@@ -86,19 +86,19 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   return (
     <div className="space-y-6">
       {shortReferralCode && (
-        <Card className="bg-primary/10 border-primary/30">
+        <Card className="bg-card border-2 border-primary shadow-lg">
           <CardHeader>
-            <CardTitle className="text-lg flex items-center text-primary-foreground">
-              <Gift className="mr-2 h-5 w-5 text-yellow-400" /> Your Unique Referral Code
+            <CardTitle className="text-lg flex items-center text-primary">
+              <Gift className="mr-2 h-5 w-5 text-yellow-500" /> Your Unique Referral Code
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <p className="font-mono text-primary-foreground bg-primary/20 px-2 py-1 rounded-sm text-lg break-all">{shortReferralCode}</p>
-            <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="text-primary-foreground hover:bg-primary/30 mt-2 sm:mt-0 self-start sm:self-center">
+            <p className="font-mono text-primary bg-primary/10 px-2 py-1 rounded-sm text-lg break-all">{shortReferralCode}</p>
+            <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="text-primary hover:bg-primary/10 mt-2 sm:mt-0 self-start sm:self-center">
               <Copy className="mr-2 h-4 w-4" /> Copy Link
             </Button>
           </CardContent>
-           <CardDescription className="px-6 pb-4 text-xs text-primary-foreground/80">
+           <CardDescription className="px-6 pb-4 text-xs text-muted-foreground">
             Share this link (copied with the button) with friends. When they sign up and complete games, you'll earn rewards!
           </CardDescription>
         </Card>
