@@ -11,30 +11,31 @@ export default function ReferralRedirectPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const shortCodeFromParams = params.shortCode as string;
+    // params.shortCode can be a string or string[] or undefined.
+    // We expect a single string.
+    const shortCodeFromParams = Array.isArray(params.shortCode) ? params.shortCode[0] : params.shortCode;
 
-    // Only proceed if shortCodeFromParams is a valid, non-empty string
     if (typeof shortCodeFromParams === 'string' && shortCodeFromParams.trim() !== '') {
       const LSTORAGE_PENDING_REFERRAL_KEY = "drawlyPendingReferralCode";
-      const codeToStoreAndRedirect = shortCodeFromParams.trim().toUpperCase();
+      const codeToProcess = shortCodeFromParams.trim().toUpperCase();
 
-      // Store in localStorage if not already present (first link clicked sticks)
+      // Attempt to set localStorage only if it's not already set (first link wins)
       if (!localStorage.getItem(LSTORAGE_PENDING_REFERRAL_KEY)) {
-        localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, codeToStoreAndRedirect);
+        localStorage.setItem(LSTORAGE_PENDING_REFERRAL_KEY, codeToProcess);
       }
       
-      // IMPORTANT: Redirect WITH the ref parameter and action=signup
-      // This ensures /auth page can pick it up if localStorage somehow fails or for direct /auth?ref= links.
-      router.replace(`/auth?ref=${codeToStoreAndRedirect}&action=signup`);
+      // CRITICAL: Ensure redirect URL includes the 'ref' parameter
+      const redirectUrl = `/auth?ref=${codeToProcess}&action=signup`;
+      router.replace(redirectUrl);
 
     } else if (params.shortCode !== undefined) {
-      // This means params.shortCode was defined but was empty or invalid after trimming.
+      // This case means params.shortCode was resolved but was not a valid non-empty string.
       // Redirect to signup without any referral code.
       router.replace('/auth?action=signup');
     }
-    // If params.shortCode is initially undefined, the effect will re-run when Next.js populates it.
-    // No 'else' is needed because we only act when params.shortCode is defined.
-  }, [params, router]); // `params` is a crucial dependency here
+    // If params.shortCode is initially undefined, this effect will re-run when Next.js fully populates params.
+    // No explicit 'else' needed here as the conditions cover resolved states.
+  }, [params, router]); // `params` is a key dependency here to re-run when shortCode is resolved.
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gradient-to-br from-primary/10 via-background to-secondary/10">
