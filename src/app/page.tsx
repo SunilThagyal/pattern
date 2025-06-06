@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift } from 'lucide-react';
+import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign } from 'lucide-react'; // Added DollarSign
 import Image from 'next/image';
 import { APP_NAME } from '@/lib/config';
 import { useState, useEffect } from 'react';
@@ -14,6 +14,8 @@ import { toast } from '@/hooks/use-toast';
 export default function HomePage() {
   const [isNavigatingCreate, setIsNavigatingCreate] = useState(false);
   const [isNavigatingJoin, setIsNavigatingJoin] = useState(false);
+  const [isNavigatingAuth, setIsNavigatingAuth] = useState(false);
+  const [isNavigatingEarnings, setIsNavigatingEarnings] = useState(false); // New state
   const router = useRouter();
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -42,9 +44,11 @@ export default function HomePage() {
     toast({ title: "Logged Out", description: "You have been logged out."});
   };
 
-  const handleNavigation = (path: string, type: 'create' | 'join' | 'auth') => {
+  const handleNavigation = (path: string, type: 'create' | 'join' | 'auth' | 'earnings') => {
     if (type === 'create') setIsNavigatingCreate(true);
     if (type === 'join') setIsNavigatingJoin(true);
+    if (type === 'auth') setIsNavigatingAuth(true);
+    if (type === 'earnings') setIsNavigatingEarnings(true); // Set new loading state
     router.push(path);
   };
   
@@ -82,8 +86,9 @@ export default function HomePage() {
             <p className="text-sm text-muted-foreground mb-4">
               Sign up or log in to get your unique referral ID. Share it with friends and earn rewards when they play!
             </p>
-            <Button size="lg" className="w-full" onClick={() => handleNavigation('/auth', 'auth')}>
-              <LogIn className="mr-2 h-5 w-5" /> Login / Sign Up
+            <Button size="lg" className="w-full" onClick={() => handleNavigation('/auth', 'auth')} disabled={isNavigatingAuth}>
+              {isNavigatingAuth ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
+              {isNavigatingAuth ? 'Loading...' : 'Login / Sign Up'}
             </Button>
           </CardContent>
         </Card>
@@ -105,6 +110,16 @@ export default function HomePage() {
               </div>
               <p className="text-xs mt-1">Share this ID with friends. You'll earn rewards in-game when they complete games!</p>
             </div>
+             <Button 
+              variant="outline" 
+              size="sm" 
+              className="w-full" 
+              onClick={() => handleNavigation('/earnings', 'earnings')}
+              disabled={isNavigatingEarnings}
+            >
+              {isNavigatingEarnings ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DollarSign className="mr-2 h-4 w-4" />}
+              {isNavigatingEarnings ? 'Loading...' : 'View Earnings Dashboard'}
+            </Button>
             <Button variant="outline" size="sm" className="w-full" onClick={handleLogout}>
               <LogOut className="mr-2 h-4 w-4" /> Logout
             </Button>
