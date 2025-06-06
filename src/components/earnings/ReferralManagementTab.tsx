@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from '@/hooks/use-toast';
-import { Users, TrendingUp, Gamepad2, AlertTriangle, Gift, Copy, Loader2, Link2 } from "lucide-react"; // Added Link2
+import { Users, TrendingUp, Gamepad2, AlertTriangle, Gift, Copy, Loader2 } from "lucide-react"; 
 import { database } from '@/lib/firebase';
 import { ref, get, query, orderByChild, equalTo } from 'firebase/database';
 import type { UserProfile, ReferralEntry } from '@/lib/types';
@@ -20,7 +20,7 @@ interface ReferralManagementTabProps {
 }
 
 interface DisplayReferral extends ReferralEntry {
-    id: string; // referredUserId
+    id: string; 
 }
 
 export default function ReferralManagementTab({ authUserUid, userProfile }: ReferralManagementTabProps) {
@@ -28,18 +28,13 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   const [isLoading, setIsLoading] = useState(true);
   const [referrals, setReferrals] = useState<DisplayReferral[]>([]);
   const [totalEarnings, setTotalEarnings] = useState(0);
-  const [referralLink, setReferralLink] = useState('');
+  // referralLink state is not directly used for display now, but kept for copy logic
+  // const [referralLink, setReferralLink] = useState(''); 
 
   useEffect(() => {
     if (!authUserUid || !userProfile) {
       setIsLoading(false);
       return;
-    }
-
-    if (typeof window !== 'undefined') {
-      setReferralLink(`${window.location.origin}/referral/${authUserUid}`);
-    } else {
-      setReferralLink(`/referral/${authUserUid}`); // Fallback for SSR or non-browser env
     }
 
     setTotalEarnings(userProfile.totalEarnings || 0);
@@ -66,8 +61,9 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   }, [authUserUid, userProfile, toast]);
 
   const handleCopyReferralLink = () => {
-    if (referralLink) {
-      navigator.clipboard.writeText(referralLink)
+    if (authUserUid && typeof window !== 'undefined') {
+      const fullReferralLink = `${window.location.origin}/referral/${authUserUid}`;
+      navigator.clipboard.writeText(fullReferralLink)
         .then(() => toast({ title: "Referral Link Copied!", description: "Your Referral Link is copied to clipboard." }))
         .catch(() => toast({ title: "Error", description: "Could not copy Referral Link.", variant: "destructive" }));
     }
@@ -79,29 +75,29 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   
   const summaryStats = {
     totalReferrals: referrals.length,
-    totalEarnings: totalEarnings,
-    gamesToday: "N/A", // Placeholder
-    activeReferrals: "N/A", // Placeholder
+    totalEarningsFromReferrals: totalEarnings, // Renamed for clarity
+    gamesToday: "N/A", 
+    activeReferrals: "N/A", 
   };
 
 
   return (
     <div className="space-y-6">
-      {authUserUid && referralLink && (
+      {authUserUid && (
         <Card className="bg-primary/10 border-primary/30">
           <CardHeader>
             <CardTitle className="text-lg flex items-center text-primary-foreground">
-              <Link2 className="mr-2 h-5 w-5 text-yellow-400" /> Your Unique Referral Link
+              <Gift className="mr-2 h-5 w-5 text-yellow-400" /> Your Unique Referral Code
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <p className="font-mono text-primary-foreground bg-primary/20 px-2 py-1 rounded-sm text-xs break-all">{referralLink}</p>
+            <p className="font-mono text-primary-foreground bg-primary/20 px-2 py-1 rounded-sm text-xs break-all">{authUserUid}</p>
             <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="text-primary-foreground hover:bg-primary/30 mt-2 sm:mt-0 self-start sm:self-center">
               <Copy className="mr-2 h-4 w-4" /> Copy Link
             </Button>
           </CardContent>
            <CardDescription className="px-6 pb-4 text-xs text-primary-foreground/80">
-            Share this link with friends. When they sign up using your link and complete games, you'll earn rewards!
+            Share this link (copied with the button) with friends. When they sign up and complete games, you'll earn rewards!
           </CardDescription>
         </Card>
       )}
@@ -123,11 +119,11 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Earnings</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Earnings from Referrals</CardTitle>
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">₹{summaryStats.totalEarnings.toFixed(2)}</div>
+              <div className="text-2xl font-bold">₹{summaryStats.totalEarningsFromReferrals.toFixed(2)}</div>
               <p className="text-xs text-muted-foreground">
                 Lifetime earnings from your referrals.
               </p>

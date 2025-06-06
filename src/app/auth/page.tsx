@@ -29,13 +29,14 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
-  const [isSigningUp, setIsSigningUp] = useState(true); // Default to sign up
+  const [isSigningUp, setIsSigningUp] = useState(true); 
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
   const searchParams = useSearchParams();
+  const [initialReferralCodeFromUrl, setInitialReferralCodeFromUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const urlReferralCode = searchParams.get('referralCode');
@@ -43,11 +44,12 @@ export default function AuthPage() {
 
     if (urlReferralCode) {
       setReferralCodeInput(urlReferralCode);
-      setIsSigningUp(true); // Force sign-up mode if referral code is present
+      setInitialReferralCodeFromUrl(urlReferralCode); // Store it to disable the field
+      setIsSigningUp(true); 
     } else if (action === 'login') {
       setIsSigningUp(false);
     } else {
-      setIsSigningUp(true); // Default to signup
+      setIsSigningUp(true); 
     }
   }, [searchParams]);
 
@@ -60,13 +62,11 @@ export default function AuthPage() {
     let finalPassword = password; 
 
     if (isGoogleAuth) {
-      // Simulate Google providing details
       finalEmail = `user${Math.floor(Math.random() * 10000)}@gmail.com`; 
       finalDisplayName = (finalEmail.split('@')[0] || "GoogleUser") + Math.floor(Math.random() * 100);
-      finalPassword = "google_simulated_password"; // Dummy for validation if needed
-       // For Google Auth, if displayName is not set yet (e.g. user didn't type anything for email signup first)
+      finalPassword = "google_simulated_password";
       if (isSigningUp && !displayName.trim()) {
-        setDisplayName(finalDisplayName); // Pre-fill display name for Google sign-up
+        setDisplayName(finalDisplayName); 
       }
     }
 
@@ -98,19 +98,20 @@ export default function AuthPage() {
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
         };
+        
+        const actualReferralCodeToUse = initialReferralCodeFromUrl || referralCodeInput.trim();
 
-        if (referralCodeInput.trim()) {
-          // Ensure not referring self
-          if (referralCodeInput.trim() === simulatedUid) {
+        if (actualReferralCodeToUse) {
+          if (actualReferralCodeToUse === simulatedUid) {
              toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
           } else {
-            const referrerRef = ref(database, `users/${referralCodeInput.trim()}`);
+            const referrerRef = ref(database, `users/${actualReferralCodeToUse}`);
             const referrerSnapshot = await get(referrerRef);
             if (referrerSnapshot.exists()) {
-              newUserProfile.referredBy = referralCodeInput.trim();
+              newUserProfile.referredBy = actualReferralCodeToUse;
               const referrerDisplayName = referrerSnapshot.val().displayName || "Referrer";
               
-              const referralsBranchRef = ref(database, `referrals/${referralCodeInput.trim()}/${simulatedUid}`);
+              const referralsBranchRef = ref(database, `referrals/${actualReferralCodeToUse}/${simulatedUid}`);
               await set(referralsBranchRef, {
                 referredUserName: finalDisplayName,
                 timestamp: serverTimestamp() as number,
@@ -123,14 +124,11 @@ export default function AuthPage() {
         }
         await set(userRef, newUserProfile);
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
-      } else { // Logging in
-        // Simplified login: find user by email (conceptually, real auth is more complex)
-        // This part is still very simulated as we don't have password checking or unique email enforcement in DB for login
+      } else { 
         let foundUser = null;
-        if (userSnapshot.exists() && userSnapshot.val().email === finalEmail) { // Basic check if UID from derived name + random matches this email
+        if (userSnapshot.exists() && userSnapshot.val().email === finalEmail) {
             foundUser = userSnapshot.val();
         } else {
-            // Try to find user by email (this is a very inefficient scan for RTDB, real auth is better)
             const allUsersRef = ref(database, 'users');
             const allUsersSnap = await get(allUsersRef);
             if (allUsersSnap.exists()) {
@@ -138,8 +136,7 @@ export default function AuthPage() {
                 for (const uid in usersData) {
                     if (usersData[uid].email === finalEmail) {
                         foundUser = usersData[uid];
-                        // Correct the simulatedUid to the actual UID found
-                        localStorage.setItem('drawlyUserUid', uid); // Update UID in localStorage
+                        localStorage.setItem('drawlyUserUid', uid); 
                         break;
                     }
                 }
@@ -151,13 +148,13 @@ export default function AuthPage() {
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        finalDisplayName = foundUser.displayName; // Use stored display name on login
+        finalDisplayName = foundUser.displayName; 
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
 
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
       localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-      localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : localStorage.getItem('drawlyUserUid') || simulatedUid); // Use existing UID on login if found
+      localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : localStorage.getItem('drawlyUserUid') || simulatedUid); 
       
       router.push('/');
     } catch (error) {
@@ -238,8 +235,11 @@ export default function AuthPage() {
                   placeholder="Enter referrer's User ID"
                   className="text-base py-3"
                   maxLength={30} 
-                  disabled={isLoadingEmail || isLoadingGoogle}
+                  disabled={isLoadingEmail || isLoadingGoogle || !!initialReferralCodeFromUrl}
                 />
+                {initialReferralCodeFromUrl && (
+                    <p className="text-xs text-green-600">Referral code applied from link.</p>
+                )}
               </div>
             )}
           </CardContent>
@@ -284,4 +284,3 @@ export default function AuthPage() {
     </div>
   );
 }
-

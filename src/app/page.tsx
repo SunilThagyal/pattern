@@ -4,7 +4,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign, Link2 } from 'lucide-react'; // Added Link2
+import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign, Copy } from 'lucide-react'; // Changed Link2 to Copy
 import Image from 'next/image';
 import { APP_NAME } from '@/lib/config';
 import { useState, useEffect } from 'react';
@@ -85,7 +85,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground mb-4">
-              Sign up or log in to get your unique referral link. Share it with friends and earn rewards when they play!
+              Sign up or log in to get your unique referral code. Share it with friends and earn rewards when they play!
             </p>
             <Button size="lg" className="w-full" onClick={() => router.push('/auth')} disabled={isNavigatingAuth}>
               {isNavigatingAuth ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
@@ -103,17 +103,17 @@ export default function HomePage() {
           <CardContent className="space-y-3">
             <div className="text-sm text-muted-foreground">
               <p className="font-semibold text-green-600 flex items-center justify-center">
-                <Gift className="mr-2 h-5 w-5 text-yellow-500"/> Your Referral Link:
+                <Gift className="mr-2 h-5 w-5 text-yellow-500"/> Your Referral Code:
               </p>
               <div className="flex items-center justify-center gap-2 mt-1">
                 <span className="font-mono text-green-700 p-1 bg-green-100 rounded-sm break-all text-xs">
-                  {typeof window !== 'undefined' ? `${window.location.origin}/referral/${userUid}` : `/referral/${userUid}`}
+                  {userUid}
                 </span>
                 <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="h-auto p-1 text-green-600 hover:bg-green-200">
-                  <Link2 className="mr-1 h-3 w-3"/>Copy
+                  <Copy className="mr-1 h-3 w-3"/>Copy Link
                 </Button>
               </div>
-              <p className="text-xs mt-1">Share this link with friends. You'll earn rewards in-game when they complete games!</p>
+              <p className="text-xs mt-1">Share your referral link (copied with the button) with friends. You'll earn rewards in-game when they complete games!</p>
             </div>
              <Button 
               variant="outline" 

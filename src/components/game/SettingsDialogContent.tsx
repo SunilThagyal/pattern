@@ -3,12 +3,12 @@
 
 import { Button } from '@/components/ui/button';
 import { DialogHeader, DialogTitle, DialogDescription, DialogContent } from '@/components/ui/dialog';
-import { Share2, LogOut, Loader2, Gift, UserCircle, Link2, Copy } from 'lucide-react'; // Added Link2, Copy
+import { Share2, LogOut, Loader2, Gift, UserCircle, Copy } from 'lucide-react'; // Removed Link2, kept Copy
 import { useToast } from '@/hooks/use-toast';
-import { useState, useEffect } from 'react'; // Added useState, useEffect
+import { useState, useEffect } from 'react'; 
 
 interface SettingsDialogContentProps {
-  onCopyLink: () => void; // Room link
+  onCopyLink: () => void; 
   onLeaveRoom: () => void;
   isLeavingRoom?: boolean;
   isAuthenticated?: boolean; 
@@ -23,17 +23,19 @@ export function SettingsDialogContent({
   authPlayerId 
 }: SettingsDialogContentProps) {
   const { toast } = useToast();
-  const [referralLink, setReferralLink] = useState('');
+  // referralLink state is no longer needed here directly for display
+  // const [referralLink, setReferralLink] = useState('');
 
-  useEffect(() => {
-    if (isAuthenticated && authPlayerId && typeof window !== 'undefined') {
-      setReferralLink(`${window.location.origin}/referral/${authPlayerId}`);
-    }
-  }, [isAuthenticated, authPlayerId]);
+  // useEffect(() => {
+  //   if (isAuthenticated && authPlayerId && typeof window !== 'undefined') {
+  //     setReferralLink(`${window.location.origin}/referral/${authPlayerId}`);
+  //   }
+  // }, [isAuthenticated, authPlayerId]);
 
   const handleCopyReferralLink = () => {
-    if (referralLink) {
-      navigator.clipboard.writeText(referralLink)
+    if (isAuthenticated && authPlayerId && typeof window !== 'undefined') {
+      const fullReferralLink = `${window.location.origin}/referral/${authPlayerId}`;
+      navigator.clipboard.writeText(fullReferralLink)
         .then(() => toast({ title: "Referral Link Copied!", description: "Your Referral Link has been copied to the clipboard." }))
         .catch(() => toast({ title: "Error", description: "Could not copy Referral Link.", variant: "destructive" }));
     }
@@ -46,18 +48,18 @@ export function SettingsDialogContent({
         <DialogDescription>Manage your room preferences here.</DialogDescription>
       </DialogHeader>
       <div className="grid gap-4 py-4">
-        {isAuthenticated && authPlayerId && referralLink && (
+        {isAuthenticated && authPlayerId && (
           <div className="space-y-2 p-3 bg-muted/50 rounded-md border">
             <p className="text-sm font-medium text-foreground flex items-center">
-              <Link2 className="mr-2 h-4 w-4 text-primary" /> Your Referral Link:
+              <Gift className="mr-2 h-4 w-4 text-primary" /> Your Referral Code:
             </p>
             <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-mono text-primary break-all">{referralLink}</p>
+              <p className="text-xs font-mono text-primary break-all">{authPlayerId}</p>
               <Button variant="ghost" size="sm" onClick={handleCopyReferralLink} className="text-xs">
-                <Copy className="mr-1 h-3 w-3"/>Copy
+                <Copy className="mr-1 h-3 w-3"/>Copy Link
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">Share this link with friends! If they complete a game after joining with your link, you might earn a bonus.</p>
+            <p className="text-xs text-muted-foreground">Share your referral link (copied with the button). If friends complete a game after joining, you might earn a bonus.</p>
           </div>
         )}
         {!isAuthenticated && (
@@ -65,7 +67,7 @@ export function SettingsDialogContent({
                 <p className="text-sm text-blue-600 mb-2 flex items-center justify-center">
                     <UserCircle className="mr-2 h-5 w-5"/> You are playing as a guest.
                 </p>
-                <p className="text-xs text-blue-500">Log in on the homepage to get your Referral Link and save progress.</p>
+                <p className="text-xs text-blue-500">Log in on the homepage to get your Referral Code and save progress.</p>
             </div>
         )}
         <Button variant="outline" onClick={onCopyLink} className="w-full justify-start" disabled={isLeavingRoom}>
