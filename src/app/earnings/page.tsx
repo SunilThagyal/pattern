@@ -4,37 +4,51 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"; // Added CardContent
-import { Button } from "@/components/ui/button"; // Added Button
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import ReferralManagementTab from '@/components/earnings/ReferralManagementTab';
 import WithdrawalManagementTab from '@/components/earnings/WithdrawalManagementTab';
 import TransactionHistoryTab from '@/components/earnings/TransactionHistoryTab';
 import { DollarSign, Users, CreditCard, History, Loader2 } from 'lucide-react';
 import { APP_NAME } from '@/lib/config';
+import { database } from '@/lib/firebase';
+import { ref, get } from 'firebase/database';
+import type { UserProfile } from '@/lib/types';
 
 export default function EarningsDashboardPage() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
-  const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
-  const [userUid, setUserUid] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [authUserUid, setAuthUserUid] = useState<string | null>(null);
 
   useEffect(() => {
-    const authStatus = localStorage.getItem('drawlyAuthStatus');
-    const storedName = localStorage.getItem('drawlyUserDisplayName');
+    const storedAuthStatus = localStorage.getItem('drawlyAuthStatus');
     const storedUid = localStorage.getItem('drawlyUserUid');
 
-    if (authStatus === 'loggedIn' && storedName && storedUid) {
-      setIsAuthenticated(true);
-      setUserDisplayName(storedName);
-      setUserUid(storedUid);
+    if (storedAuthStatus === 'loggedIn' && storedUid) {
+      setAuthUserUid(storedUid);
+      const userProfileRef = ref(database, `users/${storedUid}`);
+      get(userProfileRef).then((snapshot) => {
+        if (snapshot.exists()) {
+          setUserProfile(snapshot.val() as UserProfile);
+        } else {
+          // User profile doesn't exist in DB, possible issue or new user not yet written
+          console.warn("User profile not found in DB for UID:", storedUid);
+          setUserProfile(null); // Or handle as an error state
+        }
+        setIsLoading(false);
+      }).catch(error => {
+        console.error("Error fetching user profile:", error);
+        setIsLoading(false);
+        setUserProfile(null);
+      });
     } else {
-      setIsAuthenticated(false);
+      setIsLoading(false);
+      setUserProfile(null); // Not authenticated
     }
-    setIsLoading(false);
   }, []);
 
-  if (isLoading || isAuthenticated === undefined) {
+  if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4">
         <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -43,7 +57,7 @@ export default function EarningsDashboardPage() {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!userProfile || !authUserUid) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center">
         <Card className="w-full max-w-md">
@@ -67,7 +81,7 @@ export default function EarningsDashboardPage() {
           {APP_NAME} Earnings Dashboard
         </h1>
         <p className="text-muted-foreground mt-1">
-          Welcome, {userDisplayName || 'Player'}! Track your referrals, manage earnings, and view transactions.
+          Welcome, {userProfile.displayName || 'Player'}! Track your referrals, manage earnings, and view transactions.
         </p>
       </header>
 
@@ -85,13 +99,13 @@ export default function EarningsDashboardPage() {
         </TabsList>
 
         <TabsContent value="referrals">
-          <ReferralManagementTab authUserUid={userUid} />
+          <ReferralManagementTab authUserUid={authUserUid} userProfile={userProfile} />
         </TabsContent>
         <TabsContent value="withdrawals">
-          <WithdrawalManagementTab />
+          <WithdrawalManagementTab authUserUid={authUserUid} initialBalance={userProfile.totalEarnings} />
         </TabsContent>
         <TabsContent value="history">
-          <TransactionHistoryTab />
+          <TransactionHistoryTab authUserUid={authUserUid} />
         </TabsContent>
       </Tabs>
     </div>

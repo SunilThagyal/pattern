@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,18 +10,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from '@/hooks/use-toast';
 import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2 } from 'lucide-react';
+import { database } from '@/lib/firebase';
+import { ref, push, serverTimestamp, runTransaction, get } from 'firebase/database';
+import type { Transaction, WithdrawalRequest, UserProfile } from '@/lib/types';
 
-const MIN_WITHDRAWAL_AMOUNT = 50; // Example: ₹50
-const MOCK_BALANCE = 275.50; // Mock balance for demonstration
+const MIN_WITHDRAWAL_AMOUNT = 50;
 
-export default function WithdrawalManagementTab() {
-  // Mock data - in a real app, this would come from user's account data
-  const [currentBalance, setCurrentBalance] = useState(MOCK_BALANCE); 
+interface WithdrawalManagementTabProps {
+  authUserUid: string | null;
+  initialBalance: number;
+}
+
+export default function WithdrawalManagementTab({ authUserUid, initialBalance }: WithdrawalManagementTabProps) {
+  const [currentBalance, setCurrentBalance] = useState(initialBalance);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const [withdrawalAmount, setWithdrawalAmount] = useState('');
-  const [withdrawalMethod, setWithdrawalMethod] = useState('');
+  const [withdrawalMethod, setWithdrawalMethod] = useState<'upi' | 'paytm' | 'bank' | ''>('');
   const [upiId, setUpiId] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState('');
@@ -29,8 +35,21 @@ export default function WithdrawalManagementTab() {
 
   const { toast } = useToast();
 
-  const handleWithdrawalSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (authUserUid) {
+      const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
+      const unsubscribe = onValue(userBalanceRef, (snapshot) => {
+        setCurrentBalance(snapshot.val() || 0);
+      });
+      return () => unsubscribe();
+    }
+  }, [authUserUid]);
+
+
+  const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!authUserUid) return;
+
     setIsWithdrawing(true);
 
     const amount = parseFloat(withdrawalAmount);
@@ -54,25 +73,51 @@ export default function WithdrawalManagementTab() {
       setIsWithdrawing(false);
       return;
     }
-    if (withdrawalMethod === 'upi' && !upiId.trim()) {
-        toast({ title: "UPI ID Required", description: "Please enter your UPI ID.", variant: "destructive" });
-        setIsWithdrawing(false); return;
-    }
-    if (withdrawalMethod === 'bank' && (!accountNumber.trim() || !ifscCode.trim())) {
-        toast({ title: "Bank Details Required", description: "Please enter Account Number and IFSC Code.", variant: "destructive" });
-        setIsWithdrawing(false); return;
-    }
-    if (withdrawalMethod === 'paytm' && !paytmNumber.trim()) {
-        toast({ title: "Paytm Number Required", description: "Please enter your Paytm number.", variant: "destructive" });
-        setIsWithdrawing(false); return;
+
+    let details: Record<string, string> = {};
+    if (withdrawalMethod === 'upi') {
+        if(!upiId.trim()) { toast({ title: "UPI ID Required", variant: "destructive" }); setIsWithdrawing(false); return; }
+        details = { upiId: upiId.trim() };
+    } else if (withdrawalMethod === 'bank') {
+        if(!accountNumber.trim() || !ifscCode.trim()) { toast({ title: "Bank Details Required", variant: "destructive" }); setIsWithdrawing(false); return; }
+        details = { accountNumber: accountNumber.trim(), ifscCode: ifscCode.trim() };
+    } else if (withdrawalMethod === 'paytm') {
+        if(!paytmNumber.trim()) { toast({ title: "Paytm Number Required", variant: "destructive" }); setIsWithdrawing(false); return; }
+        details = { paytmNumber: paytmNumber.trim() };
     }
 
-    // Simulate API call
-    setTimeout(() => {
-      toast({ title: "Withdrawal Requested (Simulation)", description: `Your request to withdraw ₹${amount} via ${withdrawalMethod.toUpperCase()} is being processed. This is a simulation.`, variant: "default" });
-      // Deduct from balance (mock)
-      setCurrentBalance(prev => prev - amount);
-      // Reset form
+    const withdrawalRequestData: WithdrawalRequest = {
+      userId: authUserUid,
+      amount,
+      method: withdrawalMethod,
+      details,
+      status: 'Pending',
+      requestDate: serverTimestamp() as number,
+    };
+
+    const transactionData: Transaction = {
+      date: serverTimestamp() as number,
+      description: `Withdrawal Request (${withdrawalMethod.toUpperCase()})`,
+      amount: -amount,
+      type: 'withdrawal',
+      status: 'Pending',
+    };
+
+    try {
+      const withdrawalRequestsRef = ref(database, `withdrawalRequests/${authUserUid}`);
+      await push(withdrawalRequestsRef, withdrawalRequestData);
+
+      const transactionsRef = ref(database, `transactions/${authUserUid}`);
+      await push(transactionsRef, transactionData);
+      
+      // Note: For a real app, deducting from totalEarnings upon request might not be ideal.
+      // It's better to have a separate "available_for_withdrawal" balance or handle this server-side.
+      // For this prototype, we will optimistically update client-side, but Firebase will be source of truth.
+      // This client-side update is temporary, actual balance is fetched via useEffect.
+      // setCurrentBalance(prev => prev - amount); 
+
+
+      toast({ title: "Withdrawal Requested", description: `Your request to withdraw ₹${amount} is pending.`, variant: "default" });
       setWithdrawalAmount('');
       setWithdrawalMethod('');
       setUpiId('');
@@ -80,8 +125,12 @@ export default function WithdrawalManagementTab() {
       setIfscCode('');
       setPaytmNumber('');
       setIsDialogOpen(false);
+    } catch (error) {
+      console.error("Withdrawal request error:", error);
+      toast({ title: "Error", description: "Could not submit withdrawal request.", variant: "destructive" });
+    } finally {
       setIsWithdrawing(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -89,11 +138,8 @@ export default function WithdrawalManagementTab() {
       <Card>
         <CardHeader>
           <CardTitle className="text-xl font-semibold flex items-center">
-            <Banknote className="mr-2 h-5 w-5 text-primary" /> Current Available Balance (Mock)
+            <Banknote className="mr-2 h-5 w-5 text-primary" /> Current Available Balance
           </CardTitle>
-           <CardDescription className="text-xs">
-            This balance is for demonstration purposes. A real application would track this server-side.
-          </CardDescription>
         </CardHeader>
         <CardContent className="flex items-baseline justify-between">
           <p className="text-4xl font-bold text-foreground">₹{currentBalance.toFixed(2)}</p>
@@ -105,10 +151,9 @@ export default function WithdrawalManagementTab() {
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle className="text-xl">Request Withdrawal (Simulation)</DialogTitle>
+                <DialogTitle className="text-xl">Request Withdrawal</DialogTitle>
                 <DialogDescription>
                   Enter the amount and select your preferred method. Minimum withdrawal: ₹{MIN_WITHDRAWAL_AMOUNT}.
-                  (Withdrawal requests are simulated and not actually processed).
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleWithdrawalSubmit} className="space-y-4 mt-4">
@@ -129,7 +174,7 @@ export default function WithdrawalManagementTab() {
                 </div>
                 <div>
                   <Label htmlFor="withdrawalMethod" className="text-sm font-medium">Withdrawal Method</Label>
-                  <Select value={withdrawalMethod} onValueChange={setWithdrawalMethod} disabled={isWithdrawing}>
+                  <Select value={withdrawalMethod} onValueChange={(value) => setWithdrawalMethod(value as 'upi' | 'paytm' | 'bank' | '')} disabled={isWithdrawing}>
                     <SelectTrigger id="withdrawalMethod" className="w-full mt-1">
                       <SelectValue placeholder="Select method" />
                     </SelectTrigger>
@@ -183,7 +228,7 @@ export default function WithdrawalManagementTab() {
           <AlertTriangle className="mr-3 h-5 w-5" />
           <p className="text-sm">
             Your current balance is below the minimum withdrawal threshold of ₹{MIN_WITHDRAWAL_AMOUNT}.
-            Keep referring and earning! (Balance shown is illustrative).
+            Keep referring and earning!
           </p>
         </div>
       )}
@@ -194,11 +239,23 @@ export default function WithdrawalManagementTab() {
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
           <p><strong>Minimum Withdrawal:</strong> You can request a withdrawal once your balance reaches at least ₹{MIN_WITHDRAWAL_AMOUNT}.</p>
-          <p><strong>Processing Time:</strong> Withdrawal requests are typically processed within 3-5 business days (simulated).</p>
-          <p><strong>Verification:</strong> For larger amounts or first-time withdrawals, we may require additional verification.</p>
-          <p><strong>Fees:</strong> Standard transaction fees may apply depending on the chosen withdrawal method (we'll notify you if any).</p>
+          <p><strong>Processing Time:</strong> Withdrawal requests are typically reviewed within 3-5 business days.</p>
+          <p><strong>Verification:</strong> For security, we may require identity verification before processing withdrawals.</p>
+          <p><strong>Fees:</strong> Standard transaction fees from payment processors may apply.</p>
         </CardContent>
       </Card>
     </div>
   );
+}
+
+// Helper for onValue listener, since it's not directly available in withdrawal tab.
+// If not using onValue here, this helper is not needed.
+// For now, balance is passed as initialBalance and updated by onValue in parent.
+function onValue(query: any, callback: (snapshot: any) => void) {
+    const dbRef = query; // query is already a Ref
+    const listener = (snapshot: any) => {
+        callback(snapshot);
+    };
+    dbRef.on('value', listener);
+    return () => dbRef.off('value', listener);
 }

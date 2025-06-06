@@ -3,10 +3,10 @@
 
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
-import { ref, onValue, off, update, serverTimestamp, set, child, get, runTransaction } from 'firebase/database';
+import { ref, onValue, off, update, serverTimestamp, set, child, get, runTransaction, push } from 'firebase/database';
 import { database } from '@/lib/firebase';
-import type { Room, Player, DrawingPoint, Guess, RoomConfig } from '@/lib/types';
-import { useToast as useShadToast } from '@/hooks/use-toast'; // Renamed to avoid conflict if needed
+import type { Room, Player, DrawingPoint, Guess, RoomConfig, UserProfile, Transaction } from '@/lib/types';
+import { useToast as useShadToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -50,6 +50,8 @@ const SettingsDialogContent = dynamic(() => import('@/components/game/SettingsDi
 const RevealConfirmDialogContent = dynamic(() => import('@/components/game/RevealConfirmDialogContent').then(mod => mod.RevealConfirmDialogContent), {
   ssr: false
 });
+
+const REWARD_PER_GAME_COMPLETION = 10; // Example: 10 points/currency units per referred game completion
 
 
 const DrawingCanvas = React.memo(({
@@ -555,7 +557,16 @@ const ChatArea = React.memo(({
                          messageContent = <span className="font-semibold text-orange-600">{g.playerName} left the room!</span>;
                         messageClasses = cn(messageClasses, "bg-orange-100");
                     } else if (g.text.startsWith("[[SYSTEM_REFERRAL_REWARD]]")) {
-                        messageContent = <span className="font-semibold text-yellow-600 flex items-center gap-1"><Gift size={14}/> {g.playerName}</span>; // Assuming g.playerName holds the full message
+                        // Message format: "[[SYSTEM_REFERRAL_REWARD]]ReferrerName earned X points because ReferredPlayerName completed a game!"
+                        // Split logic:
+                        const parts = g.playerName.split(" earned ");
+                        const referrerName = parts[0];
+                        const restOfMessage = parts[1] || "";
+                        messageContent = (
+                            <span className="font-semibold text-yellow-600 flex items-center gap-1">
+                                <Gift size={14}/> {referrerName} earned {restOfMessage}
+                            </span>
+                        );
                         messageClasses = cn(messageClasses, "bg-yellow-100");
                     } else if (g.isCorrect) {
                         const isFirst = (correctGuessersThisRound?.[0] === g.playerId) && (g.playerId !== currentDrawerId);
@@ -752,8 +763,8 @@ const MobileTopBar = React.memo(({
   setIsSettingsDialogOpen,
   onDrawerLetterClick,
   isLeavingRoom,
-  authPlayerId, // Added
-  isAuthenticated, // Added
+  authPlayerId,
+  isAuthenticated,
 }: {
   room: Room;
   playerId: string;
@@ -761,8 +772,8 @@ const MobileTopBar = React.memo(({
   setIsSettingsDialogOpen: (open: boolean) => void;
   onDrawerLetterClick: (char: string, index: number) => void;
   isLeavingRoom?: boolean;
-  authPlayerId?: string | null; // Added
-  isAuthenticated?: boolean; // Added
+  authPlayerId?: string | null;
+  isAuthenticated?: boolean;
 }) => {
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
   const hasPlayerGuessedCorrectly = (room.correctGuessersThisRound || []).includes(playerId);
@@ -830,10 +841,10 @@ export default function GameRoomPage() {
   const isMobile = useIsMobile();
 
   const [room, setRoom] = useState<Room | null>(null);
-  const [playerId, setPlayerId] = useState<string | null>(null); // Can be UID or patternPartyPlayerId
+  const [playerId, setPlayerId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false); // Simulated auth state
-  const [authPlayerId, setAuthPlayerId] = useState<string | null>(null); // UID if authenticated
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authPlayerId, setAuthPlayerId] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -921,7 +932,7 @@ export default function GameRoomPage() {
     try {
         await update(ref(database, `rooms/${roomId}`), updates);
         for (const pid of Object.keys(currentRoomData.players || {})) {
-           await update(ref(database, `rooms/${roomId}/players/${pid}`), { score: 0, referralRewardsThisSession: 0 }); // Reset referral rewards too
+           await update(ref(database, `rooms/${roomId}/players/${pid}`), { score: 0, referralRewardsThisSession: 0 });
         }
         addSystemMessage("[[SYSTEM_GAME_RESET]]");
         toast({ title: "Game Reset", description: "Scores have been reset. Ready for a new game."});
@@ -1016,7 +1027,7 @@ export default function GameRoomPage() {
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
         aiSketchDataUri: null,
-        guesses: currentRoomData.guesses || [],
+        guesses: currentRoomData.guesses || [], // Persist guesses across rounds if desired, or clear
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection.slice(0,5),
         revealedPattern: [],
@@ -1353,7 +1364,7 @@ export default function GameRoomPage() {
       finalPlayerId = storedUid;
       finalPlayerName = storedDisplayName;
       finalIsAuthenticated = true;
-      setAuthPlayerId(storedUid); // Store UID for settings
+      setAuthPlayerId(storedUid);
     } else if (localPlayerId && localPlayerName) {
       finalPlayerId = localPlayerId;
       finalPlayerName = localPlayerName;
@@ -1361,7 +1372,7 @@ export default function GameRoomPage() {
 
     if (!finalPlayerId || !finalPlayerName) {
       toast({ title: "Error", description: "Player identity not found. Please rejoin or log in.", variant: "destructive" });
-      if(currentRoomIdInStorage === roomId) { // Only redirect if this is the room they were in
+      if(currentRoomIdInStorage === roomId) {
         window.location.href = `/join/${roomId}`;
       } else {
         window.location.href = `/`;
@@ -1369,15 +1380,11 @@ export default function GameRoomPage() {
       return;
     }
     if (currentRoomIdInStorage !== roomId) {
-       // If user manually navigates to a different room URL than stored, clear old patternPartyPlayerId and name
-       // to force re-entry or use auth details if they are now in a new room.
-       // This handles cases where they might copy a URL to a new room.
-       // We keep auth details as those are global.
-       if (!finalIsAuthenticated) { // Only clear if they were anonymous
+       if (!finalIsAuthenticated) {
            localStorage.removeItem('patternPartyPlayerId');
            localStorage.removeItem('patternPartyPlayerName');
        }
-       localStorage.setItem('patternPartyCurrentRoomId', roomId); // Update to current room
+       localStorage.setItem('patternPartyCurrentRoomId', roomId);
     }
 
 
@@ -1450,14 +1457,14 @@ export default function GameRoomPage() {
     if (playerId && roomId) {
         get(child(ref(database, `rooms/${roomId}`), `players/${playerId}`)).then(playerSnap => {
           if (playerSnap.exists()) {
-            update(child(ref(database, `rooms/${roomId}`), `players/${playerId}`), { isOnline: true });
-          } else if (playerName) { // Player might not exist if they are new to this room
+            update(child(ref(database, `rooms/${roomId}`), `players/${playerId}`), { isOnline: true, isAnonymous: !isAuthenticated });
+          } else if (playerName) {
             const newPlayerEntry: Player = {
                 id: playerId,
                 name: playerName,
                 score: 0,
                 isOnline: true,
-                isHost: false, // Assume not host if joining this way, host is set on creation
+                isHost: false,
                 isAnonymous: !isAuthenticated,
                 referralRewardsThisSession: 0,
             };
@@ -1639,19 +1646,18 @@ export default function GameRoomPage() {
     if (!memoizedGuesses || memoizedGuesses.length === 0 || !playerId) return;
 
     const latestGuess = memoizedGuesses[memoizedGuesses.length - 1];
-    if (!latestGuess) return; 
+    if (!latestGuess) return;
 
     const potentialToastId = `toast-${latestGuess.timestamp}-${latestGuess.playerId}-${(latestGuess.text || "").substring(0,10)}`;
 
 
     if (
-        latestGuess.playerId !== playerId && // Don't show own messages as toast
-        latestGuess.playerId !== 'system' && // Don't show system messages as toast
-        !(latestGuess.text || "").startsWith('[[SYSTEM_') // Double check for system messages
+        latestGuess.playerId !== playerId && 
+        latestGuess.playerId !== 'system' && 
+        !(latestGuess.text || "").startsWith('[[SYSTEM_')
     ) {
         
         setToastMessages(prevToasts => {
-            // Check if this exact message instance (by content and timestamp) is already being toasted
             if (prevToasts.some(t => t.timestamp === latestGuess.timestamp && t.playerId === latestGuess.playerId && t.text === latestGuess.text)) {
                 return prevToasts; 
             }
@@ -1660,16 +1666,14 @@ export default function GameRoomPage() {
             const newToastIdWithCounter = `${potentialToastId}-${toastIdCounter.current}`;
             const newToastMessage = { ...latestGuess, uniqueId: newToastIdWithCounter };
 
-            let updatedToasts = [newToastMessage, ...prevToasts]; // Add new toast to the beginning
+            let updatedToasts = [newToastMessage, ...prevToasts];
             let removedToasts: Array<Guess & { uniqueId: string }> = [];
             
-            // If we exceed max count, remove the oldest ones from the end
             if (updatedToasts.length > TOAST_MAX_COUNT) {
                 removedToasts = updatedToasts.slice(TOAST_MAX_COUNT);
                 updatedToasts = updatedToasts.slice(0, TOAST_MAX_COUNT);
             }
             
-            // Clear timeouts for any toasts that were removed from the display list
             removedToasts.forEach(rt => {
                 if (toastTimeoutsRef.current[rt.uniqueId]) {
                     clearTimeout(toastTimeoutsRef.current[rt.uniqueId]);
@@ -1677,22 +1681,20 @@ export default function GameRoomPage() {
                 }
             });
             
-            // Set timeout for the new toast
             const timeoutId = setTimeout(() => {
                 setToastMessages(currentToasts => currentToasts.filter(t => t.uniqueId !== newToastIdWithCounter));
-                if (toastTimeoutsRef.current[newToastIdWithCounter]) { // Check if still exists (might have been manually closed)
+                if (toastTimeoutsRef.current[newToastIdWithCounter]) {
                     delete toastTimeoutsRef.current[newToastIdWithCounter];
                 }
-            }, 3000); // 3 second lifespan
+            }, 3000);
             toastTimeoutsRef.current[newToastIdWithCounter] = timeoutId;
 
-            return updatedToasts; // Return the new array of toasts
+            return updatedToasts;
         });
     }
   }, [memoizedGuesses, playerId]);
 
   useEffect(() => {
-    // Cleanup all toast timeouts when the component unmounts
     return () => {
         Object.values(toastTimeoutsRef.current).forEach(clearTimeout);
         toastTimeoutsRef.current = {};
@@ -1700,30 +1702,54 @@ export default function GameRoomPage() {
   }, []);
 
   useEffect(() => {
-    // Logic for referral rewards when game ends
     if (room?.gameState === 'game_over' && playerId === room?.hostId && room.players) {
-        const playersInRoom = room.players;
-        Object.values(playersInRoom).forEach(async (p) => {
-            if (p.id && p.referredByPlayerId && !p.isAnonymous) { // Only for non-anonymous referred players
-                const referrerId = p.referredByPlayerId; // This is a UID
-                const referrer = playersInRoom[referrerId];
-                
-                // Check if referrer exists, is authenticated (not anonymous), and is online
-                if (referrer && referrer.id && !referrer.isAnonymous && referrer.isOnline) { 
-                    const referrerRef = ref(database, `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`);
-                    try {
-                        await runTransaction(referrerRef, (currentRewards) => {
-                            return (currentRewards || 0) + 1;
-                        });
-                        addSystemMessage(`[[SYSTEM_REFERRAL_REWARD]]`, `${referrer.name} earned a referral reward because ${p.name} (referred by them) completed the game!`);
-                    } catch (e) {
-                        console.error("Error awarding referral reward:", e);
-                    }
+      Object.values(room.players).forEach(async (p) => {
+        if (p.id && !p.isAnonymous) { // Process only authenticated players
+          const userProfileRef = ref(database, `users/${p.id}`);
+          const userProfileSnap = await get(userProfileRef);
+          if (userProfileSnap.exists()) {
+            const userProfile = userProfileSnap.val() as UserProfile;
+            if (userProfile.referredBy && userProfile.referredBy !== p.id) {
+              const referrerId = userProfile.referredBy;
+              const referrerProfileRef = ref(database, `users/${referrerId}`);
+              const referrerProfileSnap = await get(referrerProfileRef);
+
+              if (referrerProfileSnap.exists()) { // Ensure referrer exists
+                const referrerName = referrerProfileSnap.val().displayName || "Referrer";
+                try {
+                  // Atomically update totalEarnings for the referrer
+                  await runTransaction(ref(database, `users/${referrerId}/totalEarnings`), (currentEarnings) => {
+                    return (currentEarnings || 0) + REWARD_PER_GAME_COMPLETION;
+                  });
+
+                  // Add a transaction record for the referrer
+                  const transactionsRef = ref(database, `transactions/${referrerId}`);
+                  const newTransaction: Transaction = {
+                    date: serverTimestamp() as number,
+                    description: `Reward from ${p.name} completing a game.`,
+                    amount: REWARD_PER_GAME_COMPLETION,
+                    type: 'earning',
+                    status: 'Earned',
+                  };
+                  await push(transactionsRef, newTransaction);
+                  
+                  // Update local player referralRewardsThisSession for visual cue (this is ephemeral)
+                  const roomPlayerReferrerRef = ref(database, `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`);
+                  await runTransaction(roomPlayerReferrerRef, (currentRewards) => (currentRewards || 0) + REWARD_PER_GAME_COMPLETION);
+
+                  addSystemMessage(`[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${REWARD_PER_GAME_COMPLETION} points because ${p.name} completed a game!`);
+
+                } catch (e) {
+                  console.error("Error awarding referral reward:", e);
+                  toast({title: "Referral Reward Error", description: `Failed to process reward for ${referrerName}.`, variant: "destructive"})
                 }
+              }
             }
-        });
+          }
+        }
+      });
     }
-  }, [room?.gameState, room?.players, playerId, room?.hostId, roomId, addSystemMessage]);
+  }, [room?.gameState, room?.players, playerId, room?.hostId, roomId, addSystemMessage, toast]);
 
 
   if (isLoading) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl text-foreground">Loading Room...</span></div>;
@@ -1802,15 +1828,6 @@ export default function GameRoomPage() {
                   )}
                 >
                   <span className="font-semibold">{message.playerName}:</span> {message.text}
-                  {/* Manual close button removed as per latest instructions to auto-dismiss only
-                  <button
-                    onClick={() => handleManualCloseToast(message.uniqueId)}
-                    className="absolute top-0 right-0 p-0.5 text-muted-foreground hover:text-foreground"
-                    aria-label="Close toast"
-                  >
-                    <X size={12} />
-                  </button>
-                  */}
                 </div>
               ))}
             </div>
@@ -1845,8 +1862,8 @@ export default function GameRoomPage() {
         className={cn(
           "p-1 border-t bg-background w-full",
           isMobile
-            ? "fixed bottom-0 left-0 right-0 z-30" // Ensures it's above other content and fixed
-            : "flex-shrink-0" // Default desktop behavior
+            ? "fixed bottom-0 left-0 right-0 z-30"
+            : "flex-shrink-0"
         )}
       >
           <GuessInput onGuessSubmit={handleGuessSubmit} disabled={!canGuess} isSubmittingGuess={isSubmittingGuess} />
@@ -1896,7 +1913,6 @@ export default function GameRoomPage() {
   );
 }
 
-// Helper function to generate fallback words (ensure it's outside the component or memoized if inside)
 const generateFallbackWords = (count: number, maxWordLength?: number, previouslyUsedWords?: string[]): string[] => {
     const defaultFallbackWordsLarge = [
         "Apple", "House", "Star", "Car", "Tree", "Book", "Sun", "Moon", "Chair", "Guitar",
@@ -1925,10 +1941,9 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     };
 
     let finalWords: string[] = [];
-    const shuffledFallbacks = shuffleArray(defaultFallbackWordsLarge);
     const localUsedWords = new Set((previouslyUsedWords || []).map(w => w.toLowerCase()));
 
-    for (const fb of shuffledFallbacks) {
+    for (const fb of shuffleArray(defaultFallbackWordsLarge)) {
         if (finalWords.length >= count) break;
         const fbLower = fb.toLowerCase();
         if (!localUsedWords.has(fbLower) &&

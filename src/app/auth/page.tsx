@@ -8,11 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, Mail } from 'lucide-react'; // Using Mail for Google icon placeholder
+import { Loader2, LogIn, UserPlus } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
+import { database } from '@/lib/firebase';
+import { ref, set, get, serverTimestamp } from 'firebase/database';
+import type { UserProfile } from '@/lib/types';
 
-// Placeholder for Google Icon, you can replace with an actual SVG or library icon
 const GoogleIcon = () => (
   <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -22,71 +24,135 @@ const GoogleIcon = () => (
   </svg>
 );
 
-
 export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [isSigningUp, setIsSigningUp] = useState(true); // Default to sign up
+
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
 
-  const handleEmailAuth = (e: FormEvent) => {
-    e.preventDefault();
-    setIsLoadingEmail(true);
+  const handleAuth = async (isGoogleAuth: boolean = false) => {
+    if (isGoogleAuth) setIsLoadingGoogle(true);
+    else setIsLoadingEmail(true);
 
-    if (!email.trim() || !password.trim()) {
-      toast({ title: "Error", description: "Please enter both email and password.", variant: "destructive" });
-      setIsLoadingEmail(false);
+    let finalEmail = email;
+    let finalDisplayName = displayName;
+    let finalPassword = password; // Not used for DB, just for form validation
+
+    if (isGoogleAuth) {
+      // Simulate Google providing details
+      finalEmail = `user${Math.floor(Math.random() * 10000)}@gmail.com`; // Simulated
+      finalDisplayName = (finalEmail.split('@')[0] || "GoogleUser") + Math.floor(Math.random() * 100);
+      finalPassword = "google_simulated_password"; // Dummy for validation if needed
+    }
+
+    if (!finalEmail.trim() || (isSigningUp && !finalDisplayName.trim()) || !finalPassword.trim()) {
+      toast({ title: "Error", description: "Please fill all required fields.", variant: "destructive" });
+      if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
       return;
     }
 
-    setTimeout(() => {
-      const nameParts = email.split('@');
-      const dummyNameFromEmail = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : "User" + Math.floor(Math.random() * 1000);
-      const dummyUid = `uid_email_${Math.random().toString(36).substr(2, 9)}`;
+    const simulatedUid = `uid_${finalEmail.split('@')[0]}_${Math.random().toString(36).substr(2, 9)}`;
+
+    try {
+      const userRef = ref(database, `users/${simulatedUid}`);
+      const userSnapshot = await get(userRef);
+
+      if (isSigningUp) {
+        if (userSnapshot.exists()) {
+          toast({ title: "User Exists", description: "This email is already registered. Try logging in.", variant: "destructive" });
+          if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+          return;
+        }
+
+        const newUserProfile: UserProfile = {
+          userId: simulatedUid,
+          displayName: finalDisplayName,
+          email: finalEmail,
+          referralCode: simulatedUid, // User's own ID is their referral code
+          totalEarnings: 0,
+          createdAt: serverTimestamp() as number,
+        };
+
+        if (referralCodeInput.trim()) {
+          const referrerRef = ref(database, `users/${referralCodeInput.trim()}`);
+          const referrerSnapshot = await get(referrerRef);
+          if (referrerSnapshot.exists() && referralCodeInput.trim() !== simulatedUid) {
+            newUserProfile.referredBy = referralCodeInput.trim();
+            const referrerReferralsRef = ref(database, `referrals/${referralCodeInput.trim()}/${simulatedUid}`);
+            await set(referrerReferralsRef, {
+              referredUserName: finalDisplayName,
+              timestamp: serverTimestamp() as number,
+            });
+            toast({title: "Referral Applied!", description: `You were referred by ${referrerSnapshot.val().displayName}.`});
+          } else if (referralCodeInput.trim() === simulatedUid) {
+            toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
+          } else {
+            toast({ title: "Referral Code Invalid", description: "The referral code entered was not found.", variant: "default" });
+          }
+        }
+        await set(userRef, newUserProfile);
+        toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
+      } else { // Logging in
+        if (!userSnapshot.exists()) {
+          toast({ title: "Login Failed", description: "No account found with this email. Try signing up.", variant: "destructive" });
+          if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+          return;
+        }
+        // For simulation, we just "log them in"
+        finalDisplayName = userSnapshot.val().displayName; // Use stored display name on login
+        toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
+      }
 
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-      localStorage.setItem('drawlyUserDisplayName', dummyNameFromEmail);
-      localStorage.setItem('drawlyUserUid', dummyUid);
+      localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
+      localStorage.setItem('drawlyUserUid', simulatedUid);
       
-      toast({ title: "Success!", description: `Welcome, ${dummyNameFromEmail}! You are now logged in.`});
-      router.push('/'); 
-      setIsLoadingEmail(false);
-    }, 1000); 
+      router.push('/');
+    } catch (error) {
+      console.error("Auth error:", error);
+      toast({ title: "Authentication Error", description: "Something went wrong. Please try again.", variant: "destructive" });
+    } finally {
+      if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+    }
   };
 
-  const handleGoogleAuth = () => {
-    setIsLoadingGoogle(true);
-    // Simulate Google Sign-In
-    setTimeout(() => {
-      // In a real scenario, Google provides user info. We'll simulate it.
-      const simulatedGoogleEmail = `user${Math.floor(Math.random() * 10000)}@gmail.com`;
-      const nameParts = simulatedGoogleEmail.split('@');
-      const dummyNameFromGoogle = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : "GoogleUser";
-      const dummyUidGoogle = `uid_google_${Math.random().toString(36).substr(2, 9)}`;
-
-      localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-      localStorage.setItem('drawlyUserDisplayName', dummyNameFromGoogle);
-      localStorage.setItem('drawlyUserUid', dummyUidGoogle);
-
-      toast({ title: "Google Sign-In Success!", description: `Welcome, ${dummyNameFromGoogle}! You are now logged in.` });
-      router.push('/');
-      setIsLoadingGoogle(false);
-    }, 1500);
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    handleAuth(false);
   };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-12">
       <Card className="w-full max-w-md shadow-xl">
         <CardHeader>
-          <CardTitle className="text-3xl text-center">Login or Sign Up</CardTitle>
+          <CardTitle className="text-3xl text-center">{isSigningUp ? "Sign Up" : "Login"} to {APP_NAME}</CardTitle>
           <CardDescription className="text-center">
-            Join {APP_NAME} to save your progress and use referral features.
+            {isSigningUp ? "Create an account to play, refer friends, and earn rewards!" : "Welcome back! Log in to continue."}
           </CardDescription>
         </CardHeader>
-        <form onSubmit={handleEmailAuth}>
+        <form onSubmit={handleSubmit}>
           <CardContent className="space-y-6">
+            {isSigningUp && (
+              <div className="space-y-2">
+                <Label htmlFor="displayName" className="text-lg">Display Name</Label>
+                <Input
+                  id="displayName"
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Your game name"
+                  required={isSigningUp}
+                  className="text-base py-6"
+                  disabled={isLoadingEmail || isLoadingGoogle}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="email" className="text-lg">Email</Label>
               <Input
@@ -113,20 +179,28 @@ export default function AuthPage() {
                 disabled={isLoadingEmail || isLoadingGoogle}
               />
             </div>
+            {isSigningUp && (
+              <div className="space-y-2">
+                <Label htmlFor="referralCode" className="text-lg flex items-center">
+                   <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
+                </Label>
+                <Input
+                  id="referralCode"
+                  type="text"
+                  value={referralCodeInput}
+                  onChange={(e) => setReferralCodeInput(e.target.value)}
+                  placeholder="Enter referrer's User ID"
+                  className="text-base py-3"
+                  maxLength={30} 
+                  disabled={isLoadingEmail || isLoadingGoogle}
+                />
+              </div>
+            )}
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full text-lg py-6" disabled={isLoadingEmail || isLoadingGoogle}>
-              {isLoadingEmail ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <LogIn className="mr-2 h-5 w-5" />
-                  Login / Sign Up with Email
-                </>
-              )}
+              {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
+              {isLoadingEmail ? 'Processing...' : (isSigningUp ? 'Sign Up with Email' : 'Login with Email')}
             </Button>
             
             <div className="relative w-full my-2">
@@ -135,7 +209,7 @@ export default function AuthPage() {
               </div>
               <div className="relative flex justify-center text-xs uppercase">
                 <span className="bg-background px-2 text-muted-foreground">
-                  Or continue with
+                  Or
                 </span>
               </div>
             </div>
@@ -143,21 +217,16 @@ export default function AuthPage() {
             <Button 
               variant="outline" 
               className="w-full text-lg py-6" 
-              onClick={handleGoogleAuth} 
+              onClick={() => handleAuth(true)} 
               disabled={isLoadingGoogle || isLoadingEmail}
               type="button"
             >
-              {isLoadingGoogle ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                <>
-                  <GoogleIcon />
-                  Sign in with Google
-                </>
-              )}
+              {isLoadingGoogle ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <GoogleIcon />}
+              {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google' : 'Login with Google')}
+            </Button>
+
+            <Button variant="link" onClick={() => setIsSigningUp(!isSigningUp)} className="mt-2" disabled={isLoadingEmail || isLoadingGoogle}>
+              {isSigningUp ? "Already have an account? Login" : "Don't have an account? Sign Up"}
             </Button>
 
             <Link href="/" className="text-sm text-muted-foreground hover:text-primary mt-2">
