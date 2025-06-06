@@ -7,11 +7,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from '@/hooks/use-toast';
-import { Users, TrendingUp, Gamepad2, AlertTriangle, Gift, Copy, Loader2 } from "lucide-react"; 
+import { Users, TrendingUp, Gamepad2, Gift, Copy, Loader2 } from "lucide-react";
 import { database } from '@/lib/firebase';
-import { ref, get, query, orderByChild, equalTo } from 'firebase/database';
-import type { UserProfile, ReferralEntry } from '@/lib/types';
-import { format } from 'date-fns';
+import { ref, get } from 'firebase/database';
+import type { UserProfile, ReferralEntry, Transaction } from '@/lib/types';
+import { format, isToday, isWithinInterval, subDays, startOfDay, endOfDay } from 'date-fns';
 import { APP_NAME } from '@/lib/config';
 
 interface ReferralManagementTabProps {
@@ -20,14 +20,37 @@ interface ReferralManagementTabProps {
 }
 
 interface DisplayReferral extends ReferralEntry {
-    id: string; 
+    id: string; // This is the referredUser's UID
 }
+
+interface ReferralStats {
+    totalReferrals: number;
+    totalEarningsFromReferrals: number;
+    gamesByReferralsToday: number;
+    activeReferralsLast7Days: number;
+}
+
+interface ReferralEarningsMap {
+    [referredUserId: string]: number;
+}
+
+const parseReferredUserNameFromDescription = (description: string): string | null => {
+    const match = description.match(/^Reward from (.*) completing a game!$/);
+    return match ? match[1] : null;
+};
 
 export default function ReferralManagementTab({ authUserUid, userProfile }: ReferralManagementTabProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(true);
   const [referrals, setReferrals] = useState<DisplayReferral[]>([]);
-  const [totalEarnings, setTotalEarnings] = useState(0);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [referralStats, setReferralStats] = useState<ReferralStats>({
+    totalReferrals: 0,
+    totalEarningsFromReferrals: 0,
+    gamesByReferralsToday: 0,
+    activeReferralsLast7Days: 0,
+  });
+  const [referralEarningsMap, setReferralEarningsMap] = useState<ReferralEarningsMap>({});
   const [shortReferralCode, setShortReferralCode] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,27 +59,87 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
       return;
     }
 
-    setTotalEarnings(userProfile.totalEarnings || 0);
+    setIsLoading(true);
     setShortReferralCode(userProfile.shortReferralCode || null);
 
-    const referralsRef = ref(database, `referrals/${authUserUid}`);
-    get(referralsRef).then((snapshot) => {
-      if (snapshot.exists()) {
-        const referralsData = snapshot.val();
-        const loadedReferrals: DisplayReferral[] = Object.keys(referralsData).map(key => ({
-          id: key,
-          ...referralsData[key]
-        }));
+    const fetchData = async () => {
+      try {
+        // Fetch referrals
+        const referralsRef = ref(database, `referrals/${authUserUid}`);
+        const referralsSnapshot = await get(referralsRef);
+        let loadedReferrals: DisplayReferral[] = [];
+        if (referralsSnapshot.exists()) {
+          const referralsData = referralsSnapshot.val();
+          loadedReferrals = Object.keys(referralsData).map(key => ({
+            id: key, // The key is the referredUser's UID
+            ...referralsData[key]
+          }));
+        }
         setReferrals(loadedReferrals);
-      } else {
-        setReferrals([]);
+
+        // Fetch transactions for the authUserUid
+        const transactionsRef = ref(database, `transactions/${authUserUid}`);
+        const transactionsSnapshot = await get(transactionsRef);
+        let loadedTransactions: Transaction[] = [];
+        if (transactionsSnapshot.exists()) {
+          const transactionsData = transactionsSnapshot.val();
+          loadedTransactions = Object.keys(transactionsData)
+            .map(key => ({ id: key, ...transactionsData[key] }))
+            .sort((a, b) => b.date - a.date);
+        }
+        setTransactions(loadedTransactions);
+
+        // Calculate stats
+        let gamesToday = 0;
+        const activeReferralUserNamesLast7Days = new Set<string>();
+        const todayStart = startOfDay(new Date());
+        const todayEnd = endOfDay(new Date());
+        const sevenDaysAgoStart = startOfDay(subDays(new Date(), 6)); // last 7 days including today
+
+        loadedTransactions.forEach(tx => {
+          if (tx.type === 'earning' && tx.description.startsWith('Reward from')) {
+            const referredUserName = parseReferredUserNameFromDescription(tx.description);
+            if (referredUserName) {
+              // Games by referrals today
+              if (tx.date >= todayStart.getTime() && tx.date <= todayEnd.getTime()) {
+                gamesToday++;
+              }
+              // Active referrals last 7 days
+              if (tx.date >= sevenDaysAgoStart.getTime() && tx.date <= todayEnd.getTime()) {
+                activeReferralUserNamesLast7Days.add(referredUserName);
+              }
+            }
+          }
+        });
+
+        const newReferralEarningsMap: ReferralEarningsMap = {};
+        loadedReferrals.forEach(referral => {
+          let earningsFromThisReferral = 0;
+          loadedTransactions.forEach(tx => {
+            if (tx.type === 'earning' && tx.description === `Reward from ${referral.referredUserName} completing a game!`) {
+              earningsFromThisReferral += tx.amount;
+            }
+          });
+          newReferralEarningsMap[referral.id] = earningsFromThisReferral;
+        });
+        setReferralEarningsMap(newReferralEarningsMap);
+
+        setReferralStats({
+          totalReferrals: loadedReferrals.length,
+          totalEarningsFromReferrals: userProfile.totalEarnings || 0, // Use profile total earnings for overall
+          gamesByReferralsToday: gamesToday,
+          activeReferralsLast7Days: activeReferralUserNamesLast7Days.size,
+        });
+
+      } catch (error) {
+        console.error("Error fetching referral data:", error);
+        toast({ title: "Error", description: "Could not load referral dashboard data.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
-    }).catch(error => {
-      console.error("Error fetching referrals:", error);
-      toast({ title: "Error", description: "Could not load referral data.", variant: "destructive" });
-      setIsLoading(false);
-    });
+    };
+
+    fetchData();
 
   }, [authUserUid, userProfile, toast]);
 
@@ -71,16 +154,9 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
     }
   };
 
-  if (isLoading) {
+  if (isLoading && (!userProfile || !authUserUid)) { // Initial loading before profile is even checked
     return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
-  
-  const summaryStats = {
-    totalReferrals: referrals.length,
-    totalEarningsFromReferrals: totalEarnings, 
-    gamesToday: "N/A", 
-    activeReferrals: "N/A", 
-  };
 
 
   return (
@@ -103,7 +179,19 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
           </CardDescription>
         </Card>
       )}
-      {!shortReferralCode && authUserUid && (
+      {!shortReferralCode && authUserUid && !isLoading && (
+         <Card className="bg-muted/50 border-border">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center text-muted-foreground">
+               Referral Code Not Found
+            </CardTitle>
+          </CardHeader>
+           <CardContent>
+            <p className="text-sm text-muted-foreground">Your short referral code is not available. This might happen if your account is new. Please try re-logging or check back later.</p>
+           </CardContent>
+         </Card>
+      )}
+      {isLoading && (shortReferralCode === null && authUserUid) && ( // Loading code specifically
          <Card className="bg-muted/50 border-border">
           <CardHeader>
             <CardTitle className="text-lg flex items-center text-muted-foreground">
@@ -119,6 +207,22 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
 
       <section>
         <h2 className="text-2xl font-semibold mb-4 text-foreground">Referral Summary</h2>
+        {isLoading ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                {[...Array(4)].map((_,i) => (
+                    <Card key={i}>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                           <div className="h-4 bg-muted rounded w-3/4 animate-pulse"></div>
+                           <Users className="h-4 w-4 text-muted-foreground/30" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="h-8 bg-muted rounded w-1/2 animate-pulse mb-1"></div>
+                            <div className="h-3 bg-muted rounded w-full animate-pulse"></div>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
+        ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -126,7 +230,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{summaryStats.totalReferrals}</div>
+              <div className="text-2xl font-bold">{referralStats.totalReferrals}</div>
               <p className="text-xs text-muted-foreground">
                 Users you've successfully referred.
               </p>
@@ -138,7 +242,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">₹{summaryStats.totalEarningsFromReferrals.toFixed(2)}</div>
+              <div className="text-2xl font-bold">₹{referralStats.totalEarningsFromReferrals.toFixed(2)}</div>
               <p className="text-xs text-muted-foreground">
                 Lifetime earnings from your referrals.
               </p>
@@ -150,9 +254,9 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
               <Gamepad2 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{summaryStats.gamesToday}</div>
+              <div className="text-2xl font-bold">{referralStats.gamesByReferralsToday}</div>
               <p className="text-xs text-muted-foreground">
-                (Requires backend aggregation)
+                Reward-triggering games completed today.
               </p>
             </CardContent>
           </Card>
@@ -162,33 +266,40 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
               <Users className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{summaryStats.activeReferrals}</div>
+              <div className="text-2xl font-bold">{referralStats.activeReferralsLast7Days}</div>
               <p className="text-xs text-muted-foreground">
-                 (Requires backend aggregation)
+                 Unique referrals generating rewards.
               </p>
             </CardContent>
           </Card>
         </div>
-         <p className="text-xs text-muted-foreground mt-2">
-            Developer Note: "Referral Summary" data is based on available client-side information.
-            "Games by Referrals Today" and "Active Referrals" stats are illustrative and require backend processing for accuracy.
-          </p>
+        )}
       </section>
 
       <section>
         <Card>
           <CardHeader>
             <CardTitle className="text-xl font-semibold">My Referrals List</CardTitle>
-            <CardDescription>Users you have referred to {APP_NAME}. Detailed stats per user require backend processing.</CardDescription>
+            <CardDescription>Users you have referred to {APP_NAME}. Earnings are calculated from completed games.</CardDescription>
           </CardHeader>
           <CardContent>
-            {referrals.length > 0 ? (
+            {isLoading ? (
+                <div className="space-y-2">
+                    {[...Array(3)].map((_, i) => (
+                        <div key={i} className="flex justify-between items-center p-3 bg-muted rounded animate-pulse">
+                            <div className="h-5 bg-muted-foreground/20 rounded w-1/3"></div>
+                            <div className="h-5 bg-muted-foreground/20 rounded w-1/4"></div>
+                            <div className="h-5 bg-muted-foreground/20 rounded w-1/6"></div>
+                        </div>
+                    ))}
+                </div>
+            ) : referrals.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name/Username</TableHead>
                     <TableHead className="text-center">Referred On</TableHead>
-                    <TableHead className="text-right">Earnings Generated (Est.)</TableHead>
+                    <TableHead className="text-right">Earnings Generated (₹)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -196,7 +307,9 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
                     <TableRow key={referral.id}>
                       <TableCell className="font-medium">{referral.referredUserName}</TableCell>
                       <TableCell className="text-center">{format(new Date(referral.timestamp), "PP")}</TableCell>
-                      <TableCell className="text-right text-muted-foreground text-xs">N/A (Backend Needed)</TableCell>
+                      <TableCell className="text-right font-semibold text-green-600">
+                        {(referralEarningsMap[referral.id] || 0).toFixed(2)}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -212,8 +325,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
         </Card>
       </section>
       <p className="text-xs text-muted-foreground text-center mt-4">
-        Developer Note: This dashboard is a UI prototype. Real data fetching, aggregation, and financial transactions
-        would require a secure backend implementation and Firebase Cloud Functions for robust operations.
+        Note: Data is based on recorded transactions. If there are discrepancies, they might be due to pending operations or data propagation delays.
       </p>
     </div>
   );
