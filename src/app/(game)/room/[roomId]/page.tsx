@@ -557,8 +557,6 @@ const ChatArea = React.memo(({
                          messageContent = <span className="font-semibold text-orange-600">{g.playerName} left the room!</span>;
                         messageClasses = cn(messageClasses, "bg-orange-100");
                     } else if (g.text.startsWith("[[SYSTEM_REFERRAL_REWARD]]")) {
-                        // Message format: "[[SYSTEM_REFERRAL_REWARD]]ReferrerName earned X points because ReferredPlayerName completed a game!"
-                        // Split logic:
                         const parts = g.playerName.split(" earned ");
                         const referrerName = parts[0];
                         const restOfMessage = parts[1] || "";
@@ -614,7 +612,7 @@ const TimerDisplay = React.memo(({ targetTime, defaultSeconds, compact, gameStat
 
   useEffect(() => {
     if (!hasMounted) {
-      return; // Don't run timer logic until client has mounted
+      return; 
     }
 
     if (!targetTime || targetTime <= Date.now()) {
@@ -628,24 +626,19 @@ const TimerDisplay = React.memo(({ targetTime, defaultSeconds, compact, gameStat
       setTimeLeft(remaining);
     };
 
-    calculateTimeLeft(); // Calculate immediately on mount or when targetTime/defaultSeconds change
+    calculateTimeLeft(); 
     const interval = setInterval(calculateTimeLeft, 1000);
     return () => clearInterval(interval);
-  }, [targetTime, defaultSeconds, hasMounted]); // Add hasMounted to dependency array
+  }, [targetTime, defaultSeconds, hasMounted]); 
 
   if (!hasMounted) {
-    // Server and initial client render path
-    // This output must exactly match what the server would produce given timeLeft is null initially.
     if (gameState === 'drawing' || gameState === 'word_selection') {
         return <div className={cn("font-bold", compact ? "text-xs" : "text-base")}>...</div>;
     }
     return <div className={cn("font-bold text-xs", compact ? "text-[9px]" : "text-xs")}>--</div>;
   }
 
-  // Client render path after mount and timeLeft might have been calculated
   if (timeLeft === null) {
-      // This might still be hit if targetTime condition leads to setting timeLeft to defaultSeconds,
-      // or if calculation hasn't completed yet immediately after mount.
       if (gameState === 'drawing' || gameState === 'word_selection') {
           return <div className={cn("font-bold", compact ? "text-xs" : "text-base")}>...</div>;
       }
@@ -886,6 +879,8 @@ export default function GameRoomPage() {
   const toastIdCounter = useRef(0);
   const toastTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
 
+  const gameOverProcessedRef = useRef(false);
+
 
   const playersArray = useMemo(() => {
     return room ? Object.values(room.players || {}) : [];
@@ -1046,7 +1041,7 @@ export default function GameRoomPage() {
         currentRoundNumber: newRoundNumber,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
         aiSketchDataUri: null,
-        guesses: currentRoomData.guesses || [], // Persist guesses across rounds if desired, or clear
+        guesses: currentRoomData.guesses || [], 
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection.slice(0,5),
         revealedPattern: [],
@@ -1722,51 +1717,54 @@ export default function GameRoomPage() {
 
   useEffect(() => {
     if (room?.gameState === 'game_over' && playerId === room?.hostId && room.players) {
-      Object.values(room.players).forEach(async (p) => {
-        if (p.id && !p.isAnonymous) { // Process only authenticated players
-          const userProfileRef = ref(database, `users/${p.id}`);
-          const userProfileSnap = await get(userProfileRef);
-          if (userProfileSnap.exists()) {
-            const userProfile = userProfileSnap.val() as UserProfile;
-            if (userProfile.referredBy && userProfile.referredBy !== p.id) {
-              const referrerId = userProfile.referredBy;
-              const referrerProfileRef = ref(database, `users/${referrerId}`);
-              const referrerProfileSnap = await get(referrerProfileRef);
+      if (!gameOverProcessedRef.current) {
+        gameOverProcessedRef.current = true;
 
-              if (referrerProfileSnap.exists()) { // Ensure referrer exists
-                const referrerName = referrerProfileSnap.val().displayName || "Referrer";
-                try {
-                  // Atomically update totalEarnings for the referrer
-                  await runTransaction(ref(database, `users/${referrerId}/totalEarnings`), (currentEarnings) => {
-                    return (currentEarnings || 0) + REWARD_PER_GAME_COMPLETION;
-                  });
+        Object.values(room.players).forEach(async (p) => {
+          if (p.id && !p.isAnonymous) { 
+            const userProfileRef = ref(database, `users/${p.id}`);
+            const userProfileSnap = await get(userProfileRef);
+            if (userProfileSnap.exists()) {
+              const userProfile = userProfileSnap.val() as UserProfile;
+              if (userProfile.referredBy && userProfile.referredBy !== p.id) {
+                const referrerId = userProfile.referredBy;
+                const referrerProfileRef = ref(database, `users/${referrerId}`);
+                const referrerProfileSnap = await get(referrerProfileRef);
 
-                  // Add a transaction record for the referrer
-                  const transactionsRef = ref(database, `transactions/${referrerId}`);
-                  const newTransaction: Transaction = {
-                    date: serverTimestamp() as number,
-                    description: `Reward from ${p.name} completing a game.`,
-                    amount: REWARD_PER_GAME_COMPLETION,
-                    type: 'earning',
-                    status: 'Earned',
-                  };
-                  await push(transactionsRef, newTransaction);
-                  
-                  // Update local player referralRewardsThisSession for visual cue (this is ephemeral)
-                  const roomPlayerReferrerRef = ref(database, `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`);
-                  await runTransaction(roomPlayerReferrerRef, (currentRewards) => (currentRewards || 0) + REWARD_PER_GAME_COMPLETION);
+                if (referrerProfileSnap.exists()) { 
+                  const referrerName = referrerProfileSnap.val().displayName || "Referrer";
+                  try {
+                    await runTransaction(ref(database, `users/${referrerId}/totalEarnings`), (currentEarnings) => {
+                      return (currentEarnings || 0) + REWARD_PER_GAME_COMPLETION;
+                    });
 
-                  addSystemMessage(`[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${REWARD_PER_GAME_COMPLETION} points because ${p.name} completed a game!`);
+                    const transactionsRef = ref(database, `transactions/${referrerId}`);
+                    const newTransaction: Transaction = {
+                      date: serverTimestamp() as number,
+                      description: `Reward from ${p.name} completing a game.`,
+                      amount: REWARD_PER_GAME_COMPLETION,
+                      type: 'earning',
+                      status: 'Earned',
+                    };
+                    await push(transactionsRef, newTransaction);
+                    
+                    const roomPlayerReferrerRef = ref(database, `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`);
+                    await runTransaction(roomPlayerReferrerRef, (currentRewards) => (currentRewards || 0) + REWARD_PER_GAME_COMPLETION);
 
-                } catch (e) {
-                  console.error("Error awarding referral reward:", e);
-                  toast({title: "Referral Reward Error", description: `Failed to process reward for ${referrerName}.`, variant: "destructive"})
+                    addSystemMessage(`[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${REWARD_PER_GAME_COMPLETION} points because ${p.name} completed a game!`);
+
+                  } catch (e) {
+                    console.error("Error awarding referral reward:", e);
+                    toast({title: "Referral Reward Error", description: `Failed to process reward for ${referrerName}.`, variant: "destructive"})
+                  }
                 }
               }
             }
           }
-        }
-      });
+        });
+      }
+    } else if (room?.gameState !== 'game_over') {
+      gameOverProcessedRef.current = false; 
     }
   }, [room?.gameState, room?.players, playerId, room?.hostId, roomId, addSystemMessage, toast]);
 
