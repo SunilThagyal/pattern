@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from '@/hooks/use-toast';
 import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2 } from 'lucide-react';
 import { database } from '@/lib/firebase';
-import { ref, push, serverTimestamp, runTransaction, get, onValue, off, type DataSnapshot } from 'firebase/database';
+import { ref, push, serverTimestamp, runTransaction, get, onValue, off, type DataSnapshot, update } from 'firebase/database';
 import type { Transaction, WithdrawalRequest, UserProfile } from '@/lib/types';
 
 const MIN_WITHDRAWAL_AMOUNT = 50;
@@ -39,19 +39,18 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
     if (authUserUid) {
       console.log(`[WithdrawalTab] Setting up balance listener for UID: ${authUserUid}`);
       const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
+      
       const listenerCallback = (snapshot: DataSnapshot) => {
         const newBalance = snapshot.val() || 0;
         console.log(`[WithdrawalTab] Balance listener fired. New balance from DB: ${newBalance}`);
         setCurrentBalance(newBalance);
       };
+      
       onValue(userBalanceRef, listenerCallback);
       
-      // Fetch initial balance once explicitly to ensure UI is up-to-date quickly
       get(userBalanceRef).then(snapshot => {
         const initialFetchedBalance = snapshot.val() || 0;
         console.log(`[WithdrawalTab] Initial explicit fetch of balance: ${initialFetchedBalance}`);
-        // This ensures that if onValue is slow, we still get a relatively current balance.
-        // onValue will eventually overwrite this if the value changes.
         setCurrentBalance(initialFetchedBalance); 
       }).catch(error => {
         console.error("[WithdrawalTab] Error fetching initial balance explicitly:", error);
@@ -109,6 +108,26 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         details = { paytmNumber: paytmNumber.trim() };
     }
 
+    const transactionData: Transaction = {
+      date: serverTimestamp() as number,
+      description: `Withdrawal Request via ${withdrawalMethod.toUpperCase()}`,
+      amount: -amount, 
+      type: 'withdrawal',
+      status: 'Pending', 
+    };
+    
+    const transactionRef = push(ref(database, `transactions/${authUserUid}`), transactionData);
+    const transactionId = transactionRef.key;
+
+    if (!transactionId) {
+        toast({ title: "Error", description: "Could not create transaction record. Please try again.", variant: "destructive" });
+        setIsWithdrawing(false);
+        return;
+    }
+    // Update transaction with its own ID in notes for easier reference if needed
+    await update(ref(database, `transactions/${authUserUid}/${transactionId}`), { notes: `Txn ID: ${transactionId}`});
+
+
     const withdrawalRequestData: WithdrawalRequest = {
       userId: authUserUid,
       amount,
@@ -116,25 +135,12 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       details,
       status: 'Pending', 
       requestDate: serverTimestamp() as number,
-    };
-
-    const transactionData: Transaction = {
-      date: serverTimestamp() as number,
-      description: `Withdrawal Request via ${withdrawalMethod.toUpperCase()}`,
-      amount: -amount, 
-      type: 'withdrawal',
-      status: 'Pending', 
-      notes: `Method: ${withdrawalMethod.toUpperCase()}`,
+      transactionId: transactionId, // Link to the transaction
     };
 
     try {
       console.log("[WithdrawalTab] Saving withdrawal request to Firebase.");
-      const newWithdrawalRequestRef = push(ref(database, `withdrawalRequests/${authUserUid}`), withdrawalRequestData);
-      const withdrawalRequestId = newWithdrawalRequestRef.key;
-      transactionData.notes = `Req ID: ${withdrawalRequestId}. Method: ${withdrawalMethod.toUpperCase()}`;
-      
-      console.log("[WithdrawalTab] Logging transaction for withdrawal.");
-      await push(ref(database, `transactions/${authUserUid}`), transactionData);
+      await push(ref(database, `withdrawalRequests/${authUserUid}`), withdrawalRequestData);
       
       console.log("[WithdrawalTab] Attempting to deduct balance from user's totalEarnings.");
       const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
@@ -142,9 +148,10 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         const earningsVal = currentEarnings || 0;
         console.log(`[WithdrawalTab] In runTransaction. Current earnings from DB: ${earningsVal}, Amount to deduct: ${amount}`);
         if (earningsVal < amount) {
-          // This should ideally be caught by the client-side check, but as a safeguard
           console.warn("[WithdrawalTab] Insufficient balance during Firebase transaction. Aborting.");
-          return; // Abort transaction
+          // Abort transaction by returning undefined. Firebase will retry, or eventually give up.
+          // This case should ideally be caught client-side before this point.
+          return; 
         }
         return earningsVal - amount;
       });
@@ -160,7 +167,9 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       setIsDialogOpen(false);
     } catch (error) {
       console.error("[WithdrawalTab] Withdrawal request error:", error);
-      toast({ title: "Error", description: "Could not submit withdrawal request. Please check console for details.", variant: "destructive" });
+      // If runTransaction was aborted due to insufficient funds, error might be undefined or a specific Firebase error.
+      // If error occurs after transaction push, we might need a compensating action (though complex).
+      toast({ title: "Error", description: "Could not submit withdrawal request. Check console for details.", variant: "destructive" });
     } finally {
       setIsWithdrawing(false);
     }
@@ -173,7 +182,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           <CardTitle className="text-xl font-semibold flex items-center">
             <Banknote className="mr-2 h-5 w-5 text-primary" /> Current Available Balance
           </CardTitle>
-           <CardDescription>This balance reflects your total confirmed earnings. It updates in real-time.</CardDescription>
+           <CardDescription>This balance reflects your total confirmed earnings. It updates immediately when a withdrawal is requested.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-baseline justify-between">
           <p className="text-4xl font-bold text-foreground">₹{currentBalance.toFixed(2)}</p>
@@ -188,7 +197,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                 <DialogTitle className="text-xl">Request Withdrawal</DialogTitle>
                 <DialogDescription>
                   Enter the amount and select your preferred method. Minimum withdrawal: ₹{MIN_WITHDRAWAL_AMOUNT}.
-                  Your balance will be updated immediately upon request.
+                  Your balance will be updated immediately upon submitting the request.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleWithdrawalSubmit} className="space-y-4 mt-4">
@@ -284,13 +293,9 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         </CardContent>
       </Card>
        <p className="text-xs text-muted-foreground text-center mt-4">
-        Developer Note: This withdrawal system updates balances on request. The refund for rejected withdrawals is simulated client-side.
+        Developer Note: This withdrawal system updates balances on request. The refund for rejected withdrawals is simulated on the client-side.
         Real financial processing requires a secure backend.
       </p>
     </div>
   );
 }
-
-    
-
-    

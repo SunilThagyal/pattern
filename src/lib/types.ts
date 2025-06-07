@@ -95,6 +95,7 @@ export interface Transaction {
   type: TransactionType;
   status: TransactionStatus;
   notes?: string;
+  withdrawalRequestId?: string; // Link back to the withdrawal request
 }
 
 export interface WithdrawalRequest {
@@ -106,5 +107,7 @@ export interface WithdrawalRequest {
   status: 'Pending' | 'Approved' | 'Rejected'; // Status of the withdrawal request itself
   requestDate: number; // Timestamp
   processedDate?: number; // Timestamp
-  adminNotes?: string;
+  adminNotes?: string; // For rejection reasons or other admin notes
+  transactionId?: string; // ID of the corresponding transaction in /transactions/{userId}
 }
+
