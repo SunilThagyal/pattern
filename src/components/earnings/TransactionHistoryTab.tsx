@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react'; // Added useRef
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { format, subDays, parseISO } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from '@/lib/utils';
 import { database } from '@/lib/firebase';
-import { ref, get, query, onValue, off, type DataSnapshot } from 'firebase/database'; // Added onValue, off, DataSnapshot
+import { ref, get, query, onValue, off, type DataSnapshot, push, serverTimestamp, runTransaction } from 'firebase/database';
 import type { Transaction, TransactionStatus } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -33,6 +33,8 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     to: new Date(),
   });
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const processedRefundsRef = useRef<Set<string>>(new Set()); // To track processed refunds in current session
+
 
   useEffect(() => {
     if (!authUserUid) {
@@ -41,33 +43,79 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     }
     const transactionsRef = ref(database, `transactions/${authUserUid}`);
     
-    // Use onValue for real-time updates
-    const listenerCallback = (snapshot: DataSnapshot) => {
+    const listenerCallback = async (snapshot: DataSnapshot) => {
+      console.log("[TransactionHistoryTab] Transactions listener fired.");
       if (snapshot.exists()) {
         const data = snapshot.val();
         const loadedTransactions: Transaction[] = Object.keys(data)
-          .map(key => ({ id: key, ...data[key] }))
+          .map(key => ({ id: key, ...data[key] as Transaction }))
           .sort((a, b) => b.date - a.date); 
+        
+        // Client-side simulation for handling rejected withdrawal refunds
+        for (const tx of loadedTransactions) {
+          if (tx.type === 'withdrawal' && 
+              tx.status === 'Rejected' && 
+              tx.id && 
+              !processedRefundsRef.current.has(tx.id)) {
+            
+            console.log(`[TransactionHistoryTab] Detected rejected withdrawal to refund: ${tx.id}, Amount: ${tx.amount}`);
+            
+            const refundDescriptionSuffix = `(Ref ID: ${tx.id})`;
+            const alreadyRefunded = loadedTransactions.some(
+                existingTx => existingTx.description?.endsWith(refundDescriptionSuffix) && 
+                              existingTx.type === 'earning' && 
+                              existingTx.status === 'Earned' // Assuming refund status is 'Earned'
+            );
+
+            if (!alreadyRefunded) {
+                console.log(`[TransactionHistoryTab] Simulating refund for ${tx.id}.`);
+                const refundAmount = Math.abs(tx.amount);
+                const refundTransactionData: Transaction = {
+                    date: serverTimestamp() as number,
+                    description: `Refund for rejected withdrawal ${refundDescriptionSuffix}`,
+                    amount: refundAmount,
+                    type: 'earning', 
+                    status: 'Earned', 
+                    notes: `Automatic refund for rejected withdrawal ${tx.id}`,
+                };
+
+                try {
+                    await push(ref(database, `transactions/${authUserUid}`), refundTransactionData);
+                    const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
+                    await runTransaction(userBalanceRef, (currentEarnings) => {
+                        return (currentEarnings || 0) + refundAmount;
+                    });
+                    
+                    toast({ title: "Withdrawal Rejected & Refunded", description: `₹${refundAmount.toFixed(2)} has been credited back to your balance for rejected withdrawal.` });
+                    processedRefundsRef.current.add(tx.id); 
+                } catch (error) {
+                    console.error("[TransactionHistoryTab] Error processing simulated refund:", error);
+                    toast({ title: "Refund Error", description: "Could not process automatic refund for a rejected withdrawal.", variant: "destructive"});
+                }
+            } else {
+                console.log(`[TransactionHistoryTab] Refund for ${tx.id} appears to already exist or was processed.`);
+                processedRefundsRef.current.add(tx.id); 
+            }
+          }
+        }
         setAllTransactions(loadedTransactions);
-        // No need to setFilteredTransactions here directly, 
-        // the next useEffect will handle it when allTransactions changes.
       } else {
         setAllTransactions([]);
       }
       setIsLoading(false);
     };
     
-    const errorCallback = (error: Error) => { // Error callback for onValue
-      console.error("Error fetching transactions with onValue:", error);
+    const errorCallback = (error: Error) => { 
+      console.error("[TransactionHistoryTab] Error fetching transactions with onValue:", error);
       toast({ title: "Error", description: "Could not load transaction history in real-time.", variant: "destructive" });
       setIsLoading(false);
     };
 
     onValue(query(transactionsRef), listenerCallback, errorCallback);
 
-    // Cleanup listener on component unmount
     return () => {
       off(transactionsRef, 'value', listenerCallback);
+      processedRefundsRef.current.clear(); // Clear on unmount
     };
 
   }, [authUserUid, toast]);
@@ -130,7 +178,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
         <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <CardTitle className="text-xl font-semibold">Transaction History</CardTitle>
-            <CardDescription>View all your earnings and withdrawal activities.</CardDescription>
+            <CardDescription>View all your earnings and withdrawal activities. Updates in real-time.</CardDescription>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
             <Popover>
@@ -176,7 +224,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="earned">Earned (Referral)</SelectItem>
+                <SelectItem value="earned">Earned</SelectItem>
                 <SelectItem value="pending">Pending (Withdrawal)</SelectItem>
                 <SelectItem value="approved">Approved (Withdrawal)</SelectItem>
                 <SelectItem value="rejected">Rejected (Withdrawal)</SelectItem>
@@ -209,7 +257,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                         {tx.status}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{tx.notes || 'N/A'}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{tx.notes || tx.id?.substring(0,10) || 'N/A'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -223,8 +271,14 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
           )}
         </CardContent>
       </Card>
+      <p className="text-xs text-muted-foreground text-center mt-2">
+        Developer Note: Refund for rejected withdrawals is simulated on the client-side for demonstration.
+        A robust production system requires backend listeners for such operations.
+      </p>
     </div>
   );
 }
+
+    
 
     
