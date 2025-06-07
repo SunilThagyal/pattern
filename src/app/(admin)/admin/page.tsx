@@ -213,8 +213,8 @@ export default function AdminPage() {
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700 flex items-center gap-2">
               <ShieldAlert className="h-5 w-5" />
               <div>
-                <strong>Security Notice:</strong> This is a PROTOTYPE admin login.
-                It is NOT secure. Do NOT use real credentials.
+                <strong>Security Notice:</strong> This login is a PROTOTYPE and NOT secure.
+                Do NOT use real credentials or rely on this for production security.
               </div>
             </div>
             <form onSubmit={handleAdminLogin} className="space-y-4">
@@ -273,8 +273,8 @@ export default function AdminPage() {
     <div className="space-y-6">
       <h2 className="text-2xl font-semibold text-foreground">Withdrawal Requests Management</h2>
       
-       <div className="p-4 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-700">
-        <strong>Security Notice:</strong> This admin panel is a prototype. In a production environment, ensure robust authentication, authorization (e.g., admin roles via Firebase Custom Claims), and secure database rules to protect this sensitive functionality.
+       <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-700">
+        <strong>Admin Panel Note:</strong> The current access control is a basic client-side simulation. Proper security requires backend authentication, authorization (e.g., admin roles via Firebase Custom Claims), and secure database rules.
       </div>
 
       {allRequests.length === 0 ? (
@@ -382,5 +382,7 @@ export default function AdminPage() {
     </div>
   );
 }
+
+    
 
     
