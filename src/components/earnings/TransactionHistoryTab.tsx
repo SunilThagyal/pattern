@@ -1,21 +1,22 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from 'react'; // Added useRef
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar as CalendarIcon, Filter, AlertTriangle, Loader2 } from "lucide-react";
+import { Calendar as CalendarIcon, Filter, AlertTriangle, Loader2, Info } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, subDays, parseISO } from "date-fns";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { format, subDays } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from '@/lib/utils';
 import { database } from '@/lib/firebase';
 import { ref, get, query, onValue, off, type DataSnapshot, push, serverTimestamp, runTransaction } from 'firebase/database';
-import type { Transaction, TransactionStatus } from '@/lib/types';
+import type { Transaction, TransactionStatus, WithdrawalRequest } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
 interface TransactionHistoryTabProps {
@@ -33,7 +34,13 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     to: new Date(),
   });
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const processedRefundsRef = useRef<Set<string>>(new Set()); // To track processed refunds in current session
+  const processedRefundsRef = useRef<Set<string>>(new Set());
+
+  // State for modal
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [withdrawalRequestDetails, setWithdrawalRequestDetails] = useState<WithdrawalRequest | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isLoadingModalDetails, setIsLoadingModalDetails] = useState(false);
 
 
   useEffect(() => {
@@ -51,7 +58,6 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
           .map(key => ({ id: key, ...data[key] as Transaction }))
           .sort((a, b) => b.date - a.date); 
         
-        // Client-side simulation for handling rejected withdrawal refunds
         for (const tx of loadedTransactions) {
           if (tx.type === 'withdrawal' && 
               tx.status === 'Rejected' && 
@@ -64,7 +70,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
             const alreadyRefunded = loadedTransactions.some(
                 existingTx => existingTx.description?.endsWith(refundDescriptionSuffix) && 
                               existingTx.type === 'earning' && 
-                              existingTx.status === 'Earned' // Assuming refund status is 'Earned'
+                              existingTx.status === 'Earned'
             );
 
             if (!alreadyRefunded) {
@@ -77,6 +83,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                     type: 'earning', 
                     status: 'Earned', 
                     notes: `Automatic refund for rejected withdrawal ${tx.id}`,
+                    withdrawalRequestId: tx.withdrawalRequestId // Carry over withdrawalRequestId if present
                 };
 
                 try {
@@ -115,7 +122,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
 
     return () => {
       off(transactionsRef, 'value', listenerCallback);
-      processedRefundsRef.current.clear(); // Clear on unmount
+      processedRefundsRef.current.clear(); 
     };
 
   }, [authUserUid, toast]);
@@ -167,6 +174,31 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     }
   };
 
+  const handleRowClick = async (transaction: Transaction) => {
+    setSelectedTransaction(transaction);
+    setWithdrawalRequestDetails(null); // Reset previous details
+    setIsDetailModalOpen(true);
+
+    if (transaction.type === 'withdrawal' && transaction.withdrawalRequestId && authUserUid) {
+      setIsLoadingModalDetails(true);
+      try {
+        const requestRef = ref(database, `withdrawalRequests/${authUserUid}/${transaction.withdrawalRequestId}`);
+        const snapshot = await get(requestRef);
+        if (snapshot.exists()) {
+          setWithdrawalRequestDetails({ id: snapshot.key, ...snapshot.val() } as WithdrawalRequest);
+        } else {
+          console.warn("Withdrawal request details not found for ID:", transaction.withdrawalRequestId);
+          toast({ title: "Details Not Found", description: "Associated withdrawal request details could not be found.", variant: "default" });
+        }
+      } catch (error) {
+        console.error("Error fetching withdrawal request details:", error);
+        toast({ title: "Error", description: "Could not fetch withdrawal request details.", variant: "destructive" });
+      } finally {
+        setIsLoadingModalDetails(false);
+      }
+    }
+  };
+
 
   if (isLoading) {
     return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
@@ -178,7 +210,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
         <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <CardTitle className="text-xl font-semibold">Transaction History</CardTitle>
-            <CardDescription>View all your earnings and withdrawal activities. Updates in real-time.</CardDescription>
+            <CardDescription>View all your earnings and withdrawal activities. Updates in real-time. Click a row for details.</CardDescription>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
             <Popover>
@@ -246,7 +278,11 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
               </TableHeader>
               <TableBody>
                 {filteredTransactions.map((tx) => (
-                  <TableRow key={tx.id}>
+                  <TableRow 
+                    key={tx.id} 
+                    onClick={() => handleRowClick(tx)}
+                    className="cursor-pointer hover:bg-muted/50"
+                  >
                     <TableCell>{format(new Date(tx.date), "PP pp")}</TableCell>
                     <TableCell className="font-medium">{tx.description}</TableCell>
                     <TableCell className={cn("text-right font-semibold", tx.type === 'earning' ? 'text-green-600' : 'text-red-600')}>
@@ -275,10 +311,53 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
         Developer Note: Refund for rejected withdrawals is simulated on the client-side for demonstration.
         A robust production system requires backend listeners for such operations.
       </p>
+
+      {selectedTransaction && (
+        <Dialog open={isDetailModalOpen} onOpenChange={setIsDetailModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Info size={20}/>Transaction Details</DialogTitle>
+              <DialogDescription>
+                Detailed view of transaction ID: <span className="font-mono text-xs">{selectedTransaction.id}</span>
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-3 text-sm">
+              <div className="flex justify-between"><span>Date:</span> <span>{format(new Date(selectedTransaction.date), "PPP ppp")}</span></div>
+              <div className="flex justify-between"><span>Description:</span> <span className="text-right">{selectedTransaction.description}</span></div>
+              <div className="flex justify-between"><span>Amount:</span> <span className={cn(selectedTransaction.type === 'earning' ? 'text-green-600' : 'text-red-600', "font-semibold")}>₹{selectedTransaction.type === 'earning' ? '+' : ''}{selectedTransaction.amount.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span>Type:</span> <span className="capitalize">{selectedTransaction.type}</span></div>
+              <div className="flex justify-between items-center"><span>Status:</span> <Badge variant={getStatusBadgeVariant(selectedTransaction.status)} className={getStatusBadgeClass(selectedTransaction.status)}>{selectedTransaction.status}</Badge></div>
+              {selectedTransaction.notes && <div className="flex justify-between"><span>Notes:</span> <span className="text-xs text-muted-foreground text-right">{selectedTransaction.notes}</span></div>}
+              
+              {isLoadingModalDetails && (
+                <div className="flex items-center justify-center py-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary mr-2" /> Loading withdrawal details...
+                </div>
+              )}
+
+              {!isLoadingModalDetails && selectedTransaction.type === 'withdrawal' && withdrawalRequestDetails && (
+                <>
+                  <hr className="my-2"/>
+                  <p className="font-semibold text-foreground">Withdrawal Information:</p>
+                  <div className="flex justify-between"><span>Method:</span> <span className="capitalize">{withdrawalRequestDetails.method}</span></div>
+                  {Object.entries(withdrawalRequestDetails.details).map(([key, value]) => (
+                     <div className="flex justify-between" key={key}><span>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</span> <span>{String(value)}</span></div>
+                  ))}
+                  {selectedTransaction.status === 'Rejected' && withdrawalRequestDetails.adminNotes && (
+                     <div className="p-2 bg-red-50 border border-red-200 rounded-md">
+                        <p className="font-semibold text-red-700">Rejection Reason:</p>
+                        <p className="text-red-600">{withdrawalRequestDetails.adminNotes}</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsDetailModalOpen(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
-
-    
-
-    

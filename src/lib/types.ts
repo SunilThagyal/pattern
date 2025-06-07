@@ -95,7 +95,7 @@ export interface Transaction {
   type: TransactionType;
   status: TransactionStatus;
   notes?: string;
-  withdrawalRequestId?: string; // Link back to the withdrawal request
+  withdrawalRequestId?: string; // Link back to the withdrawal request if this transaction is a withdrawal
 }
 
 export interface WithdrawalRequest {

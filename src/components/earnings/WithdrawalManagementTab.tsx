@@ -108,40 +108,52 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         details = { paytmNumber: paytmNumber.trim() };
     }
 
-    const transactionData: Transaction = {
-      date: serverTimestamp() as number,
-      description: `Withdrawal Request via ${withdrawalMethod.toUpperCase()}`,
-      amount: -amount, 
-      type: 'withdrawal',
-      status: 'Pending', 
-    };
-    
-    const transactionRef = push(ref(database, `transactions/${authUserUid}`), transactionData);
-    const transactionId = transactionRef.key;
-
-    if (!transactionId) {
-        toast({ title: "Error", description: "Could not create transaction record. Please try again.", variant: "destructive" });
-        setIsWithdrawing(false);
-        return;
-    }
-    // Update transaction with its own ID in notes for easier reference if needed
-    await update(ref(database, `transactions/${authUserUid}/${transactionId}`), { notes: `Txn ID: ${transactionId}`});
-
-
-    const withdrawalRequestData: WithdrawalRequest = {
+    // 1. Create and save the WithdrawalRequest to get its ID
+    const withdrawalRequestData: Omit<WithdrawalRequest, 'id' | 'transactionId'> = { // Omit id and transactionId initially
       userId: authUserUid,
       amount,
       method: withdrawalMethod,
       details,
       status: 'Pending', 
       requestDate: serverTimestamp() as number,
-      transactionId: transactionId, // Link to the transaction
     };
 
+    const withdrawalRequestRef = push(ref(database, `withdrawalRequests/${authUserUid}`), withdrawalRequestData);
+    const withdrawalRequestId = withdrawalRequestRef.key;
+
+    if (!withdrawalRequestId) {
+        toast({ title: "Error", description: "Could not create withdrawal request record. Please try again.", variant: "destructive" });
+        setIsWithdrawing(false);
+        return;
+    }
+    
+    // 2. Create the Transaction, including the withdrawalRequestId
+    const transactionData: Transaction = {
+      date: serverTimestamp() as number,
+      description: `Withdrawal Request via ${withdrawalMethod.toUpperCase()}`,
+      amount: -amount, 
+      type: 'withdrawal',
+      status: 'Pending',
+      withdrawalRequestId: withdrawalRequestId, // Link to the withdrawal request
+    };
+    
+    const transactionRef = push(ref(database, `transactions/${authUserUid}`), transactionData);
+    const transactionId = transactionRef.key;
+
+    if (!transactionId) {
+        // Potentially roll back withdrawalRequest or mark it as failed
+        toast({ title: "Error", description: "Could not create transaction record. Please try again. Withdrawal request creation might need manual check.", variant: "destructive" });
+        setIsWithdrawing(false);
+        return;
+    }
+    
+    // 3. Update the WithdrawalRequest with the transactionId
+    await update(ref(database, `withdrawalRequests/${authUserUid}/${withdrawalRequestId}`), { transactionId: transactionId });
+    // Also update the transaction with its own ID in notes for easier reference if needed (optional)
+    await update(ref(database, `transactions/${authUserUid}/${transactionId}`), { notes: `Txn ID: ${transactionId}; Req ID: ${withdrawalRequestId}`});
+
+
     try {
-      console.log("[WithdrawalTab] Saving withdrawal request to Firebase.");
-      await push(ref(database, `withdrawalRequests/${authUserUid}`), withdrawalRequestData);
-      
       console.log("[WithdrawalTab] Attempting to deduct balance from user's totalEarnings.");
       const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
       await runTransaction(userBalanceRef, (currentEarnings) => {
@@ -149,8 +161,6 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         console.log(`[WithdrawalTab] In runTransaction. Current earnings from DB: ${earningsVal}, Amount to deduct: ${amount}`);
         if (earningsVal < amount) {
           console.warn("[WithdrawalTab] Insufficient balance during Firebase transaction. Aborting.");
-          // Abort transaction by returning undefined. Firebase will retry, or eventually give up.
-          // This case should ideally be caught client-side before this point.
           return; 
         }
         return earningsVal - amount;
@@ -166,10 +176,8 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       setPaytmNumber('');
       setIsDialogOpen(false);
     } catch (error) {
-      console.error("[WithdrawalTab] Withdrawal request error:", error);
-      // If runTransaction was aborted due to insufficient funds, error might be undefined or a specific Firebase error.
-      // If error occurs after transaction push, we might need a compensating action (though complex).
-      toast({ title: "Error", description: "Could not submit withdrawal request. Check console for details.", variant: "destructive" });
+      console.error("[WithdrawalTab] Withdrawal request error (post-record creation):", error);
+      toast({ title: "Error", description: "Could not finalize withdrawal request (balance update failed). Check console for details.", variant: "destructive" });
     } finally {
       setIsWithdrawing(false);
     }
