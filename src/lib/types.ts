@@ -34,7 +34,7 @@ export interface RoomConfig {
 
 export interface PlatformSettings {
   referralProgramEnabled: boolean;
-  // Potentially other global settings like platformWithdrawalsEnabled (though currently handled by .env)
+  platformWithdrawalsEnabled: boolean;
 }
 
 export interface Room {
@@ -82,6 +82,7 @@ export interface UserProfile {
   createdAt: number;
   isBlocked?: boolean;
   blockReason?: string;
+  canWithdraw?: boolean; // New field for individual user withdrawal status
 }
 
 export interface DisplayUser extends UserProfile {
@@ -142,3 +143,4 @@ export type WithdrawalFilterCriteria = {
     dateTo?: Date | null;
     searchTerm: string;
 };
+

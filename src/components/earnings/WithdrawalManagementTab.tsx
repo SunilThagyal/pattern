@@ -9,10 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from '@/hooks/use-toast';
-import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2, Ban } from 'lucide-react';
+import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2, Ban, PowerOff, Power } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, push, serverTimestamp, runTransaction, get, onValue, off, type DataSnapshot, update } from 'firebase/database';
-import type { Transaction, WithdrawalRequest, UserProfile } from '@/lib/types';
+import type { Transaction, WithdrawalRequest, UserProfile, PlatformSettings } from '@/lib/types';
 
 const MIN_WITHDRAWAL_AMOUNT = 50;
 
@@ -34,49 +34,74 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
   const [paytmNumber, setPaytmNumber] = useState('');
 
   const { toast } = useToast();
-  const [platformWithdrawalsEnabled, setPlatformWithdrawalsEnabled] = useState(true);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
 
   useEffect(() => {
-    const withdrawalsEnabled = process.env.NEXT_PUBLIC_PLATFORM_WITHDRAWALS_ENABLED === 'true';
-    setPlatformWithdrawalsEnabled(withdrawalsEnabled);
-
-    if (authUserUid) {
-      console.log(`[WithdrawalTab] Setting up balance listener for UID: ${authUserUid}`);
-      const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
-      
-      const listenerCallback = (snapshot: DataSnapshot) => {
-        const newBalance = snapshot.val() || 0;
-        console.log(`[WithdrawalTab] Balance listener fired. New balance from DB: ${newBalance}`);
-        setCurrentBalance(newBalance);
-      };
-      
-      onValue(userBalanceRef, listenerCallback);
-      
-      get(userBalanceRef).then(snapshot => {
-        const initialFetchedBalance = snapshot.val() || 0;
-        console.log(`[WithdrawalTab] Initial explicit fetch of balance: ${initialFetchedBalance}`);
-        setCurrentBalance(initialFetchedBalance); 
-      }).catch(error => {
-        console.error("[WithdrawalTab] Error fetching initial balance explicitly:", error);
-      });
-
-      return () => {
-        console.log(`[WithdrawalTab] Cleaning up balance listener for UID: ${authUserUid}`);
-        off(userBalanceRef, 'value', listenerCallback);
-      };
-    } else {
-        console.log("[WithdrawalTab] No authUserUid, using initialBalance:", initialBalance);
+    if (!authUserUid) {
         setCurrentBalance(initialBalance);
+        setIsLoadingSettings(false);
+        return;
     }
+
+    setIsLoadingSettings(true);
+    const settingsRef = ref(database, 'platformSettings');
+    const userProfileRef = ref(database, `users/${authUserUid}`);
+
+    const platformSettingsListener = onValue(settingsRef, (snapshot) => {
+        if (snapshot.exists()) {
+            setPlatformSettings(snapshot.val());
+        } else {
+             setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
+        }
+        checkIfDoneLoading();
+    }, (error) => {
+        console.error("Error fetching platform settings:", error);
+        setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true }); // Fallback
+        checkIfDoneLoading();
+    });
+
+    const userProfileListener = onValue(userProfileRef, (snapshot) => {
+        if (snapshot.exists()) {
+            const profile = snapshot.val() as UserProfile;
+            setUserProfile(profile);
+            setCurrentBalance(profile.totalEarnings || 0);
+        } else {
+            setUserProfile(null); // Should ideally not happen if authUserUid is valid
+            setCurrentBalance(initialBalance);
+        }
+        checkIfDoneLoading();
+    }, (error) => {
+        console.error("Error fetching user profile:", error);
+        setUserProfile(null);
+        setCurrentBalance(initialBalance);
+        checkIfDoneLoading();
+    });
+    
+    let settingsLoaded = false;
+    let profileLoaded = false;
+
+    const checkIfDoneLoading = () => {
+        if(settingsLoaded && profileLoaded) setIsLoadingSettings(false);
+    };
+
+    get(settingsRef).then(s => { settingsLoaded = true; if(!s.exists()) setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true }); else setPlatformSettings(s.val()); checkIfDoneLoading(); });
+    get(userProfileRef).then(p => { profileLoaded = true; if(!p.exists()) setUserProfile(null); else setUserProfile(p.val()); checkIfDoneLoading(); });
+
+
+    return () => {
+      off(settingsRef, 'value', platformSettingsListener);
+      off(userProfileRef, 'value', userProfileListener);
+    };
   }, [authUserUid, initialBalance]);
 
 
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authUserUid || !platformWithdrawalsEnabled) return;
+    if (!authUserUid || !platformSettings.platformWithdrawalsEnabled || (userProfile && userProfile.canWithdraw === false)) return;
 
     setIsWithdrawing(true);
-    console.log("[WithdrawalTab] Initiating withdrawal request.");
 
     const amount = parseFloat(withdrawalAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -153,18 +178,14 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
 
 
     try {
-      console.log("[WithdrawalTab] Attempting to deduct balance from user's totalEarnings.");
       const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
       await runTransaction(userBalanceRef, (currentEarnings) => {
         const earningsVal = currentEarnings || 0;
-        console.log(`[WithdrawalTab] In runTransaction. Current earnings from DB: ${earningsVal}, Amount to deduct: ${amount}`);
         if (earningsVal < amount) {
-          console.warn("[WithdrawalTab] Insufficient balance during Firebase transaction. Aborting.");
           return; 
         }
         return earningsVal - amount;
       });
-      console.log("[WithdrawalTab] Balance deduction transaction should have completed.");
 
       toast({ title: "Withdrawal Requested", description: `Your request to withdraw ₹${amount.toFixed(2)} via ${withdrawalMethod.toUpperCase()} is pending. Your balance has been updated.`, variant: "default" });
       setWithdrawalAmount('');
@@ -181,6 +202,18 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       setIsWithdrawing(false);
     }
   };
+  
+  const userCanWithdraw = userProfile ? userProfile.canWithdraw !== false : true; // Default to true if profile not loaded or field undefined
+  const isWithdrawalDisabled = isLoadingSettings || !platformSettings.platformWithdrawalsEnabled || !userCanWithdraw;
+  let disabledReason = "";
+  if (!platformSettings.platformWithdrawalsEnabled) disabledReason = "Platform withdrawals are temporarily disabled.";
+  else if (!userCanWithdraw) disabledReason = "Withdrawals are currently disabled for your account.";
+  else if (currentBalance < MIN_WITHDRAWAL_AMOUNT) disabledReason = `Minimum balance of ₹${MIN_WITHDRAWAL_AMOUNT} required.`;
+
+
+  if (isLoadingSettings) {
+    return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -197,11 +230,11 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
             <DialogTrigger asChild>
               <Button 
                 size="lg" 
-                disabled={currentBalance < MIN_WITHDRAWAL_AMOUNT || isWithdrawing || !platformWithdrawalsEnabled}
-                title={!platformWithdrawalsEnabled ? "Withdrawals are temporarily disabled" : (currentBalance < MIN_WITHDRAWAL_AMOUNT ? `Minimum balance of ₹${MIN_WITHDRAWAL_AMOUNT} required` : "Request a withdrawal")}
+                disabled={isWithdrawalDisabled || currentBalance < MIN_WITHDRAWAL_AMOUNT || isWithdrawing}
+                title={disabledReason || "Request a withdrawal"}
               >
-                {!platformWithdrawalsEnabled ? <Ban className="mr-2 h-5 w-5" /> : <DollarSign className="mr-2 h-5 w-5" />}
-                {!platformWithdrawalsEnabled ? "Withdrawals Disabled" : "Withdraw Funds"}
+                {!platformSettings.platformWithdrawalsEnabled || !userCanWithdraw ? <Ban className="mr-2 h-5 w-5" /> : <DollarSign className="mr-2 h-5 w-5" />}
+                {isWithdrawalDisabled ? (userCanWithdraw ? "Platform Disabled" : "Account Disabled") : "Withdraw Funds"}
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
@@ -279,26 +312,19 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         </CardContent>
       </Card>
       
-      {!platformWithdrawalsEnabled && (
+      {isWithdrawalDisabled && (
          <div className="p-4 bg-orange-50 border border-orange-200 rounded-md text-orange-700 flex items-center">
           <Ban className="mr-3 h-5 w-5 flex-shrink-0" />
           <div>
-            <p className="text-sm font-semibold">Withdrawals Temporarily Disabled</p>
-            <p className="text-xs">
-              Withdrawals are currently unavailable. Please check back later.
+            <p className="text-sm font-semibold">
+                {disabledReason.includes("Platform") ? "Withdrawals Temporarily Disabled by Platform" : 
+                 disabledReason.includes("Account") ? "Withdrawals Disabled for Your Account" : 
+                 "Withdrawals Unavailable"}
             </p>
-          </div>
-        </div>
-      )}
-
-      {platformWithdrawalsEnabled && currentBalance < MIN_WITHDRAWAL_AMOUNT && (
-        <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-700 flex items-start">
-          <AlertTriangle className="mr-3 h-5 w-5 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold">Minimum Withdrawal Not Met</p>
             <p className="text-xs">
-              Your current balance (₹{currentBalance.toFixed(2)}) is below the minimum withdrawal threshold of ₹{MIN_WITHDRAWAL_AMOUNT}.
-              Keep referring and earning!
+              {disabledReason.includes("Minimum balance") ? disabledReason :
+               disabledReason.includes("Platform") ? "Platform-wide withdrawals are currently unavailable. Please check back later." :
+               "Withdrawals are currently not permitted for your account. Please contact support if you believe this is an error."}
             </p>
           </div>
         </div>
@@ -319,3 +345,4 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
     </div>
   );
 }
+

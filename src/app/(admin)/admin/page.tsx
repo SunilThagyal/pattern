@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical, ChevronDown, Settings, AlertCircleIcon } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical, ChevronDown, Settings, AlertCircleIcon, PowerOff, Power } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -90,8 +90,10 @@ export default function AdminPage() {
   });
   const [dashboardDateFilter, setDashboardDateFilter] = useState<DateFilterOption>("all_time");
 
-  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true });
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
   const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
+  const [processingUserWithdrawalToggle, setProcessingUserWithdrawalToggle] = useState(false);
+
 
   const { toast } = useToast();
 
@@ -103,11 +105,16 @@ export default function AdminPage() {
     try {
       const snapshot = await get(settingsRef);
       if (snapshot.exists()) {
-        setPlatformSettings(snapshot.val());
+        const settings = snapshot.val();
+        setPlatformSettings({
+            referralProgramEnabled: settings.referralProgramEnabled !== false, // Default to true
+            platformWithdrawalsEnabled: settings.platformWithdrawalsEnabled !== false, // Default to true
+        });
       } else {
         // Initialize with default if not exists
-        await set(settingsRef, { referralProgramEnabled: true });
-        setPlatformSettings({ referralProgramEnabled: true });
+        const defaultSettings = { referralProgramEnabled: true, platformWithdrawalsEnabled: true };
+        await set(settingsRef, defaultSettings);
+        setPlatformSettings(defaultSettings);
       }
     } catch (error) {
       console.error("Error fetching platform settings:", error);
@@ -115,19 +122,40 @@ export default function AdminPage() {
     }
   }, [toast]);
 
-  const handleToggleReferralProgram = async (enabled: boolean) => {
+  const handleTogglePlatformSetting = async (settingKey: keyof PlatformSettings, enabled: boolean) => {
     setIsUpdatingSettings(true);
     try {
-      await update(ref(database, 'platformSettings'), { referralProgramEnabled: enabled });
-      setPlatformSettings(prev => ({ ...prev, referralProgramEnabled: enabled }));
-      toast({ title: "Settings Updated", description: `Referral program ${enabled ? 'enabled' : 'disabled'}.` });
+      await update(ref(database, 'platformSettings'), { [settingKey]: enabled });
+      setPlatformSettings(prev => ({ ...prev, [settingKey]: enabled }));
+      const settingName = settingKey === 'referralProgramEnabled' ? 'Referral Program' : 'Platform Withdrawals';
+      toast({ title: "Settings Updated", description: `${settingName} ${enabled ? 'enabled' : 'disabled'}.` });
     } catch (error) {
-      console.error("Error updating referral program status:", error);
-      toast({ title: "Error", description: "Could not update referral program status.", variant: "destructive" });
+      console.error(`Error updating ${settingKey}:`, error);
+      toast({ title: "Error", description: `Could not update ${settingKey}.`, variant: "destructive" });
     } finally {
       setIsUpdatingSettings(false);
     }
   };
+  
+  const handleToggleUserWithdrawal = async (userId: string, currentCanWithdraw: boolean) => {
+    if (!selectedUserForModal || selectedUserForModal.userId !== userId) return;
+    setProcessingUserWithdrawalToggle(true);
+    try {
+        const newCanWithdrawStatus = !currentCanWithdraw;
+        await update(ref(database, `users/${userId}`), { canWithdraw: newCanWithdrawStatus });
+        setSelectedUserForModal(prev => prev ? { ...prev, canWithdraw: newCanWithdrawStatus } : null);
+        // Optimistically update the main user list if the user is there
+        setAllUsers(prevUsers => prevUsers.map(u => u.userId === userId ? {...u, canWithdraw: newCanWithdrawStatus} : u));
+
+        toast({ title: "User Setting Updated", description: `Withdrawals for ${selectedUserForModal.displayName} are now ${newCanWithdrawStatus ? 'enabled' : 'disabled'}.` });
+    } catch (error) {
+        console.error("Error toggling user withdrawal status:", error);
+        toast({ title: "Error", description: "Could not update user withdrawal status.", variant: "destructive" });
+    } finally {
+        setProcessingUserWithdrawalToggle(false);
+    }
+  };
+
 
   const fetchData = useCallback(async () => {
     if (!isAuthenticatedAdmin) {
@@ -183,6 +211,7 @@ export default function AdminPage() {
 
           return {
             ...userProfile,
+            canWithdraw: userProfile.canWithdraw !== false, // Default to true if undefined
             userId,
             referredUsersCount,
             grossLifetimeEarnings,
@@ -638,10 +667,23 @@ export default function AdminPage() {
                   <Switch
                     id="referralProgramSwitch"
                     checked={platformSettings.referralProgramEnabled}
-                    onCheckedChange={handleToggleReferralProgram}
+                    onCheckedChange={(checked) => handleTogglePlatformSetting('referralProgramEnabled', checked)}
                     disabled={isUpdatingSettings}
                   />
                 </div>
+                <div className="flex items-center justify-between p-3 border rounded-md">
+                  <div>
+                    <Label htmlFor="platformWithdrawalsSwitch" className="font-medium">Platform Withdrawals</Label>
+                    <p className="text-xs text-muted-foreground">Enable or disable all withdrawals on the platform.</p>
+                  </div>
+                  <Switch
+                    id="platformWithdrawalsSwitch"
+                    checked={platformSettings.platformWithdrawalsEnabled}
+                    onCheckedChange={(checked) => handleTogglePlatformSetting('platformWithdrawalsEnabled', checked)}
+                    disabled={isUpdatingSettings}
+                  />
+                </div>
+
                 {isUpdatingSettings && <div className="text-xs text-primary flex items-center"><Loader2 className="h-3 w-3 mr-1 animate-spin"/>Updating settings...</div>}
                  <div className="mt-2 p-3 border rounded-md bg-yellow-50 border-yellow-200">
                     <div className="flex items-center text-yellow-700">
@@ -649,8 +691,8 @@ export default function AdminPage() {
                         <p className="text-sm font-semibold">Note on Global Settings</p>
                     </div>
                     <ul className="list-disc pl-5 mt-1 text-xs text-yellow-600 space-y-1">
-                        <li>Disabling "Referral Program" will stop new referral reward calculations and hide referral code displays for users.</li>
-                        <li>Platform-wide withdrawal disable/enable is managed via the <code className="bg-yellow-100 px-1 rounded">.env</code> file (<code className="bg-yellow-100 px-1 rounded">NEXT_PUBLIC_PLATFORM_WITHDRAWALS_ENABLED</code>) and requires an app restart/rebuild to take effect.</li>
+                        <li>Toggling "Referral Program" or "Platform Withdrawals" takes effect almost immediately for new user actions.</li>
+                        <li>These settings are stored in Firebase and do not require an app restart/rebuild.</li>
                     </ul>
                  </div>
               </CardContent>
@@ -817,6 +859,7 @@ export default function AdminPage() {
                         <TableHead className="text-right">Gross Lifetime Earnings (₹)</TableHead>
                         <TableHead className="text-right">Current Balance (₹)</TableHead>
                         <TableHead className="text-center">Referrals Made</TableHead>
+                        <TableHead className="text-center">Withdrawals</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -831,6 +874,13 @@ export default function AdminPage() {
                           <TableCell className="text-right font-semibold">₹{(user.grossLifetimeEarnings || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right font-semibold">₹{(user.totalEarnings || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-center">{user.referredUsersCount}</TableCell>
+                           <TableCell className="text-center">
+                            {user.canWithdraw !== false ? (
+                                <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300">Enabled</Badge>
+                            ) : (
+                                <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300">Disabled</Badge>
+                            )}
+                           </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -889,15 +939,26 @@ export default function AdminPage() {
                 <Card>
                     <CardHeader className="pb-2 flex flex-row justify-between items-center">
                         <CardTitle className="text-base">Profile Information</CardTitle>
-                        {!selectedUserForModal.isBlocked ? (
-                            <Button variant="destructive" size="sm" onClick={() => openBlockUserDialog(selectedUserForModal)} disabled={processingBlock}>
-                                {processingBlock ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Ban className="h-4 w-4 mr-1" />} Block User
-                            </Button>
-                        ) : (
-                             <Button variant="outline" size="sm" onClick={() => handleUnblockUser(selectedUserForModal.userId, selectedUserForModal.displayName)} disabled={processingBlock} className="text-green-600 border-green-600 hover:text-green-700 hover:bg-green-50">
-                                {processingBlock ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCheck className="h-4 w-4 mr-1" />} Unblock User
-                            </Button>
-                        )}
+                         <div className="flex gap-2">
+                            {selectedUserForModal.canWithdraw !== false ? (
+                                 <Button variant="outline" size="sm" onClick={() => handleToggleUserWithdrawal(selectedUserForModal.userId, true)} disabled={processingUserWithdrawalToggle} className="text-orange-600 border-orange-500 hover:bg-orange-50 hover:text-orange-700">
+                                    {processingUserWithdrawalToggle ? <Loader2 className="h-4 w-4 animate-spin mr-1"/> : <PowerOff className="h-4 w-4 mr-1"/>} Disable Withdrawals
+                                </Button>
+                            ) : (
+                                <Button variant="outline" size="sm" onClick={() => handleToggleUserWithdrawal(selectedUserForModal.userId, false)} disabled={processingUserWithdrawalToggle} className="text-green-600 border-green-500 hover:bg-green-50 hover:text-green-700">
+                                     {processingUserWithdrawalToggle ? <Loader2 className="h-4 w-4 animate-spin mr-1"/> : <Power className="h-4 w-4 mr-1"/>} Enable Withdrawals
+                                </Button>
+                            )}
+                            {!selectedUserForModal.isBlocked ? (
+                                <Button variant="destructive" size="sm" onClick={() => openBlockUserDialog(selectedUserForModal)} disabled={processingBlock}>
+                                    {processingBlock ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Ban className="h-4 w-4 mr-1" />} Block User
+                                </Button>
+                            ) : (
+                                <Button variant="outline" size="sm" onClick={() => handleUnblockUser(selectedUserForModal.userId, selectedUserForModal.displayName)} disabled={processingBlock} className="text-green-600 border-green-600 hover:text-green-700 hover:bg-green-50">
+                                    {processingBlock ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCheck className="h-4 w-4 mr-1" />} Unblock User
+                                </Button>
+                            )}
+                        </div>
                     </CardHeader>
                     <CardContent className="space-y-1 text-xs">
                         <div><strong>Email:</strong> {selectedUserForModal.email || 'N/A'}</div>
@@ -907,6 +968,9 @@ export default function AdminPage() {
                         {isLoadingUserTransactions ? <Loader2 className="h-4 w-4 animate-spin" /> : <div><strong>Total Withdrawn (Approved):</strong> <span className="font-semibold text-red-600">₹{(selectedUserForModal.totalWithdrawn || 0).toFixed(2)}</span></div>}
                         <div><strong>Current Available Balance:</strong> <span className="font-semibold text-blue-600">₹{(selectedUserForModal.totalEarnings || 0).toFixed(2)}</span></div>
                         {selectedUserForModal.referredBy && <div><strong>Referred By User ID:</strong> <span className="font-mono">{selectedUserForModal.referredBy}</span></div>}
+                        <div className={cn("flex items-center gap-1 font-semibold", selectedUserForModal.canWithdraw !== false ? "text-green-600" : "text-red-600")}>
+                            <strong>Withdrawal Status:</strong> {selectedUserForModal.canWithdraw !== false ? "Enabled" : "Disabled"}
+                        </div>
                         {selectedUserForModal.isBlocked && selectedUserForModal.blockReason && (
                             <div className="mt-2 p-1.5 bg-destructive/10 border border-destructive/20 rounded-sm">
                                 <p className="font-semibold text-destructive">Block Reason:</p>
@@ -961,3 +1025,4 @@ export default function AdminPage() {
     </div>
   );
 }
+
