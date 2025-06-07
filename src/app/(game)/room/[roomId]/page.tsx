@@ -945,6 +945,7 @@ export default function GameRoomPage() {
         selectableWords: [],
         revealedPattern: [],
         usedWords: [],
+        lastRoundScoreChanges: null,
     };
 
     try {
@@ -1050,6 +1051,7 @@ export default function GameRoomPage() {
         correctGuessersThisRound: [],
         selectableWords: wordsForSelection.slice(0,5),
         revealedPattern: [],
+        lastRoundScoreChanges: null,
     };
     try {
         await update(ref(database, `rooms/${roomId}`), updates);
@@ -1079,7 +1081,7 @@ export default function GameRoomPage() {
 
     const updatesForDrawingStart: Partial<Room> = {
         currentPattern: word,
-        roundStartedAt: serverTimestamp() as any, // Firebase will set this
+        roundStartedAt: serverTimestamp() as any,
         roundEndsAt: newRoundEndsAt,
         selectableWords: [],
         wordSelectionEndsAt: null,
@@ -1087,6 +1089,7 @@ export default function GameRoomPage() {
         usedWords: newUsedWords,
         drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
         aiSketchDataUri: null,
+        lastRoundScoreChanges: null,
     };
     try {
         await set(ref(database, `rooms/${roomId}/revealedPattern`), initialRevealedPattern);
@@ -1113,35 +1116,53 @@ export default function GameRoomPage() {
        return;
     }
 
-    // Drawer Scoring
-    let totalDrawerPointsEarned = 0;
+    let totalDrawerPointsEarnedThisRound = 0;
+    const roundScoreChanges: { [playerId: string]: number } = {};
+    const uniqueCorrectGuessersForDrawerPoints = new Set<string>();
+
+
     if (currentRoomData.roundStartedAt && currentRoomData.guesses) {
         const roundStartedAt = currentRoomData.roundStartedAt;
         const roundTimeLimit = currentRoomData.config.roundTimeoutSeconds;
 
-        const correctGuessesForThisRound = (currentRoomData.guesses || []).filter(g => 
-            g.isCorrect && 
-            g.timestamp >= roundStartedAt && 
+        const correctGuessesInDb = (currentRoomData.guesses || []).filter(g =>
+            g.isCorrect &&
+            g.timestamp >= roundStartedAt &&
             (currentRoomData.correctGuessersThisRound || []).includes(g.playerId)
         );
         
-        correctGuessesForThisRound.forEach(guess => {
-            const guessTimeSeconds = Math.max(0, (guess.timestamp - roundStartedAt) / 1000);
-            const clampedGuessTime = Math.min(guessTimeSeconds, roundTimeLimit);
-            const pointsForThisGuesser = Math.round(BaseDrawerPointsPerGuess * (clampedGuessTime / roundTimeLimit));
-            totalDrawerPointsEarned += pointsForThisGuesser;
+        // Calculate Guesser's points for the round (for modal display)
+        (currentRoomData.correctGuessersThisRound || []).forEach((guesserId, index) => {
+            const guesserGuess = correctGuessesInDb.find(g => g.playerId === guesserId);
+            if (guesserGuess) {
+                const guessTimeSeconds = Math.max(0, (guesserGuess.timestamp - roundStartedAt) / 1000);
+                const clampedGuessTime = Math.min(guessTimeSeconds, roundTimeLimit);
+                let pointsForThisGuesserInRound = Math.round(MaxGuesserPoints * ((roundTimeLimit - clampedGuessTime) / roundTimeLimit));
+                if (index === 0) { // First guesser bonus
+                    pointsForThisGuesserInRound += FirstGuesserBonus;
+                }
+                roundScoreChanges[guesserId] = (roundScoreChanges[guesserId] || 0) + pointsForThisGuesserInRound;
+
+                // For Drawer Scoring - only count each guesser once
+                if (!uniqueCorrectGuessersForDrawerPoints.has(guesserId)) {
+                    const drawerPointsFromThisGuesser = Math.round(BaseDrawerPointsPerGuess * (clampedGuessTime / roundTimeLimit));
+                    totalDrawerPointsEarnedThisRound += drawerPointsFromThisGuesser;
+                    uniqueCorrectGuessersForDrawerPoints.add(guesserId);
+                }
+            }
         });
     }
-    
-    if (totalDrawerPointsEarned > 0) {
+
+    if (totalDrawerPointsEarnedThisRound > 0) {
         const drawerPlayerRef = ref(database, `rooms/${roomId}/players/${currentRoomData.currentDrawerId}`);
         try {
             await runTransaction(drawerPlayerRef, (playerData: Player | null) => {
                 if (playerData) {
-                    playerData.score = (playerData.score || 0) + totalDrawerPointsEarned;
+                    playerData.score = (playerData.score || 0) + totalDrawerPointsEarnedThisRound;
                 }
                 return playerData;
             });
+            roundScoreChanges[currentRoomData.currentDrawerId] = (roundScoreChanges[currentRoomData.currentDrawerId] || 0) + totalDrawerPointsEarnedThisRound;
         } catch (e) {
             console.error("Error updating drawer score:", e);
         }
@@ -1153,7 +1174,7 @@ export default function GameRoomPage() {
             await update(ref(database, `rooms/${roomId}`), {
                 gameState: 'round_end',
                 wordSelectionEndsAt: null,
-                // roundEndsAt: null, // Keep roundEndsAt for potential display or review
+                lastRoundScoreChanges: roundScoreChanges,
             });
             if (currentRoomData.currentPattern) {
                  addSystemMessage(`[[SYSTEM_ROUND_END_WORD]]`, currentRoomData.currentPattern);
@@ -1188,14 +1209,14 @@ export default function GameRoomPage() {
         }
 
         const isCorrect = guessText.toLowerCase() === currentRoom.currentPattern.toLowerCase();
-        const guessTimestampForScoring = Date.now(); // For immediate local calculation
+        const guessTimestampForScoring = Date.now(); 
 
         const newGuess: Guess = {
           playerId,
           playerName,
           text: guessText,
           isCorrect,
-          timestamp: serverTimestamp() as any // For DB record
+          timestamp: serverTimestamp() as any 
         };
 
         const guessesRef = ref(database, `rooms/${roomId}/guesses`);
@@ -1219,14 +1240,13 @@ export default function GameRoomPage() {
 
                 pointsAwardedToGuesser = Math.round(MaxGuesserPoints * ((roundTimeLimit - clampedGuessTime) / roundTimeLimit));
 
-                if (newCorrectGuessers.length === 1) { // First correct guesser
+                if (newCorrectGuessers.length === 1) { 
                     pointsAwardedToGuesser += FirstGuesserBonus;
                 }
             }
             
             const playerRef = ref(database, `rooms/${roomId}/players/${playerId}`);
-            const currentPlayerData = currentRoom.players[playerId];
-            if (currentPlayerData) {
+            if (currentRoom.players[playerId]) {
                 try {
                     await runTransaction(playerRef, (playerData: Player | null) => {
                         if (playerData) {
@@ -1242,8 +1262,7 @@ export default function GameRoomPage() {
 
         await update(ref(database, `rooms/${roomId}`), updates);
 
-        // Check if all non-drawing players have guessed correctly to end the round
-        if (currentRoom.hostId === playerId && isCorrect) { // Only host checks for auto-end
+        if (currentRoom.hostId === playerId && isCorrect) { 
             const updatedRoomSnapForEndRound = await get(ref(database, `rooms/${roomId}`));
              if (!updatedRoomSnapForEndRound.exists()) {
                 setIsSubmittingGuess(false);
@@ -1493,6 +1512,9 @@ export default function GameRoomPage() {
         if (roomData.roundStartedAt === undefined) {
             roomData.roundStartedAt = null;
         }
+        if (roomData.lastRoundScoreChanges === undefined) {
+            roomData.lastRoundScoreChanges = null;
+        }
 
 
         setRoom(roomData);
@@ -1575,7 +1597,7 @@ export default function GameRoomPage() {
                     }
                 }
             });
-        }, 500); // Short delay to allow final guess processing
+        }, 500); 
       } else {
         const now = Date.now();
         const timeLeftMs = room.roundEndsAt - now;
@@ -1911,7 +1933,7 @@ export default function GameRoomPage() {
             isHost={room.hostId === playerId}
             onStartGame={manageGameStart}
             startButtonInfo={startButtonInfo}
-            canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players || {}).filter((p:any)=>p.isOnline).length >= 1}
+            canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players || {}).filter((p: Player)=>p.isOnline).length >= 1}
             isStartingNextRoundOrGame={isStartingNextRoundOrGame}
             aiSketchDataUri={room.aiSketchDataUri}
             onDrawWithAI={isCurrentPlayerDrawing ? handleDrawWithAI : undefined}
