@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -32,13 +32,14 @@ import {
 interface UserWithdrawalRequests {
   userId: string;
   requests: AdminDisplayWithdrawalRequest[];
-  userEmail?: string; 
+  userEmail?: string;
 }
 
 const ADMIN_EMAIL = "admin@devifyo.com";
 const ADMIN_PASSWORD = "pass@admin";
 
 type DateFilterOption = "all_time" | "today" | "last_7_days" | "last_30_days";
+const ITEMS_PER_PAGE = 10; // For admin panel lists
 
 export default function AdminPage() {
   const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(false);
@@ -66,6 +67,7 @@ export default function AdminPage() {
   });
   const [withdrawalDateRange, setWithdrawalDateRange] = useState<DateRange | undefined>(undefined);
   const [pendingWithdrawalCount, setPendingWithdrawalCount] = useState(0);
+  const [visibleWithdrawalGroupsCount, setVisibleWithdrawalGroupsCount] = useState(ITEMS_PER_PAGE);
 
 
   // User Management State
@@ -75,7 +77,7 @@ export default function AdminPage() {
   const [isUserDetailModalOpen, setIsUserDetailModalOpen] = useState(false);
   const [selectedUserReferrals, setSelectedUserReferrals] = useState<ReferralEntry[]>([]);
   const [isLoadingUserReferrals, setIsLoadingUserReferrals] = useState(false);
-  const [userSortCriteria, setUserSortCriteria] = useState<'grossLifetimeEarnings' | 'referredUsersCount' | 'displayName'>('displayName');
+  const [userSortCriteria, setUserSortCriteria] = useState<'displayName' | 'grossLifetimeEarnings' | 'referredUsersCount'>('displayName');
   const [userSortOrder, setUserSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedUserTransactions, setSelectedUserTransactions] = useState<Transaction[]>([]);
   const [isLoadingUserTransactions, setIsLoadingUserTransactions] = useState(false);
@@ -83,6 +85,7 @@ export default function AdminPage() {
   const [userToBlock, setUserToBlock] = useState<DisplayUser | null>(null);
   const [blockReason, setBlockReason] = useState('');
   const [processingBlock, setProcessingBlock] = useState(false);
+  const [visibleUsersCount, setVisibleUsersCount] = useState(ITEMS_PER_PAGE);
 
 
   // Dashboard State
@@ -104,6 +107,8 @@ export default function AdminPage() {
     setIsDataLoading(true);
     setWithdrawalError(null);
     setUserError(null);
+    setVisibleUsersCount(ITEMS_PER_PAGE); // Reset pagination on refresh
+    setVisibleWithdrawalGroupsCount(ITEMS_PER_PAGE); // Reset pagination on refresh
 
     try {
       const usersRef = ref(database, 'users');
@@ -233,7 +238,8 @@ export default function AdminPage() {
 
 
   const sortedUsers = useMemo(() => {
-    return [...allUsers].sort((a, b) => {
+    const usersToSort = [...allUsers];
+    usersToSort.sort((a, b) => {
       let compareA, compareB;
       if (userSortCriteria === 'grossLifetimeEarnings') {
         compareA = a.grossLifetimeEarnings || 0;
@@ -252,7 +258,17 @@ export default function AdminPage() {
         return typeof compareB === 'string' ? (compareB as string).localeCompare(compareA as string) : (compareB as number) - (compareA as number);
       }
     });
+    return usersToSort;
   }, [allUsers, userSortCriteria, userSortOrder]);
+
+  const usersToDisplay = useMemo(() => {
+    return sortedUsers.slice(0, visibleUsersCount);
+  }, [sortedUsers, visibleUsersCount]);
+
+  const handleLoadMoreUsers = () => {
+    setVisibleUsersCount(prev => prev + ITEMS_PER_PAGE);
+  };
+
 
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -483,8 +499,18 @@ export default function AdminPage() {
         return { ...userReqGroup, requests: filteredUserRequests };
     }).filter(userReqGroup => userReqGroup.requests.length > 0); 
 
+    // Reset visible count for withdrawals when filters change
+    setVisibleWithdrawalGroupsCount(ITEMS_PER_PAGE);
     return result;
   }, [allRequests, withdrawalFilters]);
+
+  const withdrawalGroupsToDisplay = useMemo(() => {
+    return filteredWithdrawalRequests.slice(0, visibleWithdrawalGroupsCount);
+  }, [filteredWithdrawalRequests, visibleWithdrawalGroupsCount]);
+
+  const handleLoadMoreWithdrawalGroups = () => {
+    setVisibleWithdrawalGroupsCount(prev => prev + ITEMS_PER_PAGE);
+  };
 
 
   if (!isAuthenticatedAdmin) {
@@ -619,7 +645,7 @@ export default function AdminPage() {
                         </Select>
                     </div>
                     <div className="lg:col-span-2">
-                        <Label htmlFor="withdrawalDateFilterPopover">Date Range</Label> {/* Changed ID for Popover trigger */}
+                        <Label htmlFor="withdrawalDateFilterPopover">Date Range</Label>
                          <Popover>
                             <PopoverTrigger asChild>
                                 <Button id="withdrawalDateFilterPopover" variant={"outline"} className={cn("w-full justify-start text-left font-normal", !withdrawalDateRange && "text-muted-foreground")}>
@@ -647,55 +673,64 @@ export default function AdminPage() {
             <div className="flex justify-center items-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>
           ) : withdrawalError ? (
             <div className="text-center text-destructive p-4 bg-destructive/10 rounded-md flex items-center justify-center gap-2"><AlertTriangle /> {withdrawalError}</div>
-          ) : filteredWithdrawalRequests.length === 0 ? (
+          ) : withdrawalGroupsToDisplay.length === 0 ? (
             <p className="text-muted-foreground">No withdrawal requests found matching your criteria.</p>
           ) : (
-            filteredWithdrawalRequests.map(userReqs => (
-              <Card key={userReqs.userId} className="mb-8 shadow-sm bg-card">
-                <CardHeader><CardTitle className="text-lg">User ID: <span className="font-mono text-sm bg-muted p-1 rounded">{userReqs.userId}</span> {userReqs.userEmail && <span className="text-xs text-muted-foreground">({userReqs.userEmail})</span>}</CardTitle></CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Req ID</TableHead><TableHead>Date</TableHead><TableHead>Amount (₹)</TableHead><TableHead>Method</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {userReqs.requests.map((req) => (
-                        <TableRow key={req.originalId} > {/* Removed onClick for direct actions */}
-                          <TableCell className="text-xs font-mono" onClick={() => handleWithdrawalRowClick(req)}>{req.originalId.substring(0,10)}...</TableCell>
-                          <TableCell onClick={() => handleWithdrawalRowClick(req)}>{format(new Date(req.requestDate), "PP pp")}</TableCell>
-                          <TableCell className="font-semibold" onClick={() => handleWithdrawalRowClick(req)}>₹{req.amount.toFixed(2)}</TableCell>
-                          <TableCell onClick={() => handleWithdrawalRowClick(req)}>{req.method.toUpperCase()}</TableCell>
-                          <TableCell onClick={() => handleWithdrawalRowClick(req)}><Badge variant="outline" className={cn("text-xs", getStatusBadgeClass(req.status))}>{req.status}</Badge></TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                  <EllipsisVertical className="h-4 w-4" />
-                                  <span className="sr-only">Actions</span>
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleWithdrawalRowClick(req)}>
-                                  <Info className="mr-2 h-4 w-4" /> View Details
-                                </DropdownMenuItem>
-                                {req.status === 'Pending' && (
-                                  <>
-                                  <DropdownMenuItem onClick={() => handleApprove(req)} disabled={processingAction === `${req.userId}_${req.originalId}`} className="text-green-600 focus:bg-green-50 focus:text-green-700">
-                                    {processingAction === `${req.userId}_${req.originalId}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />} Approve
+            <>
+              {withdrawalGroupsToDisplay.map(userReqs => (
+                <Card key={userReqs.userId} className="mb-8 shadow-sm bg-card">
+                  <CardHeader><CardTitle className="text-lg">User ID: <span className="font-mono text-sm bg-muted p-1 rounded">{userReqs.userId}</span> {userReqs.userEmail && <span className="text-xs text-muted-foreground">({userReqs.userEmail})</span>}</CardTitle></CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader><TableRow><TableHead>Req ID</TableHead><TableHead>Date</TableHead><TableHead>Amount (₹)</TableHead><TableHead>Method</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {userReqs.requests.map((req) => (
+                          <TableRow key={req.originalId} >
+                            <TableCell className="text-xs font-mono" onClick={() => handleWithdrawalRowClick(req)}>{req.originalId.substring(0,10)}...</TableCell>
+                            <TableCell onClick={() => handleWithdrawalRowClick(req)}>{format(new Date(req.requestDate), "PP pp")}</TableCell>
+                            <TableCell className="font-semibold" onClick={() => handleWithdrawalRowClick(req)}>₹{req.amount.toFixed(2)}</TableCell>
+                            <TableCell onClick={() => handleWithdrawalRowClick(req)}>{req.method.toUpperCase()}</TableCell>
+                            <TableCell onClick={() => handleWithdrawalRowClick(req)}><Badge variant="outline" className={cn("text-xs", getStatusBadgeClass(req.status))}>{req.status}</Badge></TableCell>
+                            <TableCell className="text-right">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <EllipsisVertical className="h-4 w-4" />
+                                    <span className="sr-only">Actions</span>
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleWithdrawalRowClick(req)}>
+                                    <Info className="mr-2 h-4 w-4" /> View Details
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => openRejectDialog(req)} disabled={processingAction === `${req.userId}_${req.originalId}`} className="text-red-600 focus:bg-red-50 focus:text-red-700">
-                                    {processingAction === `${req.userId}_${req.originalId}` && currentRequestToProcess?.originalId !== req.originalId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />} Reject
-                                  </DropdownMenuItem>
-                                  </>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            ))
+                                  {req.status === 'Pending' && (
+                                    <>
+                                    <DropdownMenuItem onClick={() => handleApprove(req)} disabled={processingAction === `${req.userId}_${req.originalId}`} className="text-green-600 focus:bg-green-50 focus:text-green-700">
+                                      {processingAction === `${req.userId}_${req.originalId}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />} Approve
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => openRejectDialog(req)} disabled={processingAction === `${req.userId}_${req.originalId}`} className="text-red-600 focus:bg-red-50 focus:text-red-700">
+                                      {processingAction === `${req.userId}_${req.originalId}` && currentRequestToProcess?.originalId !== req.originalId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />} Reject
+                                    </DropdownMenuItem>
+                                    </>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              ))}
+              {visibleWithdrawalGroupsCount < filteredWithdrawalRequests.length && (
+                <div className="mt-6 text-center">
+                  <Button variant="outline" onClick={handleLoadMoreWithdrawalGroups}>
+                    <ChevronDown className="mr-2 h-4 w-4" /> Load More Withdrawal Groups
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </TabsContent>
 
@@ -717,9 +752,10 @@ export default function AdminPage() {
             <div className="flex justify-center items-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>
           ) : userError ? (
             <div className="text-center text-destructive p-4 bg-destructive/10 rounded-md flex items-center justify-center gap-2"><AlertTriangle /> {userError}</div>
-          ) : sortedUsers.length === 0 ? (
+          ) : usersToDisplay.length === 0 ? (
             <p className="text-muted-foreground">No users found.</p>
           ) : (
+            <>
             <Card><CardContent className="pt-6">
                   <Table>
                     <TableHeader>
@@ -733,7 +769,7 @@ export default function AdminPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {sortedUsers.map((user) => (
+                      {usersToDisplay.map((user) => (
                         <TableRow key={user.userId} onClick={() => handleUserRowClick(user)} className="cursor-pointer hover:bg-muted/50">
                           <TableCell className="text-xs font-mono">{user.userId.substring(0,10)}...</TableCell>
                           <TableCell className="font-medium flex items-center">
@@ -749,6 +785,14 @@ export default function AdminPage() {
                     </TableBody>
                   </Table>
             </CardContent></Card>
+            {visibleUsersCount < sortedUsers.length && (
+              <div className="mt-6 text-center">
+                <Button variant="outline" onClick={handleLoadMoreUsers}>
+                  <ChevronDown className="mr-2 h-4 w-4" /> Load More Users
+                </Button>
+              </div>
+            )}
+            </>
           )}
         </TabsContent>
       </Tabs>
@@ -866,3 +910,4 @@ export default function AdminPage() {
     </div>
   );
 }
+
