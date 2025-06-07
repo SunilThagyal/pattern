@@ -1,7 +1,9 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { APP_NAME } from '@/lib/config';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, Home } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 export default function PrivacyPolicyPage() {
   return (
@@ -104,6 +106,14 @@ export default function PrivacyPolicyPage() {
             all jurisdictions or applications. You should consult with a legal professional to ensure
             compliance with all applicable laws and regulations.
           </p>
+          <div className="mt-8 text-center">
+            <Link href="/" passHref>
+              <Button variant="outline">
+                <Home className="mr-2 h-4 w-4" />
+                Back to Game Lobby
+              </Button>
+            </Link>
+          </div>
         </CardContent>
       </Card>
     </div>

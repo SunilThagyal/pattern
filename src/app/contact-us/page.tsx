@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { APP_NAME } from '@/lib/config';
-import { Mail } from 'lucide-react';
+import { Mail, Home } from 'lucide-react';
+import Link from 'next/link';
 
 export default function ContactUsPage() {
   // Basic form submission handler (does not actually send email)
@@ -55,6 +56,14 @@ export default function ContactUsPage() {
             <p className="text-sm">
               Alternatively, you can email us directly at: <a href="mailto:drawly.devifyo.com" className="text-primary hover:underline">drawly.devifyo.com</a>
             </p>
+          </div>
+          <div className="mt-8 text-center">
+            <Link href="/" passHref>
+              <Button variant="outline">
+                <Home className="mr-2 h-4 w-4" />
+                Back to Game Lobby
+              </Button>
+            </Link>
           </div>
         </CardContent>
       </Card>

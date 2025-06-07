@@ -1,7 +1,9 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { APP_NAME } from '@/lib/config';
-import { Info } from 'lucide-react';
+import { Info, Home } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 export default function AboutUsPage() {
   return (
@@ -42,6 +44,14 @@ export default function AboutUsPage() {
             Thank you for playing {APP_NAME}. We are constantly working to improve the game
             and add new features. Your feedback is always welcome!
           </p>
+          <div className="mt-8 text-center">
+            <Link href="/" passHref>
+              <Button variant="outline">
+                <Home className="mr-2 h-4 w-4" />
+                Back to Game Lobby
+              </Button>
+            </Link>
+          </div>
         </CardContent>
       </Card>
     </div>
