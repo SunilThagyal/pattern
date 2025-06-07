@@ -341,10 +341,11 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                   <p className="font-semibold text-foreground">Withdrawal Information:</p>
                   <div className="flex justify-between"><span>Method:</span> <span className="capitalize">{withdrawalRequestDetails.method}</span></div>
                   {Object.entries(withdrawalRequestDetails.details).map(([key, value]) => (
-                     <div className="flex justify-between" key={key}><span>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</span> <span>{String(value)}</span></div>
+                     <div className="flex justify-between" key={key}><span>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</span> 
+                     <span className="text-right break-all">{String(value)}</span></div>
                   ))}
                   {selectedTransaction.status === 'Rejected' && withdrawalRequestDetails.adminNotes && (
-                     <div className="p-2 bg-red-50 border border-red-200 rounded-md">
+                     <div className="p-2 bg-red-50 border border-red-200 rounded-md mt-2">
                         <p className="font-semibold text-red-700">Rejection Reason:</p>
                         <p className="text-red-600">{withdrawalRequestDetails.adminNotes}</p>
                     </div>
@@ -361,3 +362,4 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     </div>
   );
 }
+
