@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -22,11 +22,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import type { DateRange } from "react-day-picker";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface UserWithdrawalRequests {
   userId: string;
   requests: AdminDisplayWithdrawalRequest[];
-  userEmail?: string; // For searching by email
+  userEmail?: string; 
 }
 
 const ADMIN_EMAIL = "admin@devifyo.com";
@@ -59,6 +65,7 @@ export default function AdminPage() {
     searchTerm: '',
   });
   const [withdrawalDateRange, setWithdrawalDateRange] = useState<DateRange | undefined>(undefined);
+  const [pendingWithdrawalCount, setPendingWithdrawalCount] = useState(0);
 
 
   // User Management State
@@ -148,21 +155,25 @@ export default function AdminPage() {
       }
       setAllUsers(fetchedUsers);
 
-      // Fetch Withdrawal Requests
       const withdrawalRequestsRef = ref(database, 'withdrawalRequests');
       const withdrawalSnapshot = await get(withdrawalRequestsRef);
       const loadedRequests: UserWithdrawalRequests[] = [];
+      let totalPendingCount = 0;
       if (withdrawalSnapshot.exists()) {
-        const usersData = withdrawalSnapshot.val();
-        for (const userId in usersData) {
-          const userRequestsData = usersData[userId];
+        const usersWithdrawalData = withdrawalSnapshot.val();
+        for (const userId in usersWithdrawalData) {
+          const userRequestsData = usersWithdrawalData[userId];
           const userRequestsList: AdminDisplayWithdrawalRequest[] = [];
           for (const reqId in userRequestsData) {
-            userRequestsList.push({
+             const request = {
               ...userRequestsData[reqId],
               userId: userId,
               originalId: reqId,
-            });
+            } as AdminDisplayWithdrawalRequest;
+            userRequestsList.push(request);
+            if (request.status === 'Pending') {
+              totalPendingCount++;
+            }
           }
           if (userRequestsList.length > 0) {
             loadedRequests.push({ userId, requests: userRequestsList.sort((a, b) => b.requestDate - a.requestDate), userEmail: userMapForWithdrawals.get(userId)?.email });
@@ -170,6 +181,7 @@ export default function AdminPage() {
         }
       }
       setAllRequests(loadedRequests.sort((a, b) => (b.requests[0]?.requestDate || 0) - (a.requests[0]?.requestDate || 0)));
+      setPendingWithdrawalCount(totalPendingCount);
 
     } catch (err) {
       console.error("Error fetching admin data:", err);
@@ -229,7 +241,7 @@ export default function AdminPage() {
       } else if (userSortCriteria === 'referredUsersCount') {
         compareA = a.referredUsersCount || 0;
         compareB = b.referredUsersCount || 0;
-      } else { // displayName
+      } else { 
         compareA = a.displayName?.toLowerCase() || '';
         compareB = b.displayName?.toLowerCase() || '';
       }
@@ -284,7 +296,7 @@ export default function AdminPage() {
       
       toast({ title: "Success", description: `Request ${requestId} has been ${newStatus.toLowerCase()}.` });
       
-      fetchData(); // Re-fetch all data to ensure consistency
+      fetchData(); 
 
     } catch (err) {
       console.error(`Error updating request ${requestId} to ${newStatus}:`, err);
@@ -393,7 +405,7 @@ export default function AdminPage() {
   const openBlockUserDialog = (user: DisplayUser) => {
     setUserToBlock(user);
     setIsBlockUserDialogOpen(true);
-    setBlockReason(user.blockReason || ''); // Pre-fill if already blocked
+    setBlockReason(user.blockReason || ''); 
   };
 
   const handleConfirmBlockUser = async () => {
@@ -408,7 +420,7 @@ export default function AdminPage() {
         blockReason: blockReason.trim(),
       });
       toast({ title: "User Blocked", description: `${userToBlock.displayName} has been blocked.` });
-      fetchData(); // Refresh user list
+      fetchData(); 
       setIsBlockUserDialogOpen(false);
       setUserToBlock(null);
       setBlockReason('');
@@ -425,11 +437,11 @@ export default function AdminPage() {
     try {
       await update(ref(database, `users/${userId}`), {
         isBlocked: false,
-        blockReason: null, // Or remove(ref(database, `users/${userId}/blockReason`))
+        blockReason: null, 
       });
       toast({ title: "User Unblocked", description: `${userName} has been unblocked.` });
-      fetchData(); // Refresh user list
-      setIsUserDetailModalOpen(false); // Close detail modal if unblocked from there
+      fetchData(); 
+      setIsUserDetailModalOpen(false); 
     } catch (error) {
       console.error("Error unblocking user:", error);
       toast({ title: "Error", description: "Could not unblock user.", variant: "destructive" });
@@ -445,25 +457,20 @@ export default function AdminPage() {
     result = result.map(userReqGroup => {
         let filteredUserRequests = [...userReqGroup.requests];
 
-        // Filter by status
         if (status !== 'all') {
             filteredUserRequests = filteredUserRequests.filter(req => req.status === status);
         }
-        // Filter by method
         if (method !== 'all') {
             filteredUserRequests = filteredUserRequests.filter(req => req.method === method);
         }
-        // Filter by dateFrom
         if (dateFrom && isValidDate(dateFrom)) {
             const fromTime = startOfDay(dateFrom).getTime();
             filteredUserRequests = filteredUserRequests.filter(req => req.requestDate >= fromTime);
         }
-        // Filter by dateTo
         if (dateTo && isValidDate(dateTo)) {
             const toTime = endOfDay(dateTo).getTime();
             filteredUserRequests = filteredUserRequests.filter(req => req.requestDate <= toTime);
         }
-        // Filter by search term
         if (searchTerm.trim()) {
             const lowerSearchTerm = searchTerm.toLowerCase();
             filteredUserRequests = filteredUserRequests.filter(req => 
@@ -474,7 +481,7 @@ export default function AdminPage() {
             );
         }
         return { ...userReqGroup, requests: filteredUserRequests };
-    }).filter(userReqGroup => userReqGroup.requests.length > 0); // Only keep users who have matching requests
+    }).filter(userReqGroup => userReqGroup.requests.length > 0); 
 
     return result;
   }, [allRequests, withdrawalFilters]);
@@ -510,7 +517,14 @@ export default function AdminPage() {
       <Tabs defaultValue="dashboard">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="dashboard"><LayoutDashboard className="mr-2 h-4 w-4" />Dashboard</TabsTrigger>
-          <TabsTrigger value="withdrawals"><CreditCard className="mr-2 h-4 w-4" />Withdrawals</TabsTrigger>
+          <TabsTrigger value="withdrawals" className="relative">
+            <CreditCard className="mr-2 h-4 w-4" />Withdrawals
+            {pendingWithdrawalCount > 0 && (
+              <Badge variant="destructive" className="absolute -top-2 -right-2 h-5 w-5 p-0 flex items-center justify-center rounded-full text-xs">
+                {pendingWithdrawalCount}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="users"><Users className="mr-2 h-4 w-4" />Users</TabsTrigger>
         </TabsList>
 
@@ -605,10 +619,10 @@ export default function AdminPage() {
                         </Select>
                     </div>
                     <div className="lg:col-span-2">
-                        <Label htmlFor="withdrawalDateFilter">Date Range</Label>
+                        <Label htmlFor="withdrawalDateFilterPopover">Date Range</Label> {/* Changed ID for Popover trigger */}
                          <Popover>
                             <PopoverTrigger asChild>
-                                <Button id="withdrawalDateFilter" variant={"outline"} className={cn("w-full justify-start text-left font-normal", !withdrawalDateRange && "text-muted-foreground")}>
+                                <Button id="withdrawalDateFilterPopover" variant={"outline"} className={cn("w-full justify-start text-left font-normal", !withdrawalDateRange && "text-muted-foreground")}>
                                     <CalendarDays className="mr-2 h-4 w-4" />
                                     {withdrawalDateRange?.from ? (withdrawalDateRange.to ? (<>{format(withdrawalDateRange.from, "LLL dd, y")} - {format(withdrawalDateRange.to, "LLL dd, y")}</>) : (format(withdrawalDateRange.from, "LLL dd, y"))) : (<span>Pick a date range</span>)}
                                 </Button>
@@ -641,22 +655,39 @@ export default function AdminPage() {
                 <CardHeader><CardTitle className="text-lg">User ID: <span className="font-mono text-sm bg-muted p-1 rounded">{userReqs.userId}</span> {userReqs.userEmail && <span className="text-xs text-muted-foreground">({userReqs.userEmail})</span>}</CardTitle></CardHeader>
                 <CardContent>
                   <Table>
-                    <TableHeader><TableRow><TableHead>Req ID</TableHead><TableHead>Date</TableHead><TableHead>Amount (₹)</TableHead><TableHead>Method</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+                    <TableHeader><TableRow><TableHead>Req ID</TableHead><TableHead>Date</TableHead><TableHead>Amount (₹)</TableHead><TableHead>Method</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
                     <TableBody>
                       {userReqs.requests.map((req) => (
-                        <TableRow key={req.originalId} onClick={() => handleWithdrawalRowClick(req)} className="cursor-pointer hover:bg-muted/50">
-                          <TableCell className="text-xs font-mono">{req.originalId.substring(0,10)}...</TableCell>
-                          <TableCell>{format(new Date(req.requestDate), "PP pp")}</TableCell>
-                          <TableCell className="font-semibold">₹{req.amount.toFixed(2)}</TableCell>
-                          <TableCell>{req.method.toUpperCase()}</TableCell>
-                          <TableCell><Badge variant="outline" className={cn("text-xs", getStatusBadgeClass(req.status))}>{req.status}</Badge></TableCell>
-                          <TableCell>
-                            {req.status === 'Pending' && (
-                              <div className="flex gap-2">
-                                <Button size="sm" variant="outline" className="text-green-600 border-green-600 hover:bg-green-50 hover:text-green-700" onClick={(e) => { e.stopPropagation(); handleApprove(req);}} disabled={processingAction === `${req.userId}_${req.originalId}`}>{processingAction === `${req.userId}_${req.originalId}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}</Button>
-                                <Button size="sm" variant="outline" className="text-red-600 border-red-600 hover:bg-red-50 hover:text-red-700" onClick={(e) => { e.stopPropagation(); openRejectDialog(req);}} disabled={processingAction === `${req.userId}_${req.originalId}`}>{processingAction === `${req.userId}_${req.originalId}` && currentRequestToProcess?.originalId !== req.originalId ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}</Button>
-                              </div>
-                            )}
+                        <TableRow key={req.originalId} > {/* Removed onClick for direct actions */}
+                          <TableCell className="text-xs font-mono" onClick={() => handleWithdrawalRowClick(req)}>{req.originalId.substring(0,10)}...</TableCell>
+                          <TableCell onClick={() => handleWithdrawalRowClick(req)}>{format(new Date(req.requestDate), "PP pp")}</TableCell>
+                          <TableCell className="font-semibold" onClick={() => handleWithdrawalRowClick(req)}>₹{req.amount.toFixed(2)}</TableCell>
+                          <TableCell onClick={() => handleWithdrawalRowClick(req)}>{req.method.toUpperCase()}</TableCell>
+                          <TableCell onClick={() => handleWithdrawalRowClick(req)}><Badge variant="outline" className={cn("text-xs", getStatusBadgeClass(req.status))}>{req.status}</Badge></TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                  <EllipsisVertical className="h-4 w-4" />
+                                  <span className="sr-only">Actions</span>
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleWithdrawalRowClick(req)}>
+                                  <Info className="mr-2 h-4 w-4" /> View Details
+                                </DropdownMenuItem>
+                                {req.status === 'Pending' && (
+                                  <>
+                                  <DropdownMenuItem onClick={() => handleApprove(req)} disabled={processingAction === `${req.userId}_${req.originalId}`} className="text-green-600 focus:bg-green-50 focus:text-green-700">
+                                    {processingAction === `${req.userId}_${req.originalId}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />} Approve
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => openRejectDialog(req)} disabled={processingAction === `${req.userId}_${req.originalId}`} className="text-red-600 focus:bg-red-50 focus:text-red-700">
+                                    {processingAction === `${req.userId}_${req.originalId}` && currentRequestToProcess?.originalId !== req.originalId ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />} Reject
+                                  </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -835,4 +866,3 @@ export default function AdminPage() {
     </div>
   );
 }
-

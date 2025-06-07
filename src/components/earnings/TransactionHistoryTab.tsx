@@ -1,17 +1,17 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react'; // Added useMemo
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar as CalendarIcon, Filter, AlertTriangle, Loader2, Info } from "lucide-react";
+import { Calendar as CalendarIcon, Filter, AlertTriangle, Loader2, Info, ChevronDown } from "lucide-react"; // Added ChevronDown
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { format, subDays } from "date-fns";
+import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from "date-fns"; // Added date-fns functions
 import type { DateRange } from "react-day-picker";
 import { cn } from '@/lib/utils';
 import { database } from '@/lib/firebase';
@@ -23,9 +23,10 @@ interface TransactionHistoryTabProps {
   authUserUid: string | null;
 }
 
+const ITEMS_PER_PAGE = 20; // Number of transactions to show per "page"
+
 export default function TransactionHistoryTab({ authUserUid }: TransactionHistoryTabProps) {
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
@@ -42,6 +43,8 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isLoadingModalDetails, setIsLoadingModalDetails] = useState(false);
 
+  // State for "Load More"
+  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
 
   useEffect(() => {
     if (!authUserUid) {
@@ -51,7 +54,6 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     const transactionsRef = ref(database, `transactions/${authUserUid}`);
     
     const listenerCallback = async (snapshot: DataSnapshot) => {
-      console.log("[TransactionHistoryTab] Transactions listener fired.");
       if (snapshot.exists()) {
         const data = snapshot.val();
         const loadedTransactions: Transaction[] = Object.keys(data)
@@ -64,8 +66,6 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
               tx.id && 
               !processedRefundsRef.current.has(tx.id)) {
             
-            console.log(`[TransactionHistoryTab] Detected rejected withdrawal to refund: ${tx.id}, Amount: ${tx.amount}`);
-            
             const refundDescriptionSuffix = `(Ref ID: ${tx.id})`;
             const alreadyRefunded = loadedTransactions.some(
                 existingTx => existingTx.description?.endsWith(refundDescriptionSuffix) && 
@@ -74,7 +74,6 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
             );
 
             if (!alreadyRefunded) {
-                console.log(`[TransactionHistoryTab] Simulating refund for ${tx.id}.`);
                 const refundAmount = Math.abs(tx.amount);
                 const refundTransactionData: Transaction = {
                     date: serverTimestamp() as number,
@@ -83,7 +82,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                     type: 'earning', 
                     status: 'Earned', 
                     notes: `Automatic refund for rejected withdrawal ${tx.id}`,
-                    withdrawalRequestId: tx.withdrawalRequestId // Carry over withdrawalRequestId if present
+                    withdrawalRequestId: tx.withdrawalRequestId 
                 };
 
                 try {
@@ -100,7 +99,6 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                     toast({ title: "Refund Error", description: "Could not process automatic refund for a rejected withdrawal.", variant: "destructive"});
                 }
             } else {
-                console.log(`[TransactionHistoryTab] Refund for ${tx.id} appears to already exist or was processed.`);
                 processedRefundsRef.current.add(tx.id); 
             }
           }
@@ -127,25 +125,32 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
 
   }, [authUserUid, toast]);
 
-  useEffect(() => {
+  const filteredTransactions = useMemo(() => {
     let currentFiltered = [...allTransactions];
 
-    if (dateRange?.from) {
-      currentFiltered = currentFiltered.filter(tx => tx.date >= dateRange.from!.getTime());
+    if (dateRange?.from && isValidDate(dateRange.from)) {
+        const fromTime = startOfDay(dateRange.from).getTime();
+        currentFiltered = currentFiltered.filter(tx => tx.date >= fromTime);
     }
-    if (dateRange?.to) {
-      const endOfDayTo = new Date(dateRange.to);
-      endOfDayTo.setHours(23, 59, 59, 999);
-      currentFiltered = currentFiltered.filter(tx => tx.date <= endOfDayTo.getTime());
+    if (dateRange?.to && isValidDate(dateRange.to)) {
+        const toTime = endOfDay(dateRange.to).getTime();
+        currentFiltered = currentFiltered.filter(tx => tx.date <= toTime);
     }
     
     if (statusFilter !== 'all') {
       currentFiltered = currentFiltered.filter(tx => tx.status.toLowerCase() === statusFilter.toLowerCase());
     }
     
-    setFilteredTransactions(currentFiltered);
+    return currentFiltered;
   }, [allTransactions, dateRange, statusFilter]);
 
+  const transactionsToDisplay = useMemo(() => {
+    return filteredTransactions.slice(0, visibleCount);
+  }, [filteredTransactions, visibleCount]);
+
+  const handleLoadMore = () => {
+    setVisibleCount(prevCount => prevCount + ITEMS_PER_PAGE);
+  };
 
   const getStatusBadgeVariant = (status: TransactionStatus): "default" | "secondary" | "destructive" | "outline" => {
     switch (status) {
@@ -176,7 +181,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
 
   const handleRowClick = async (transaction: Transaction) => {
     setSelectedTransaction(transaction);
-    setWithdrawalRequestDetails(null); // Reset previous details
+    setWithdrawalRequestDetails(null); 
     setIsDetailModalOpen(true);
 
     if (transaction.type === 'withdrawal' && transaction.withdrawalRequestId && authUserUid) {
@@ -187,11 +192,9 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
         if (snapshot.exists()) {
           setWithdrawalRequestDetails({ id: snapshot.key, ...snapshot.val() } as WithdrawalRequest);
         } else {
-          console.warn("Withdrawal request details not found for ID:", transaction.withdrawalRequestId);
           toast({ title: "Details Not Found", description: "Associated withdrawal request details could not be found.", variant: "default" });
         }
       } catch (error) {
-        console.error("Error fetching withdrawal request details:", error);
         toast({ title: "Error", description: "Could not fetch withdrawal request details.", variant: "destructive" });
       } finally {
         setIsLoadingModalDetails(false);
@@ -200,9 +203,10 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
   };
 
 
-  if (isLoading) {
-    return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  if (isLoading && !authUserUid) { // Show loader only if authUserUid is not yet available but expected
+     return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
+
 
   return (
     <div className="space-y-6">
@@ -249,7 +253,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                 />
               </PopoverContent>
             </Popover>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setVisibleCount(ITEMS_PER_PAGE); }}>
               <SelectTrigger className="w-full sm:w-[180px]">
                 <Filter className="mr-2 h-4 w-4" />
                 <SelectValue placeholder="Filter by status" />
@@ -265,7 +269,10 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
           </div>
         </CardHeader>
         <CardContent>
-          {filteredTransactions.length > 0 ? (
+          {isLoading && authUserUid ? ( // Show main loader if authUserUid is present and still loading
+             <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+           ) : transactionsToDisplay.length > 0 ? (
+            <>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -277,7 +284,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredTransactions.map((tx) => (
+                {transactionsToDisplay.map((tx) => (
                   <TableRow 
                     key={tx.id} 
                     onClick={() => handleRowClick(tx)}
@@ -298,11 +305,19 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                 ))}
               </TableBody>
             </Table>
+            {visibleCount < filteredTransactions.length && (
+                <div className="mt-6 text-center">
+                    <Button variant="outline" onClick={handleLoadMore}>
+                        <ChevronDown className="mr-2 h-4 w-4" /> Load More Transactions
+                    </Button>
+                </div>
+            )}
+            </>
           ) : (
              <div className="text-center py-10">
                 <AlertTriangle className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">No transactions found for the selected filters.</p>
-                 {allTransactions.length === 0 && <p className="text-sm text-muted-foreground mt-1">You have no transaction history yet.</p>}
+                 {allTransactions.length === 0 && !isLoading && <p className="text-sm text-muted-foreground mt-1">You have no transaction history yet.</p>}
               </div>
           )}
         </CardContent>
@@ -362,4 +377,3 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     </div>
   );
 }
-
