@@ -11,14 +11,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from '@/hooks/use-toast';
 import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2 } from 'lucide-react';
 import { database } from '@/lib/firebase';
-import { ref, push, serverTimestamp, runTransaction, get, onValue } from 'firebase/database'; // Import onValue from firebase/database
+import { ref, push, serverTimestamp, runTransaction, get, onValue } from 'firebase/database';
 import type { Transaction, WithdrawalRequest, UserProfile } from '@/lib/types';
 
 const MIN_WITHDRAWAL_AMOUNT = 50;
 
 interface WithdrawalManagementTabProps {
   authUserUid: string | null;
-  initialBalance: number; // This prop might be less relevant if we're listening in real-time
+  initialBalance: number;
 }
 
 export default function WithdrawalManagementTab({ authUserUid, initialBalance }: WithdrawalManagementTabProps) {
@@ -41,10 +41,8 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       const unsubscribe = onValue(userBalanceRef, (snapshot) => {
         setCurrentBalance(snapshot.val() || 0);
       });
-      // Cleanup subscription on component unmount
       return () => unsubscribe();
     } else {
-        // If authUserUid is not available, reset balance or use initialBalance
         setCurrentBalance(initialBalance);
     }
   }, [authUserUid, initialBalance]);
@@ -95,30 +93,30 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       amount,
       method: withdrawalMethod,
       details,
-      status: 'Pending',
+      status: 'Pending', // Status of the request itself
       requestDate: serverTimestamp() as number,
     };
 
     const transactionData: Transaction = {
       date: serverTimestamp() as number,
-      description: `Withdrawal Request (${withdrawalMethod.toUpperCase()}) - (Simulation)`,
-      amount: -amount, // Representing a debit
+      description: `Withdrawal Request via ${withdrawalMethod.toUpperCase()}`,
+      amount: -amount, // Negative to signify a debit from potential perspective
       type: 'withdrawal',
-      status: 'Pending',
+      status: 'Pending', // Status of the transaction record
+      notes: `Method: ${withdrawalMethod.toUpperCase()}`,
     };
 
     try {
-      const withdrawalRequestsRef = ref(database, `withdrawalRequests/${authUserUid}`);
-      await push(withdrawalRequestsRef, withdrawalRequestData);
+      const newWithdrawalRequestRef = push(ref(database, `withdrawalRequests/${authUserUid}`), withdrawalRequestData);
+      transactionData.notes = `Ref ID: ${newWithdrawalRequestRef.key}. Method: ${withdrawalMethod.toUpperCase()}`;
 
       const transactionsRef = ref(database, `transactions/${authUserUid}`);
       await push(transactionsRef, transactionData);
       
-      // Important: For a real app, deducting from totalEarnings upon request is complex.
-      // This should ideally be handled server-side or via Cloud Functions upon approval.
-      // The client-side balance is updated by the onValue listener to the actual totalEarnings.
+      // Balance is NOT debited here. It's updated via onValue listener to actual totalEarnings.
+      // An admin would approve the request and then adjust totalEarnings via a backend process.
 
-      toast({ title: "Withdrawal Requested (Simulation)", description: `Your request to withdraw ₹${amount} is pending. This is a simulation.`, variant: "default" });
+      toast({ title: "Withdrawal Requested (Simulation)", description: `Your request to withdraw ₹${amount} via ${withdrawalMethod.toUpperCase()} is pending. This is a simulation.`, variant: "default" });
       setWithdrawalAmount('');
       setWithdrawalMethod('');
       setUpiId('');
@@ -141,7 +139,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           <CardTitle className="text-xl font-semibold flex items-center">
             <Banknote className="mr-2 h-5 w-5 text-primary" /> Current Available Balance
           </CardTitle>
-           <CardDescription>This balance is fetched in real-time from your user profile.</CardDescription>
+           <CardDescription>This balance reflects your total confirmed earnings.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-baseline justify-between">
           <p className="text-4xl font-bold text-foreground">₹{currentBalance.toFixed(2)}</p>
@@ -251,8 +249,8 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         </CardContent>
       </Card>
        <p className="text-xs text-muted-foreground text-center mt-4">
-        Developer Note: This withdrawal system is a UI prototype. Real financial transactions, balance deductions, and request processing
-        would require a secure backend implementation (e.g., Firebase Cloud Functions) and integration with payment gateways.
+        Developer Note: This withdrawal system is a UI prototype. Real financial transactions and request processing
+        would require a secure backend implementation (e.g., Firebase Cloud Functions) and integration with payment gateways. Balance displayed is total earnings.
       </p>
     </div>
   );

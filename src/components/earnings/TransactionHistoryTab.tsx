@@ -14,7 +14,7 @@ import { format, subDays, parseISO } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from '@/lib/utils';
 import { database } from '@/lib/firebase';
-import { ref, get, query /* Removed orderByChild */ } from 'firebase/database';
+import { ref, get, query } from 'firebase/database';
 import type { Transaction, TransactionStatus } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -32,7 +32,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     from: subDays(new Date(), 30),
     to: new Date(),
   });
-  const [statusFilter, setStatusFilter] = useState<string>('all'); // 'all', 'earned', 'pending', 'approved', 'rejected'
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
   useEffect(() => {
     if (!authUserUid) {
@@ -40,15 +40,14 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
       return;
     }
     const transactionsRef = ref(database, `transactions/${authUserUid}`);
-    // Removed orderByChild('date') from the query. Client-side sort will handle ordering.
     get(query(transactionsRef)).then((snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
         const loadedTransactions: Transaction[] = Object.keys(data)
           .map(key => ({ id: key, ...data[key] }))
-          .sort((a, b) => b.date - a.date); // Sort descending by date (client-side)
+          .sort((a, b) => b.date - a.date); 
         setAllTransactions(loadedTransactions);
-        setFilteredTransactions(loadedTransactions); // Initially show all
+        setFilteredTransactions(loadedTransactions); 
       } else {
         setAllTransactions([]);
         setFilteredTransactions([]);
@@ -64,18 +63,15 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
   useEffect(() => {
     let currentFiltered = [...allTransactions];
 
-    // Filter by date
     if (dateRange?.from) {
       currentFiltered = currentFiltered.filter(tx => tx.date >= dateRange.from!.getTime());
     }
     if (dateRange?.to) {
-       // Set to to end of day for inclusive range
       const endOfDayTo = new Date(dateRange.to);
       endOfDayTo.setHours(23, 59, 59, 999);
       currentFiltered = currentFiltered.filter(tx => tx.date <= endOfDayTo.getTime());
     }
     
-    // Filter by status
     if (statusFilter !== 'all') {
       currentFiltered = currentFiltered.filter(tx => tx.status.toLowerCase() === statusFilter.toLowerCase());
     }
@@ -107,7 +103,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
       case 'Rejected':
         return 'bg-red-100 text-red-700 border-red-300';
       default:
-        return '';
+        return 'bg-muted text-muted-foreground border-border';
     }
   };
 
@@ -168,7 +164,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="earned">Earned</SelectItem>
+                <SelectItem value="earned">Earned (Referral)</SelectItem>
                 <SelectItem value="pending">Pending (Withdrawal)</SelectItem>
                 <SelectItem value="approved">Approved (Withdrawal)</SelectItem>
                 <SelectItem value="rejected">Rejected (Withdrawal)</SelectItem>
@@ -185,7 +181,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                   <TableHead>Description</TableHead>
                   <TableHead className="text-right">Amount (₹)</TableHead>
                   <TableHead className="text-center">Status</TableHead>
-                  <TableHead>Notes</TableHead>
+                  <TableHead>Notes/Ref ID</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -218,4 +214,3 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     </div>
   );
 }
-

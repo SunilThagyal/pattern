@@ -52,6 +52,7 @@ export interface Room {
   usedWords?: string[];
   createdAt: number;
   aiSketchDataUri?: string | null;
+  lastRoundScoreChanges?: { [playerId: string]: number };
 }
 
 export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameState' | 'createdAt' | 'config' | 'currentRoundNumber'> & {
@@ -60,8 +61,9 @@ export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameSta
   selectableWords?: string[];
   usedWords?: string[];
   wordSelectionEndsAt?: null;
-  roundStartedAt?: null; // Added for consistency
+  roundStartedAt?: null;
   aiSketchDataUri?: null;
+  lastRoundScoreChanges?: null;
 };
 
 // New types for global user data and earnings
@@ -89,7 +91,7 @@ export interface Transaction {
   id?: string; // Will be the key from Firebase push
   date: number; // Timestamp
   description: string;
-  amount: number; // Positive for earnings, negative for withdrawals
+  amount: number; // Positive for earnings, typically negative or handled as debit for withdrawals
   type: TransactionType;
   status: TransactionStatus;
   notes?: string;
@@ -101,9 +103,8 @@ export interface WithdrawalRequest {
   amount: number;
   method: 'upi' | 'paytm' | 'bank';
   details: Record<string, string>; // e.g., { upiId: '...' } or { accountNumber: '...', ifsc: '...' }
-  status: 'Pending' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'Approved' | 'Rejected'; // Status of the withdrawal request itself
   requestDate: number; // Timestamp
   processedDate?: number; // Timestamp
   adminNotes?: string;
 }
-
