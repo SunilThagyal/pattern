@@ -8,6 +8,7 @@ import type { WithdrawalRequest, TransactionStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input'; // For rejection reason
 import { Textarea } from '@/components/ui/textarea'; // For rejection reason
+import { Label } from '@/components/ui/label'; // Added import
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
