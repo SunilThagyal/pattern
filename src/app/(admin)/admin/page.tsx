@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { database } from '@/lib/firebase';
 import { ref, get, update, serverTimestamp } from 'firebase/database';
-import type { WithdrawalRequest, TransactionStatus, UserProfile, DisplayUser, ReferralEntry, DisplayWithdrawalRequest as AdminDisplayWithdrawalRequest, Transaction, AdminDashboardStats } from '@/lib/types';
+import type { WithdrawalRequest, TransactionStatus, UserProfile, DisplayUser, ReferralEntry, AdminDisplayWithdrawalRequest, Transaction, AdminDashboardStats } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -55,7 +55,7 @@ export default function AdminPage() {
   const [isUserDetailModalOpen, setIsUserDetailModalOpen] = useState(false);
   const [selectedUserReferrals, setSelectedUserReferrals] = useState<ReferralEntry[]>([]);
   const [isLoadingUserReferrals, setIsLoadingUserReferrals] = useState(false);
-  const [userSortCriteria, setUserSortCriteria] = useState<'totalEarnings' | 'referredUsersCount' | 'displayName'>('displayName');
+  const [userSortCriteria, setUserSortCriteria] = useState<'grossLifetimeEarnings' | 'referredUsersCount' | 'displayName'>('displayName');
   const [userSortOrder, setUserSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedUserTransactions, setSelectedUserTransactions] = useState<Transaction[]>([]);
   const [isLoadingUserTransactions, setIsLoadingUserTransactions] = useState(false);
@@ -105,21 +105,48 @@ export default function AdminPage() {
       }
       setAllRequests(loadedRequests.sort((a, b) => (b.requests[0]?.requestDate || 0) - (a.requests[0]?.requestDate || 0)));
 
-      // Fetch Users
+      // Fetch Users and Their Gross Lifetime Earnings
       const usersRef = ref(database, 'users');
       const usersSnapshot = await get(usersRef);
       let fetchedUsers: DisplayUser[] = [];
+
+      const allTransactionsRef = ref(database, 'transactions');
+      const allTransactionsSnapshot = await get(allTransactionsRef);
+      const userTransactionsMap = new Map<string, Transaction[]>();
+
+      if (allTransactionsSnapshot.exists()) {
+        const allTransactionsData = allTransactionsSnapshot.val();
+        for (const userId in allTransactionsData) {
+          const userTxns = Object.keys(allTransactionsData[userId]).map(txId => ({
+            id: txId,
+            ...allTransactionsData[userId][txId] as Transaction,
+          }));
+          userTransactionsMap.set(userId, userTxns);
+        }
+      }
+      
       if (usersSnapshot.exists()) {
         const usersData = usersSnapshot.val();
         const loadedUsersPromises = Object.keys(usersData).map(async (userId) => {
           const userProfile = usersData[userId] as UserProfile;
+          
           const referralsRef = ref(database, `referrals/${userId}`);
           const referralsSnapshot = await get(referralsRef);
           const referredUsersCount = referralsSnapshot.exists() ? Object.keys(referralsSnapshot.val()).length : 0;
+
+          let grossLifetimeEarnings = 0;
+          const currentUserTransactions = userTransactionsMap.get(userId) || [];
+          currentUserTransactions.forEach(tx => {
+            if (tx.type === 'earning') {
+              grossLifetimeEarnings += tx.amount;
+            }
+          });
+
           return {
             ...userProfile,
             userId,
             referredUsersCount,
+            grossLifetimeEarnings,
           };
         });
         fetchedUsers = await Promise.all(loadedUsersPromises);
@@ -143,8 +170,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (!isDataLoading) {
       let filteredWithdrawals = allRequests.flatMap(ur => ur.requests);
-      let filteredUsersForEarnings = [...allUsers];
-
+      
       const now = new Date();
       let startDate: Date | null = null;
 
@@ -159,15 +185,11 @@ export default function AdminPage() {
       if (startDate) {
         const startTime = startDate.getTime();
         filteredWithdrawals = filteredWithdrawals.filter(req => req.requestDate >= startTime);
-        // For user earnings, it's typically cumulative, but if we wanted to filter users *created* in period:
-        // filteredUsersForEarnings = filteredUsersForEarnings.filter(user => user.createdAt >= startTime);
-        // However, "Total Platform Earnings" usually means overall, not just for users created in the period.
-        // So, date filter will mostly apply to time-sensitive stats like withdrawals.
       }
 
       const newStats: AdminDashboardStats = {
         totalUsers: allUsers.length,
-        totalPlatformEarnings: allUsers.reduce((sum, user) => sum + (user.totalEarnings || 0), 0),
+        totalPlatformEarnings: allUsers.reduce((sum, user) => sum + (user.grossLifetimeEarnings || 0), 0), // Use gross earnings
         totalApprovedWithdrawalsAmount: filteredWithdrawals
           .filter(req => req.status === 'Approved')
           .reduce((sum, req) => sum + req.amount, 0),
@@ -183,20 +205,21 @@ export default function AdminPage() {
   const sortedUsers = useMemo(() => {
     return [...allUsers].sort((a, b) => {
       let compareA, compareB;
-      if (userSortCriteria === 'totalEarnings') {
-        compareA = a.totalEarnings || 0;
-        compareB = b.totalEarnings || 0;
+      if (userSortCriteria === 'grossLifetimeEarnings') {
+        compareA = a.grossLifetimeEarnings || 0;
+        compareB = b.grossLifetimeEarnings || 0;
       } else if (userSortCriteria === 'referredUsersCount') {
         compareA = a.referredUsersCount || 0;
         compareB = b.referredUsersCount || 0;
-      } else {
+      } else { // displayName
         compareA = a.displayName?.toLowerCase() || '';
         compareB = b.displayName?.toLowerCase() || '';
       }
+
       if (userSortOrder === 'asc') {
-        return typeof compareA === 'string' ? compareA.localeCompare(compareB as string) : (compareA as number) - (compareB as number);
+        return typeof compareA === 'string' ? (compareA as string).localeCompare(compareB as string) : (compareA as number) - (compareB as number);
       } else {
-        return typeof compareB === 'string' ? compareB.localeCompare(compareA as string) : (compareB as number) - (compareA as number);
+        return typeof compareB === 'string' ? (compareB as string).localeCompare(compareA as string) : (compareB as number) - (compareA as number);
       }
     });
   }, [allUsers, userSortCriteria, userSortOrder]);
@@ -291,9 +314,11 @@ export default function AdminPage() {
     }
   };
 
- const getStatusBadgeClass = (status: WithdrawalRequest['status']): string => {
+ const getStatusBadgeClass = (status: WithdrawalRequest['status'] | TransactionStatus): string => {
     switch (status) {
-      case 'Approved': return 'bg-green-100 text-green-700 border-green-300';
+      case 'Approved': 
+      case 'Earned':
+        return 'bg-green-100 text-green-700 border-green-300';
       case 'Pending': return 'bg-yellow-100 text-yellow-700 border-yellow-300';
       case 'Rejected': return 'bg-red-100 text-red-700 border-red-300';
       default: return 'bg-muted text-muted-foreground border-border';
@@ -341,10 +366,9 @@ export default function AdminPage() {
       }
       setSelectedUserTransactions(loadedTransactions);
       
-      // Calculate total withdrawn for this user
       const totalWithdrawn = loadedTransactions
         .filter(tx => tx.type === 'withdrawal' && tx.status === 'Approved')
-        .reduce((sum, tx) => sum + Math.abs(tx.amount), 0); // Sum absolute amounts
+        .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
         
       setSelectedUserForModal(prevUser => prevUser ? {...prevUser, totalWithdrawn } : null);
 
@@ -423,7 +447,7 @@ export default function AdminPage() {
                 <CardContent><div className="text-2xl font-bold">{dashboardStats.totalUsers}</div></CardContent>
               </Card>
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><CircleDollarSign className="mr-2 h-4 w-4"/>Total Platform Earnings</CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><CircleDollarSign className="mr-2 h-4 w-4"/>Total Platform Gross Earnings</CardTitle></CardHeader>
                 <CardContent><div className="text-2xl font-bold">₹{dashboardStats.totalPlatformEarnings.toFixed(2)}</div></CardContent>
               </Card>
               <Card>
@@ -500,8 +524,12 @@ export default function AdminPage() {
           <div className="mb-4 flex items-center gap-4">
             <Label htmlFor="userSort" className="text-sm">Sort Users By:</Label>
             <Select value={userSortCriteria} onValueChange={(value) => setUserSortCriteria(value as any)}>
-                <SelectTrigger className="w-[200px]"><SelectValue placeholder="Select criteria" /></SelectTrigger>
-                <SelectContent><SelectItem value="displayName">Display Name</SelectItem><SelectItem value="totalEarnings">Total Earnings</SelectItem><SelectItem value="referredUsersCount">Number of Referrals</SelectItem></SelectContent>
+                <SelectTrigger className="w-[240px]"><SelectValue placeholder="Select criteria" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="displayName">Display Name</SelectItem>
+                  <SelectItem value="grossLifetimeEarnings">Gross Lifetime Earnings</SelectItem>
+                  <SelectItem value="referredUsersCount">Number of Referrals</SelectItem>
+                </SelectContent>
             </Select>
             <Button variant="outline" size="icon" onClick={toggleUserSortOrder} title={`Sort ${userSortOrder === 'asc' ? 'Descending' : 'Ascending'}`}>{userSortOrder === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}</Button>
           </div>
@@ -514,13 +542,23 @@ export default function AdminPage() {
           ) : (
             <Card><CardContent className="pt-6">
                   <Table>
-                    <TableHeader><TableRow><TableHead>User ID</TableHead><TableHead>Display Name</TableHead><TableHead>Email</TableHead><TableHead className="text-right">Total Earnings (₹)</TableHead><TableHead className="text-center">Referrals Made</TableHead></TableRow></TableHeader>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>User ID</TableHead>
+                        <TableHead>Display Name</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead className="text-right">Gross Lifetime Earnings (₹)</TableHead>
+                        <TableHead className="text-right">Current Balance (₹)</TableHead>
+                        <TableHead className="text-center">Referrals Made</TableHead>
+                      </TableRow>
+                    </TableHeader>
                     <TableBody>
                       {sortedUsers.map((user) => (
                         <TableRow key={user.userId} onClick={() => handleUserRowClick(user)} className="cursor-pointer hover:bg-muted/50">
                           <TableCell className="text-xs font-mono">{user.userId.substring(0,10)}...</TableCell>
                           <TableCell className="font-medium">{user.displayName}</TableCell>
                           <TableCell>{user.email || 'N/A'}</TableCell>
+                          <TableCell className="text-right font-semibold">₹{(user.grossLifetimeEarnings || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right font-semibold">₹{(user.totalEarnings || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-center">{user.referredUsersCount}</TableCell>
                         </TableRow>
@@ -569,9 +607,9 @@ export default function AdminPage() {
                         <div><strong>Email:</strong> {selectedUserForModal.email || 'N/A'}</div>
                         <div><strong>Account Created:</strong> {format(new Date(selectedUserForModal.createdAt), "PPP ppp")}</div>
                         <div><strong>Short Referral Code:</strong> <span className="font-mono text-primary">{selectedUserForModal.shortReferralCode || 'N/A'}</span></div>
-                        <div><strong>Total Earnings (Current):</strong> <span className="font-semibold text-green-600">₹{(selectedUserForModal.totalEarnings || 0).toFixed(2)}</span></div>
-                         {isLoadingUserTransactions ? <Loader2 className="h-4 w-4 animate-spin" /> : <div><strong>Total Withdrawn (Approved):</strong> <span className="font-semibold text-red-600">₹{(selectedUserForModal.totalWithdrawn || 0).toFixed(2)}</span></div>}
-                        <div><strong>Effective Available Balance:</strong> <span className="font-semibold text-blue-600">₹{((selectedUserForModal.totalEarnings || 0) - (selectedUserForModal.totalWithdrawn || 0)).toFixed(2)}</span></div>
+                        <div><strong>Gross Lifetime Earnings:</strong> <span className="font-semibold text-green-600">₹{(selectedUserForModal.grossLifetimeEarnings || 0).toFixed(2)}</span></div>
+                        {isLoadingUserTransactions ? <Loader2 className="h-4 w-4 animate-spin" /> : <div><strong>Total Withdrawn (Approved):</strong> <span className="font-semibold text-red-600">₹{(selectedUserForModal.totalWithdrawn || 0).toFixed(2)}</span></div>}
+                        <div><strong>Current Available Balance:</strong> <span className="font-semibold text-blue-600">₹{(selectedUserForModal.totalEarnings || 0).toFixed(2)}</span></div>
                         {selectedUserForModal.referredBy && <div><strong>Referred By User ID:</strong> <span className="font-mono">{selectedUserForModal.referredBy}</span></div>}
                     </CardContent>
                 </Card>
@@ -602,10 +640,3 @@ export default function AdminPage() {
     </div>
   );
 }
-
-// Note on Dashboard Graphs:
-// Implementing dynamic, performant graphs from raw client-side data is complex.
-// For a production admin panel, data for graphs would typically be pre-aggregated
-// by a backend system (e.g., Firebase Cloud Functions) and stored in a way
-// that's easy to query for charting. The placeholders above indicate where such
-// charts would go.

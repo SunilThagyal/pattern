@@ -73,7 +73,7 @@ export interface UserProfile {
   email?: string;
   referralCode: string; // This is their own userId (kept for potential internal use)
   shortReferralCode?: string; // The new 5-character shareable code
-  totalEarnings: number;
+  totalEarnings: number; // Represents current available balance (after withdrawals are deducted)
   referredBy?: string | null; // UID of the user who referred them
   createdAt: number;
 }
@@ -82,6 +82,7 @@ export interface UserProfile {
 export interface DisplayUser extends UserProfile {
   referredUsersCount: number; // Calculated client-side
   totalWithdrawn?: number; // Calculated client-side for user detail modal
+  grossLifetimeEarnings?: number; // Sum of all positive earning transactions
 }
 
 export interface ReferralEntry {
@@ -118,14 +119,14 @@ export interface WithdrawalRequest {
 }
 
 // For displaying withdrawal requests in admin panel (includes original ID for Firebase path)
-export interface DisplayWithdrawalRequest extends WithdrawalRequest {
+export interface AdminDisplayWithdrawalRequest extends WithdrawalRequest { // Renamed to avoid conflict if imported directly
   originalId: string; // Firebase key of the request
 }
 
+
 export interface AdminDashboardStats {
   totalUsers: number;
-  totalPlatformEarnings: number;
+  totalPlatformEarnings: number; // This will now be based on gross lifetime earnings
   totalApprovedWithdrawalsAmount: number;
   totalPendingWithdrawalsAmount: number;
-  // Add more stats as needed
 }
