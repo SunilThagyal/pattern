@@ -7,10 +7,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from '@/hooks/use-toast';
-import { Users, TrendingUp, Gamepad2, Gift, Copy, Loader2 } from "lucide-react";
+import { Users, TrendingUp, Gamepad2, Gift, Copy, Loader2, AlertCircle } from "lucide-react";
 import { database } from '@/lib/firebase';
-import { ref, get } from 'firebase/database';
-import type { UserProfile, ReferralEntry, Transaction } from '@/lib/types';
+import { ref, get, onValue, off } from 'firebase/database';
+import type { UserProfile, ReferralEntry, Transaction, PlatformSettings } from '@/lib/types';
 import { format, isToday, isWithinInterval, subDays, startOfDay, endOfDay } from 'date-fns';
 import { APP_NAME } from '@/lib/config';
 
@@ -20,7 +20,7 @@ interface ReferralManagementTabProps {
 }
 
 interface DisplayReferral extends ReferralEntry {
-    id: string; // This is the referredUser's UID
+    id: string; 
 }
 
 interface ReferralStats {
@@ -34,9 +34,8 @@ interface ReferralEarningsMap {
     [referredUserId: string]: number;
 }
 
-// Enhanced parser for the specific reward transaction description
 const parseRewardTransactionDescription = (description: string): { referredUserName: string; rounds: number; players: number } | null => {
-    const match = description.match(/^Reward from (.*?) \(Played (\d+) rounds? with (\d+) players?\)$/i); // Made "round" and "player" optionally plural, case-insensitive
+    const match = description.match(/^Reward from (.*?) \(Played (\d+) rounds? with (\d+) players?\)$/i); 
     if (match && match[1] && match[2] && match[3]) {
         return {
             referredUserName: match[1].trim(),
@@ -52,8 +51,6 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(true);
   const [referrals, setReferrals] = useState<DisplayReferral[]>([]);
-  // Removed transactions state as it's part of userProfile now for total earnings.
-  // We will still fetch transactions to calculate stats.
   const [referralStats, setReferralStats] = useState<ReferralStats>({
     totalReferrals: 0,
     totalEarningsFromReferrals: 0,
@@ -62,117 +59,87 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   });
   const [referralEarningsMap, setReferralEarningsMap] = useState<ReferralEarningsMap>({});
   const [shortReferralCode, setShortReferralCode] = useState<string | null>(null);
+  const [referralProgramEnabled, setReferralProgramEnabled] = useState(true);
+  const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
 
   useEffect(() => {
-    if (!authUserUid || !userProfile) {
-      console.log("[ReferralTab] AuthUserUid or UserProfile missing. Skipping fetch.", { authUserUid, userProfile });
-      setIsLoading(false);
+    const settingsRef = ref(database, 'platformSettings');
+    const listener = onValue(settingsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setReferralProgramEnabled(snapshot.val().referralProgramEnabled !== false);
+      } else {
+        setReferralProgramEnabled(true); 
+      }
+      setIsLoadingPlatformSettings(false);
+    }, (error) => {
+      console.error("Error fetching platform settings for ReferralTab:", error);
+      setReferralProgramEnabled(true); 
+      setIsLoadingPlatformSettings(false);
+    });
+    return () => off(settingsRef, 'value', listener);
+  }, []);
+
+  useEffect(() => {
+    if (!authUserUid || !userProfile || isLoadingPlatformSettings) {
+      if (!isLoadingPlatformSettings) setIsLoading(false); // Only set loading to false if platform settings are loaded
       return;
     }
 
     setIsLoading(true);
     setShortReferralCode(userProfile.shortReferralCode || null);
-    console.log("[ReferralTab] Starting data fetch for user:", authUserUid);
 
     const fetchData = async () => {
       try {
-        // Fetch referrals list (users referred by authUserUid)
         const referralsRef = ref(database, `referrals/${authUserUid}`);
         const referralsSnapshot = await get(referralsRef);
         let loadedReferrals: DisplayReferral[] = [];
         if (referralsSnapshot.exists()) {
           const referralsData = referralsSnapshot.val();
           loadedReferrals = Object.keys(referralsData).map(key => ({
-            id: key, // The key is the referredUser's UID
+            id: key, 
             ...referralsData[key]
           }));
         }
         setReferrals(loadedReferrals);
-        console.log("[ReferralTab] Loaded referrals list:", loadedReferrals);
 
-        // Fetch all transactions for the authUserUid to calculate stats
-        const transactionsRefPath = `transactions/${authUserUid}`;
-        console.log("[ReferralTab] Fetching transactions from path:", transactionsRefPath);
-        const transactionsSnapshot = await get(ref(database, transactionsRefPath));
+        const transactionsSnapshot = await get(ref(database, `transactions/${authUserUid}`));
         let loadedTransactions: Transaction[] = [];
         if (transactionsSnapshot.exists()) {
           const transactionsData = transactionsSnapshot.val();
           loadedTransactions = Object.keys(transactionsData)
             .map(key => ({ id: key, ...transactionsData[key] }))
-            .sort((a, b) => b.date - a.date); // Sort by date desc
+            .sort((a, b) => b.date - a.date); 
         }
-        console.log("[ReferralTab] Loaded transactions for calculations:", loadedTransactions);
 
-
-        // Calculate stats
         let gamesTodayCount = 0;
         const activeUserNamesLast7Days = new Set<string>();
         const newReferralEarningsMap: ReferralEarningsMap = {};
-
         const todayStart = startOfDay(new Date());
         const todayEnd = endOfDay(new Date());
-        const sevenDaysAgoStart = startOfDay(subDays(new Date(), 6)); // last 7 days including today
-
-        console.log(`[ReferralTab] Date Ranges for Stats:
-          Today: ${todayStart.toISOString()} - ${todayEnd.toISOString()}
-          Last 7 Days Start: ${sevenDaysAgoStart.toISOString()}`);
+        const sevenDaysAgoStart = startOfDay(subDays(new Date(), 6));
 
         loadedTransactions.forEach(tx => {
-          console.log(`[ReferralTab] Processing TX ID: ${tx.id}, Type: ${tx.type}, Desc: "${tx.description}", Date: ${new Date(tx.date).toISOString()}, Amount: ${tx.amount}`);
           if (tx.type === 'earning') {
             const parsedInfo = parseRewardTransactionDescription(tx.description);
-            console.log(`[ReferralTab] Parsed info for "${tx.description}":`, parsedInfo);
-
             if (parsedInfo && parsedInfo.referredUserName) {
-              const txDateValue = new Date(tx.date).getTime(); // Compare timestamps
-
-              // Games by referrals today
-              if (txDateValue >= todayStart.getTime() && txDateValue <= todayEnd.getTime()) {
-                console.log(`[ReferralTab]  ✅ TX IS TODAY. User: ${parsedInfo.referredUserName}. Incrementing gamesTodayCount.`);
-                gamesTodayCount++;
-              } else {
-                // console.log(`[ReferralTab]  ❌ TX NOT TODAY. TxDate: ${new Date(tx.date).toISOString()}`);
-              }
-
-              // Active referrals last 7 days
-              if (txDateValue >= sevenDaysAgoStart.getTime() && txDateValue <= todayEnd.getTime()) {
-                console.log(`[ReferralTab]  ✅ TX IS WITHIN LAST 7 DAYS. Adding user to Set: ${parsedInfo.referredUserName}`);
-                activeUserNamesLast7Days.add(parsedInfo.referredUserName);
-              } else {
-                // console.log(`[ReferralTab]  ❌ TX NOT WITHIN LAST 7 DAYS. TxDate: ${new Date(tx.date).toISOString()}`);
-              }
-
-              // Earnings for each referral in the main list
-              // Match by referredUserName parsed from transaction against the names in the loadedReferrals list
+              const txDateValue = new Date(tx.date).getTime();
+              if (txDateValue >= todayStart.getTime() && txDateValue <= todayEnd.getTime()) gamesTodayCount++;
+              if (txDateValue >= sevenDaysAgoStart.getTime() && txDateValue <= todayEnd.getTime()) activeUserNamesLast7Days.add(parsedInfo.referredUserName);
+              
               const matchingReferralInList = loadedReferrals.find(r => r.referredUserName === parsedInfo.referredUserName);
               if (matchingReferralInList) {
                 newReferralEarningsMap[matchingReferralInList.id] = (newReferralEarningsMap[matchingReferralInList.id] || 0) + tx.amount;
-                console.log(`[ReferralTab]  💰 Attributed ₹${tx.amount} to ${parsedInfo.referredUserName} (ID: ${matchingReferralInList.id}). Total for this user: ${newReferralEarningsMap[matchingReferralInList.id]}`);
-              } else {
-                console.warn(`[ReferralTab]  ⚠️ Could not find referred user '${parsedInfo.referredUserName}' (from TX desc) in the main 'referrals' list to attribute earnings. Tx ID: ${tx.id}`);
               }
-            } else {
-              // console.log(`[ReferralTab]  ℹ️ Transaction description did not parse as a reward: "${tx.description}"`);
             }
-          } else {
-            // console.log(`[ReferralTab]  ℹ️ Transaction type is not 'earning': ${tx.type}`);
           }
         });
         
         setReferralEarningsMap(newReferralEarningsMap);
-        console.log("[ReferralTab] Final Referral Earnings Map:", newReferralEarningsMap);
-
         setReferralStats({
           totalReferrals: loadedReferrals.length,
           totalEarningsFromReferrals: userProfile.totalEarnings || 0,
           gamesByReferralsToday: gamesTodayCount,
           activeReferralsLast7Days: activeUserNamesLast7Days.size,
-        });
-        console.log("[ReferralTab] Final Stats:", {
-            totalReferrals: loadedReferrals.length,
-            totalEarningsFromReferrals: userProfile.totalEarnings || 0,
-            gamesByReferralsToday: gamesTodayCount,
-            activeReferralsLast7Days: activeUserNamesLast7Days.size,
         });
 
       } catch (error) {
@@ -180,13 +147,19 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
         toast({ title: "Error", description: "Could not load referral dashboard data.", variant: "destructive" });
       } finally {
         setIsLoading(false);
-        console.log("[ReferralTab] Fetching and processing complete.");
       }
     };
 
-    fetchData();
+    if (referralProgramEnabled) { // Only fetch referral specific data if program is enabled
+        fetchData();
+    } else {
+        setIsLoading(false); // If program disabled, no need to load referral specifics
+        setReferrals([]);
+        setReferralEarningsMap({});
+        setReferralStats({ totalReferrals: 0, totalEarningsFromReferrals: userProfile.totalEarnings || 0, gamesByReferralsToday: 0, activeReferralsLast7Days: 0 });
+    }
 
-  }, [authUserUid, userProfile, toast]);
+  }, [authUserUid, userProfile, toast, isLoadingPlatformSettings, referralProgramEnabled]);
 
   const handleCopyReferralLink = () => {
     if (shortReferralCode && typeof window !== 'undefined') {
@@ -199,8 +172,28 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
     }
   };
 
-  if (isLoading && (!userProfile || !authUserUid)) { 
+  if (isLoading || isLoadingPlatformSettings) { 
     return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
+  }
+
+  if (!referralProgramEnabled) {
+    return (
+      <div className="space-y-6">
+        <Card className="bg-yellow-50 border border-yellow-200">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center text-yellow-700">
+              <AlertCircle className="mr-2 h-5 w-5" /> Referral Program Disabled
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-yellow-600">
+              The referral and earning program is currently disabled by the administrators. 
+              You can still view your overall transaction history and manage withdrawals if applicable.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
 
@@ -224,7 +217,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
           </CardDescription>
         </Card>
       )}
-      {!shortReferralCode && authUserUid && !isLoading && (
+      {!shortReferralCode && authUserUid && (
          <Card className="bg-muted/50 border-border">
           <CardHeader>
             <CardTitle className="text-lg flex items-center text-muted-foreground">
@@ -236,38 +229,10 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
            </CardContent>
          </Card>
       )}
-      {isLoading && (shortReferralCode === null && authUserUid) && ( 
-         <Card className="bg-muted/50 border-border">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center text-muted-foreground">
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading Your Referral Code...
-            </CardTitle>
-          </CardHeader>
-           <CardContent>
-            <p className="text-sm text-muted-foreground">Your short referral code is being prepared. Please check back shortly or try re-logging if it doesn't appear.</p>
-           </CardContent>
-         </Card>
-      )}
 
 
       <section>
         <h2 className="text-2xl font-semibold mb-4 text-foreground">Referral Summary</h2>
-        {isLoading ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {[...Array(4)].map((_,i) => (
-                    <Card key={i}>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                           <div className="h-4 bg-muted rounded w-3/4 animate-pulse"></div>
-                           <Users className="h-4 w-4 text-muted-foreground/30" />
-                        </CardHeader>
-                        <CardContent>
-                            <div className="h-8 bg-muted rounded w-1/2 animate-pulse mb-1"></div>
-                            <div className="h-3 bg-muted rounded w-full animate-pulse"></div>
-                        </CardContent>
-                    </Card>
-                ))}
-            </div>
-        ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -318,7 +283,6 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
             </CardContent>
           </Card>
         </div>
-        )}
       </section>
 
       <section>
@@ -328,17 +292,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
             <CardDescription>Users you have referred to {APP_NAME}. Earnings are calculated from completed games.</CardDescription>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
-                <div className="space-y-2">
-                    {[...Array(3)].map((_, i) => (
-                        <div key={i} className="flex justify-between items-center p-3 bg-muted rounded animate-pulse">
-                            <div className="h-5 bg-muted-foreground/20 rounded w-1/3"></div>
-                            <div className="h-5 bg-muted-foreground/20 rounded w-1/4"></div>
-                            <div className="h-5 bg-muted-foreground/20 rounded w-1/6"></div>
-                        </div>
-                    ))}
-                </div>
-            ) : referrals.length > 0 ? (
+            {referrals.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -375,4 +329,3 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
     </div>
   );
 }
-

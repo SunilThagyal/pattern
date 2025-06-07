@@ -5,7 +5,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useParams } from 'next/navigation';
 import { ref, onValue, off, update, serverTimestamp, set, child, get, runTransaction, push } from 'firebase/database';
 import { database } from '@/lib/firebase';
-import type { Room, Player, DrawingPoint, Guess, RoomConfig, UserProfile, Transaction } from '@/lib/types';
+import type { Room, Player, DrawingPoint, Guess, RoomConfig, UserProfile, Transaction, PlatformSettings } from '@/lib/types';
 import { useToast as useShadToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,7 +33,6 @@ import {
   AlertDialogFooter,
 } from "@/components/ui/alert-dialog";
 
-// Scoring Constants
 const MaxGuesserPoints = 100;
 const BaseDrawerPointsPerGuess = 50;
 const FirstGuesserBonus = 10;
@@ -415,6 +414,7 @@ const PlayerList = React.memo(({
     correctGuessersThisRound,
     isMinimized,
     setIsMinimized,
+    referralProgramEnabled,
 }: {
     players: Player[],
     currentPlayerId?: string | null,
@@ -423,6 +423,7 @@ const PlayerList = React.memo(({
     correctGuessersThisRound: string[],
     isMinimized: boolean,
     setIsMinimized: (isMinimized: boolean) => void,
+    referralProgramEnabled?: boolean;
 }) => {
     const sortedPlayers = useMemo(() => [...players].sort((a, b) => (b.score || 0) - (a.score || 0)), [players]);
 
@@ -456,7 +457,7 @@ const PlayerList = React.memo(({
                         </span>
                         <br />
                         <span className="font-normal text-gray-600">{player.score || 0} points</span>
-                        {(player.referralRewardsThisSession || 0) > 0 && (
+                        {referralProgramEnabled && (player.referralRewardsThisSession || 0) > 0 && (
                            <div className="text-xs text-yellow-600 flex items-center justify-center gap-1">
                                <Gift size={12} /> +{player.referralRewardsThisSession.toFixed(2)} bonus
                            </div>
@@ -520,12 +521,14 @@ const ChatArea = React.memo(({
     playerId,
     currentDrawerId,
     correctGuessersThisRound,
+    referralProgramEnabled,
 }: {
     guesses: Guess[],
     gameState: Room['gameState'] | undefined,
     playerId: string,
     currentDrawerId?: string | null,
     correctGuessersThisRound?: string[],
+    referralProgramEnabled?: boolean;
 }) => {
     const internalChatScrollRef = useRef<HTMLDivElement>(null);
 
@@ -560,6 +563,7 @@ const ChatArea = React.memo(({
                          messageContent = <span className="font-semibold text-orange-600">{g.playerName} left the room!</span>;
                         messageClasses = cn(messageClasses, "bg-orange-100");
                     } else if (g.text.startsWith("[[SYSTEM_REFERRAL_REWARD]]")) {
+                        if (!referralProgramEnabled) return null; // Don't show if program is off
                         const parts = g.playerName.split(" because ");
                         const rewardPart = parts[0];
                         const reasonPart = parts[1] || "";
@@ -884,6 +888,27 @@ export default function GameRoomPage() {
 
   const gameOverProcessedRef = useRef(false);
 
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true });
+  const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
+
+  useEffect(() => {
+    const settingsRef = ref(database, 'platformSettings');
+    const listener = onValue(settingsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setPlatformSettings(snapshot.val());
+      } else {
+        // Default if not set in DB, consider this the "true" default
+        setPlatformSettings({ referralProgramEnabled: true });
+      }
+      setIsLoadingPlatformSettings(false);
+    }, (error) => {
+      console.error("Error fetching platform settings for GameRoom:", error);
+      setPlatformSettings({ referralProgramEnabled: true }); // Fallback
+      setIsLoadingPlatformSettings(false);
+    });
+    return () => off(settingsRef, 'value', listener);
+  }, []);
+
 
   const playersArray = useMemo(() => {
     return room ? Object.values(room.players || {}) : [];
@@ -1131,19 +1156,17 @@ export default function GameRoomPage() {
             (currentRoomData.correctGuessersThisRound || []).includes(g.playerId)
         );
         
-        // Calculate Guesser's points for the round (for modal display)
         (currentRoomData.correctGuessersThisRound || []).forEach((guesserId, index) => {
             const guesserGuess = correctGuessesInDb.find(g => g.playerId === guesserId);
             if (guesserGuess) {
                 const guessTimeSeconds = Math.max(0, (guesserGuess.timestamp - roundStartedAt) / 1000);
                 const clampedGuessTime = Math.min(guessTimeSeconds, roundTimeLimit);
                 let pointsForThisGuesserInRound = Math.round(MaxGuesserPoints * ((roundTimeLimit - clampedGuessTime) / roundTimeLimit));
-                if (index === 0) { // First guesser bonus
+                if (index === 0) { 
                     pointsForThisGuesserInRound += FirstGuesserBonus;
                 }
                 roundScoreChanges[guesserId] = (roundScoreChanges[guesserId] || 0) + pointsForThisGuesserInRound;
 
-                // For Drawer Scoring - only count each guesser once
                 if (!uniqueCorrectGuessersForDrawerPoints.has(guesserId)) {
                     const drawerPointsFromThisGuesser = Math.round(BaseDrawerPointsPerGuess * (clampedGuessTime / roundTimeLimit));
                     totalDrawerPointsEarnedThisRound += drawerPointsFromThisGuesser;
@@ -1799,7 +1822,12 @@ export default function GameRoomPage() {
   }, []);
 
   useEffect(() => {
-    if (room?.gameState === 'game_over' && playerId === room?.hostId && room.players && room.config) {
+    if (room?.gameState === 'game_over' && 
+        playerId === room?.hostId && 
+        room.players && 
+        room.config && 
+        platformSettings.referralProgramEnabled && // Check if referral program is enabled
+        !isLoadingPlatformSettings) { // And settings have been loaded
       if (!gameOverProcessedRef.current) {
         gameOverProcessedRef.current = true;
 
@@ -1871,10 +1899,10 @@ export default function GameRoomPage() {
     } else if (room?.gameState !== 'game_over') {
       gameOverProcessedRef.current = false; 
     }
-  }, [room?.gameState, room?.players, playerId, room?.hostId, room?.config, room?.currentRoundNumber, roomId, addSystemMessage, toast]);
+  }, [room?.gameState, room?.players, playerId, room?.hostId, room?.config, room?.currentRoundNumber, roomId, addSystemMessage, toast, platformSettings.referralProgramEnabled, isLoadingPlatformSettings]);
 
 
-  if (isLoading) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl text-foreground">Loading Room...</span></div>;
+  if (isLoading || isLoadingPlatformSettings) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl text-foreground">Loading Room...</span></div>;
   if (error) return <div className="text-center text-destructive p-8 bg-destructive/10 border border-destructive/20 rounded-md h-screen flex flex-col justify-center items-center"><AlertCircle className="mx-auto h-12 w-12 mb-4" /> <h2 className="text-2xl font-semibold mb-2">Error Loading Room</h2><p>{error}</p><Button onClick={() => window.location.href = '/'} className="mt-4">Go Home</Button></div>;
   if (!room || !playerId || !playerName || !room.config) return <div className="text-center p-8 h-screen flex flex-col justify-center items-center">Room data is not available or incomplete. <Link href="/" className="text-primary hover:underline">Go Home</Link></div>;
 
@@ -1966,6 +1994,7 @@ export default function GameRoomPage() {
                 correctGuessersThisRound={room.correctGuessersThisRound || []}
                 isMinimized={isPlayerListMinimized}
                 setIsMinimized={setIsPlayerListMinimized}
+                referralProgramEnabled={platformSettings.referralProgramEnabled}
                 />
             </div>
             <div className="w-1/2 h-full">
@@ -1975,6 +2004,7 @@ export default function GameRoomPage() {
                 playerId={playerId}
                 currentDrawerId={room.currentDrawerId}
                 correctGuessersThisRound={room.correctGuessersThisRound}
+                referralProgramEnabled={platformSettings.referralProgramEnabled}
                 />
             </div>
         </div>
@@ -2103,4 +2133,3 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     }
     return finalWords.slice(0, count);
 };
-

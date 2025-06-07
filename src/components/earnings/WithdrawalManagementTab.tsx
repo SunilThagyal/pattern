@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from '@/hooks/use-toast';
-import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2 } from 'lucide-react';
+import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2, Ban } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, push, serverTimestamp, runTransaction, get, onValue, off, type DataSnapshot, update } from 'firebase/database';
 import type { Transaction, WithdrawalRequest, UserProfile } from '@/lib/types';
@@ -34,8 +34,12 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
   const [paytmNumber, setPaytmNumber] = useState('');
 
   const { toast } = useToast();
+  const [platformWithdrawalsEnabled, setPlatformWithdrawalsEnabled] = useState(true);
 
   useEffect(() => {
+    const withdrawalsEnabled = process.env.NEXT_PUBLIC_PLATFORM_WITHDRAWALS_ENABLED === 'true';
+    setPlatformWithdrawalsEnabled(withdrawalsEnabled);
+
     if (authUserUid) {
       console.log(`[WithdrawalTab] Setting up balance listener for UID: ${authUserUid}`);
       const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
@@ -69,7 +73,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
 
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authUserUid) return;
+    if (!authUserUid || !platformWithdrawalsEnabled) return;
 
     setIsWithdrawing(true);
     console.log("[WithdrawalTab] Initiating withdrawal request.");
@@ -108,8 +112,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         details = { paytmNumber: paytmNumber.trim() };
     }
 
-    // 1. Create and save the WithdrawalRequest to get its ID
-    const withdrawalRequestData: Omit<WithdrawalRequest, 'id' | 'transactionId'> = { // Omit id and transactionId initially
+    const withdrawalRequestData: Omit<WithdrawalRequest, 'id' | 'transactionId'> = { 
       userId: authUserUid,
       amount,
       method: withdrawalMethod,
@@ -127,29 +130,25 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         return;
     }
     
-    // 2. Create the Transaction, including the withdrawalRequestId
     const transactionData: Transaction = {
       date: serverTimestamp() as number,
       description: `Withdrawal Request via ${withdrawalMethod.toUpperCase()}`,
       amount: -amount, 
       type: 'withdrawal',
       status: 'Pending',
-      withdrawalRequestId: withdrawalRequestId, // Link to the withdrawal request
+      withdrawalRequestId: withdrawalRequestId, 
     };
     
     const transactionRef = push(ref(database, `transactions/${authUserUid}`), transactionData);
     const transactionId = transactionRef.key;
 
     if (!transactionId) {
-        // Potentially roll back withdrawalRequest or mark it as failed
         toast({ title: "Error", description: "Could not create transaction record. Please try again. Withdrawal request creation might need manual check.", variant: "destructive" });
         setIsWithdrawing(false);
         return;
     }
     
-    // 3. Update the WithdrawalRequest with the transactionId
     await update(ref(database, `withdrawalRequests/${authUserUid}/${withdrawalRequestId}`), { transactionId: transactionId });
-    // Also update the transaction with its own ID in notes for easier reference if needed (optional)
     await update(ref(database, `transactions/${authUserUid}/${transactionId}`), { notes: `Txn ID: ${transactionId}; Req ID: ${withdrawalRequestId}`});
 
 
@@ -196,8 +195,13 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           <p className="text-4xl font-bold text-foreground">₹{currentBalance.toFixed(2)}</p>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="lg" disabled={currentBalance < MIN_WITHDRAWAL_AMOUNT || isWithdrawing}>
-                <DollarSign className="mr-2 h-5 w-5" /> Withdraw Funds
+              <Button 
+                size="lg" 
+                disabled={currentBalance < MIN_WITHDRAWAL_AMOUNT || isWithdrawing || !platformWithdrawalsEnabled}
+                title={!platformWithdrawalsEnabled ? "Withdrawals are temporarily disabled" : (currentBalance < MIN_WITHDRAWAL_AMOUNT ? `Minimum balance of ₹${MIN_WITHDRAWAL_AMOUNT} required` : "Request a withdrawal")}
+              >
+                {!platformWithdrawalsEnabled ? <Ban className="mr-2 h-5 w-5" /> : <DollarSign className="mr-2 h-5 w-5" />}
+                {!platformWithdrawalsEnabled ? "Withdrawals Disabled" : "Withdraw Funds"}
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
@@ -274,8 +278,20 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           </Dialog>
         </CardContent>
       </Card>
+      
+      {!platformWithdrawalsEnabled && (
+         <div className="p-4 bg-orange-50 border border-orange-200 rounded-md text-orange-700 flex items-center">
+          <Ban className="mr-3 h-5 w-5 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-semibold">Withdrawals Temporarily Disabled</p>
+            <p className="text-xs">
+              Withdrawals are currently unavailable. Please check back later.
+            </p>
+          </div>
+        </div>
+      )}
 
-      {currentBalance < MIN_WITHDRAWAL_AMOUNT && (
+      {platformWithdrawalsEnabled && currentBalance < MIN_WITHDRAWAL_AMOUNT && (
         <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-700 flex items-start">
           <AlertTriangle className="mr-3 h-5 w-5 flex-shrink-0 mt-0.5" />
           <div>
@@ -300,10 +316,6 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           <p><strong>Fees:</strong> Standard transaction fees from payment processors may apply in a real system (not simulated here).</p>
         </CardContent>
       </Card>
-       <p className="text-xs text-muted-foreground text-center mt-4">
-        Developer Note: This withdrawal system updates balances on request. The refund for rejected withdrawals is simulated on the client-side.
-        Real financial processing requires a secure backend.
-      </p>
     </div>
   );
 }

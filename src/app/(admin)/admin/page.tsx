@@ -3,8 +3,8 @@
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { database } from '@/lib/firebase';
-import { ref, get, update, serverTimestamp, remove } from 'firebase/database';
-import type { WithdrawalRequest, TransactionStatus, UserProfile, DisplayUser, ReferralEntry, AdminDisplayWithdrawalRequest, Transaction, AdminDashboardStats, WithdrawalFilterCriteria } from '@/lib/types';
+import { ref, get, update, serverTimestamp, remove, set, onValue, off } from 'firebase/database';
+import type { WithdrawalRequest, TransactionStatus, UserProfile, DisplayUser, ReferralEntry, AdminDisplayWithdrawalRequest, Transaction, AdminDashboardStats, WithdrawalFilterCriteria, PlatformSettings } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical, ChevronDown } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical, ChevronDown, Settings, AlertCircleIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -28,6 +28,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Switch } from '@/components/ui/switch';
 
 interface UserWithdrawalRequests {
   userId: string;
@@ -35,11 +36,8 @@ interface UserWithdrawalRequests {
   userEmail?: string;
 }
 
-const ADMIN_EMAIL = "admin@devifyo.com";
-const ADMIN_PASSWORD = "pass@admin";
-
 type DateFilterOption = "all_time" | "today" | "last_7_days" | "last_30_days";
-const ITEMS_PER_PAGE = 10; // For admin panel lists
+const ITEMS_PER_PAGE = 10;
 
 export default function AdminPage() {
   const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(false);
@@ -49,7 +47,6 @@ export default function AdminPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isDataLoading, setIsDataLoading] = useState(true);
 
-  // Withdrawal Management State
   const [allRequests, setAllRequests] = useState<UserWithdrawalRequests[]>([]);
   const [withdrawalError, setWithdrawalError] = useState<string | null>(null);
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
@@ -69,8 +66,6 @@ export default function AdminPage() {
   const [pendingWithdrawalCount, setPendingWithdrawalCount] = useState(0);
   const [visibleWithdrawalGroupsCount, setVisibleWithdrawalGroupsCount] = useState(ITEMS_PER_PAGE);
 
-
-  // User Management State
   const [allUsers, setAllUsers] = useState<DisplayUser[]>([]);
   const [userError, setUserError] = useState<string | null>(null);
   const [selectedUserForModal, setSelectedUserForModal] = useState<DisplayUser | null>(null);
@@ -87,8 +82,6 @@ export default function AdminPage() {
   const [processingBlock, setProcessingBlock] = useState(false);
   const [visibleUsersCount, setVisibleUsersCount] = useState(ITEMS_PER_PAGE);
 
-
-  // Dashboard State
   const [dashboardStats, setDashboardStats] = useState<AdminDashboardStats>({
     totalUsers: 0,
     totalPlatformEarnings: 0,
@@ -97,7 +90,44 @@ export default function AdminPage() {
   });
   const [dashboardDateFilter, setDashboardDateFilter] = useState<DateFilterOption>("all_time");
 
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true });
+  const [isUpdatingSettings, setIsUpdatingSettings] = useState(false);
+
   const { toast } = useToast();
+
+  const ADMIN_EMAIL_ENV = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "admin@example.com";
+  const ADMIN_PASSWORD_ENV = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "password";
+
+  const fetchPlatformSettings = useCallback(async () => {
+    const settingsRef = ref(database, 'platformSettings');
+    try {
+      const snapshot = await get(settingsRef);
+      if (snapshot.exists()) {
+        setPlatformSettings(snapshot.val());
+      } else {
+        // Initialize with default if not exists
+        await set(settingsRef, { referralProgramEnabled: true });
+        setPlatformSettings({ referralProgramEnabled: true });
+      }
+    } catch (error) {
+      console.error("Error fetching platform settings:", error);
+      toast({ title: "Error", description: "Could not load platform settings.", variant: "destructive" });
+    }
+  }, [toast]);
+
+  const handleToggleReferralProgram = async (enabled: boolean) => {
+    setIsUpdatingSettings(true);
+    try {
+      await update(ref(database, 'platformSettings'), { referralProgramEnabled: enabled });
+      setPlatformSettings(prev => ({ ...prev, referralProgramEnabled: enabled }));
+      toast({ title: "Settings Updated", description: `Referral program ${enabled ? 'enabled' : 'disabled'}.` });
+    } catch (error) {
+      console.error("Error updating referral program status:", error);
+      toast({ title: "Error", description: "Could not update referral program status.", variant: "destructive" });
+    } finally {
+      setIsUpdatingSettings(false);
+    }
+  };
 
   const fetchData = useCallback(async () => {
     if (!isAuthenticatedAdmin) {
@@ -107,10 +137,12 @@ export default function AdminPage() {
     setIsDataLoading(true);
     setWithdrawalError(null);
     setUserError(null);
-    setVisibleUsersCount(ITEMS_PER_PAGE); // Reset pagination on refresh
-    setVisibleWithdrawalGroupsCount(ITEMS_PER_PAGE); // Reset pagination on refresh
+    setVisibleUsersCount(ITEMS_PER_PAGE);
+    setVisibleWithdrawalGroupsCount(ITEMS_PER_PAGE);
 
     try {
+      await fetchPlatformSettings(); // Fetch platform settings
+
       const usersRef = ref(database, 'users');
       const usersSnapshot = await get(usersRef);
       let fetchedUsers: DisplayUser[] = [];
@@ -196,7 +228,7 @@ export default function AdminPage() {
     } finally {
       setIsDataLoading(false);
     }
-  }, [isAuthenticatedAdmin, toast]);
+  }, [isAuthenticatedAdmin, toast, fetchPlatformSettings]);
 
   useEffect(() => {
     fetchData();
@@ -236,7 +268,6 @@ export default function AdminPage() {
     }
   }, [allRequests, allUsers, dashboardDateFilter, isDataLoading]);
 
-
   const sortedUsers = useMemo(() => {
     const usersToSort = [...allUsers];
     usersToSort.sort((a, b) => {
@@ -269,10 +300,9 @@ export default function AdminPage() {
     setVisibleUsersCount(prev => prev + ITEMS_PER_PAGE);
   };
 
-
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (emailInput === ADMIN_EMAIL && passwordInput === ADMIN_PASSWORD) {
+    if (emailInput === ADMIN_EMAIL_ENV && passwordInput === ADMIN_PASSWORD_ENV) {
       setIsAuthenticatedAdmin(true);
       setAuthError(null);
       sessionStorage.setItem('isAdminAuthenticated_drawly', 'true');
@@ -499,7 +529,6 @@ export default function AdminPage() {
         return { ...userReqGroup, requests: filteredUserRequests };
     }).filter(userReqGroup => userReqGroup.requests.length > 0); 
 
-    // Reset visible count for withdrawals when filters change
     setVisibleWithdrawalGroupsCount(ITEMS_PER_PAGE);
     return result;
   }, [allRequests, withdrawalFilters]);
@@ -511,7 +540,6 @@ export default function AdminPage() {
   const handleLoadMoreWithdrawalGroups = () => {
     setVisibleWithdrawalGroupsCount(prev => prev + ITEMS_PER_PAGE);
   };
-
 
   if (!isAuthenticatedAdmin) {
     return (
@@ -597,17 +625,40 @@ export default function AdminPage() {
             </div>
           )}
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Platform Settings</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-3 border rounded-md">
+                  <div>
+                    <Label htmlFor="referralProgramSwitch" className="font-medium">Referral Program</Label>
+                    <p className="text-xs text-muted-foreground">Enable or disable the user referral and earning program.</p>
+                  </div>
+                  <Switch
+                    id="referralProgramSwitch"
+                    checked={platformSettings.referralProgramEnabled}
+                    onCheckedChange={handleToggleReferralProgram}
+                    disabled={isUpdatingSettings}
+                  />
+                </div>
+                {isUpdatingSettings && <div className="text-xs text-primary flex items-center"><Loader2 className="h-3 w-3 mr-1 animate-spin"/>Updating settings...</div>}
+                 <div className="mt-2 p-3 border rounded-md bg-yellow-50 border-yellow-200">
+                    <div className="flex items-center text-yellow-700">
+                        <AlertCircleIcon className="h-5 w-5 mr-2" />
+                        <p className="text-sm font-semibold">Note on Global Settings</p>
+                    </div>
+                    <ul className="list-disc pl-5 mt-1 text-xs text-yellow-600 space-y-1">
+                        <li>Disabling "Referral Program" will stop new referral reward calculations and hide referral code displays for users.</li>
+                        <li>Platform-wide withdrawal disable/enable is managed via the <code className="bg-yellow-100 px-1 rounded">.env</code> file (<code className="bg-yellow-100 px-1 rounded">NEXT_PUBLIC_PLATFORM_WITHDRAWALS_ENABLED</code>) and requires an app restart/rebuild to take effect.</li>
+                    </ul>
+                 </div>
+              </CardContent>
+            </Card>
              <Card className="h-[300px] flex items-center justify-center">
                 <CardContent className="text-center text-muted-foreground">
                     <LayoutDashboard className="mx-auto h-12 w-12 mb-2" />
                     <p>User Signups Graph Placeholder</p>
-                    <p className="text-xs">(Chart component would go here)</p>
-                </CardContent>
-             </Card>
-             <Card className="h-[300px] flex items-center justify-center">
-                <CardContent className="text-center text-muted-foreground">
-                    <CreditCard className="mx-auto h-12 w-12 mb-2" />
-                    <p>Withdrawal Trends Placeholder</p>
                     <p className="text-xs">(Chart component would go here)</p>
                 </CardContent>
              </Card>
@@ -910,4 +961,3 @@ export default function AdminPage() {
     </div>
   );
 }
-

@@ -8,12 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus } from 'lucide-react';
+import { Loader2, LogIn, UserPlus, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database } from '@/lib/firebase';
-import { ref, set, get, serverTimestamp } from 'firebase/database';
-import type { UserProfile } from '@/lib/types';
+import { ref, set, get, serverTimestamp, onValue, off } from 'firebase/database';
+import type { UserProfile, PlatformSettings } from '@/lib/types';
 
 const GoogleIcon = () => (
   <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
@@ -61,13 +61,34 @@ export default function AuthForm({
   const router = useRouter();
   const { toast } = useToast();
 
+  const [referralProgramEnabled, setReferralProgramEnabled] = useState(true);
+  const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
+
+  useEffect(() => {
+    const settingsRef = ref(database, 'platformSettings');
+    const listener = onValue(settingsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setReferralProgramEnabled(snapshot.val().referralProgramEnabled !== false);
+      } else {
+        setReferralProgramEnabled(true);
+      }
+      setIsLoadingPlatformSettings(false);
+    }, (error) => {
+      console.error("Error fetching platform settings for AuthForm:", error);
+      setReferralProgramEnabled(true); // Fallback on error
+      setIsLoadingPlatformSettings(false);
+    });
+
+    return () => off(settingsRef, 'value', listener);
+  }, []);
+
+
   useEffect(() => {
     let codeToSet = '';
     let forceSignupModeForEffect = forceSignupFromPath;
 
     if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
       codeToSet = passedReferralCodeProp.trim().toUpperCase();
-      // If a referral code is passed (either from path or query), lean towards signup
       if (initialActionProp !== 'login') {
         forceSignupModeForEffect = true;
       }
@@ -80,7 +101,7 @@ export default function AuthForm({
     } else if (initialActionProp === 'login') {
       setIsSigningUp(false);
     } else {
-      setIsSigningUp(true); // Default
+      setIsSigningUp(true); 
     }
 
   }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
@@ -115,22 +136,24 @@ export default function AuthForm({
     try {
       if (isSigningUp) {
         let newShortReferralCode = '';
-        let codeExists = true;
-        let attempts = 0;
-        const MAX_CODE_GEN_ATTEMPTS = 10;
+        if (referralProgramEnabled) { // Only generate if program is enabled
+            let codeExists = true;
+            let attempts = 0;
+            const MAX_CODE_GEN_ATTEMPTS = 10;
 
-        while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
-            newShortReferralCode = generateShortAlphaNumericCode(5);
-            const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
-            const shortCodeSnap = await get(shortCodeMapRef);
-            codeExists = shortCodeSnap.exists();
-            attempts++;
-        }
+            while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
+                newShortReferralCode = generateShortAlphaNumericCode(5);
+                const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
+                const shortCodeSnap = await get(shortCodeMapRef);
+                codeExists = shortCodeSnap.exists();
+                attempts++;
+            }
 
-        if (codeExists) {
-            toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again later.", variant: "destructive" });
-            if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-            return;
+            if (codeExists) {
+                toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again later.", variant: "destructive" });
+                if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+                return;
+            }
         }
 
         const newUserProfile: UserProfile = {
@@ -138,60 +161,62 @@ export default function AuthForm({
           displayName: finalDisplayName,
           email: finalEmail,
           referralCode: simulatedUid, 
-          shortReferralCode: newShortReferralCode, 
+          shortReferralCode: referralProgramEnabled ? newShortReferralCode : undefined, 
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
         };
 
-        let actualReferrerUid: string | null = null;
-        const deviceOriginalReferrerUid = typeof window !== 'undefined' ? localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY) : null;
-        
-        // Use the referralCodeInput state, which has been pre-filled by the useEffect
-        const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); 
+        if (referralProgramEnabled) { // Only process referrals if program is enabled
+            let actualReferrerUid: string | null = null;
+            const deviceOriginalReferrerUid = typeof window !== 'undefined' ? localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY) : null;
+            const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); 
 
-        if (deviceOriginalReferrerUid) {
-          actualReferrerUid = deviceOriginalReferrerUid;
-          if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
-            const mapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
-            const mapSnap = await get(mapRef);
-            if (mapSnap.exists() && mapSnap.val() !== deviceOriginalReferrerUid) {
-                 toast({
-                    title: "Referral Overridden",
-                    description: "This device is already linked to a referrer. The original referral has been applied.",
-                    variant: "default"
-                 });
-            }
-          }
-        } else if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
-          const referrerMapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
-          const referrerMapSnap = await get(referrerMapRef);
-          if (referrerMapSnap.exists()) {
-            const foundReferrerUid = referrerMapSnap.val() as string;
-            if (foundReferrerUid === simulatedUid) { 
-               toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
-            } else {
-              actualReferrerUid = foundReferrerUid;
-              if (typeof window !== 'undefined') {
-                localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid);
+            if (deviceOriginalReferrerUid) {
+              actualReferrerUid = deviceOriginalReferrerUid;
+              if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
+                const mapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
+                const mapSnap = await get(mapRef);
+                if (mapSnap.exists() && mapSnap.val() !== deviceOriginalReferrerUid) {
+                     toast({
+                        title: "Referral Overridden",
+                        description: "This device is already linked to a referrer. The original referral has been applied.",
+                        variant: "default"
+                     });
+                }
               }
-              toast({title: "Referral Applied!", description: `You were successfully referred.`});
+            } else if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
+              const referrerMapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
+              const referrerMapSnap = await get(referrerMapRef);
+              if (referrerMapSnap.exists()) {
+                const foundReferrerUid = referrerMapSnap.val() as string;
+                if (foundReferrerUid === simulatedUid) { 
+                   toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
+                } else {
+                  actualReferrerUid = foundReferrerUid;
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid);
+                  }
+                  toast({title: "Referral Applied!", description: `You were successfully referred.`});
+                }
+              } else {
+                toast({ title: "Referral Code Invalid", description: "The referral code was not found. Proceeding without referral.", variant: "default" });
+              }
             }
-          } else {
-            toast({ title: "Referral Code Invalid", description: "The referral code was not found. Proceeding without referral.", variant: "default" });
-          }
-        }
 
-        if (actualReferrerUid) {
-          newUserProfile.referredBy = actualReferrerUid;
-          const referralsBranchRef = ref(database, `referrals/${actualReferrerUid}/${simulatedUid}`);
-          await set(referralsBranchRef, {
-            referredUserName: finalDisplayName,
-            timestamp: serverTimestamp() as number,
-          });
-        }
+            if (actualReferrerUid) {
+              newUserProfile.referredBy = actualReferrerUid;
+              const referralsBranchRef = ref(database, `referrals/${actualReferrerUid}/${simulatedUid}`);
+              await set(referralsBranchRef, {
+                referredUserName: finalDisplayName,
+                timestamp: serverTimestamp() as number,
+              });
+            }
+        } // End of referralProgramEnabled block
 
         await set(ref(database, `users/${simulatedUid}`), newUserProfile);
-        await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid); 
+        if (referralProgramEnabled && newShortReferralCode) {
+            await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid); 
+        }
 
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
@@ -318,8 +343,14 @@ export default function AuthForm({
                   placeholder="Enter 5-character code"
                   className="text-base py-3"
                   maxLength={5}
-                  disabled={isLoadingEmail || isLoadingGoogle} 
+                  disabled={isLoadingEmail || isLoadingGoogle || isLoadingPlatformSettings || !referralProgramEnabled} 
                 />
+                {isLoadingPlatformSettings && <p className="text-xs text-muted-foreground"><Loader2 className="h-3 w-3 mr-1 animate-spin inline-block"/>Loading referral status...</p>}
+                {!isLoadingPlatformSettings && !referralProgramEnabled && (
+                    <p className="text-xs text-yellow-600 flex items-center gap-1">
+                        <AlertCircle size={14}/> The referral program is currently disabled.
+                    </p>
+                )}
               </div>
             )}
           </CardContent>

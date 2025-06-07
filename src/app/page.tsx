@@ -4,15 +4,15 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign, Copy } from 'lucide-react';
+import { Paintbrush, Users, Zap, Loader2, UserPlus, LogIn, LogOut, Gift, DollarSign, Copy, AlertCircle } from 'lucide-react';
 import Image from 'next/image';
 import { APP_NAME } from '@/lib/config';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/hooks/use-toast';
 import { database } from '@/lib/firebase';
-import { ref, get } from 'firebase/database';
-import type { UserProfile } from '@/lib/types';
+import { ref, get, onValue, off } from 'firebase/database';
+import type { UserProfile, PlatformSettings } from '@/lib/types';
 
 
 export default function HomePage() {
@@ -26,7 +26,27 @@ export default function HomePage() {
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
   const [userUid, setUserUid] = useState<string | null>(null);
   const [shortReferralCode, setShortReferralCode] = useState<string | null>(null);
+  const [referralProgramEnabled, setReferralProgramEnabled] = useState(true);
+  const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
 
+  useEffect(() => {
+    const settingsRef = ref(database, 'platformSettings');
+    const listener = onValue(settingsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setReferralProgramEnabled(snapshot.val().referralProgramEnabled !== false); // Default to true if undefined
+      } else {
+        setReferralProgramEnabled(true); // Default if not set
+      }
+      setIsLoadingPlatformSettings(false);
+    }, (error) => {
+      console.error("Error fetching platform settings:", error);
+      setReferralProgramEnabled(true); // Fallback on error
+      setIsLoadingPlatformSettings(false);
+    });
+
+    return () => off(settingsRef, 'value', listener);
+  }, []);
+  
   useEffect(() => {
     const authStatus = localStorage.getItem('drawlyAuthStatus');
     const storedName = localStorage.getItem('drawlyUserDisplayName');
@@ -36,7 +56,6 @@ export default function HomePage() {
       setIsAuthenticated(true);
       setUserDisplayName(storedName);
       setUserUid(storedUid);
-      // Fetch shortReferralCode
       const userProfileRef = ref(database, `users/${storedUid}`);
       get(userProfileRef).then((snapshot) => {
         if (snapshot.exists()) {
@@ -94,7 +113,26 @@ export default function HomePage() {
         Unleash your inner artist! Draw, challenge your friends, and guess your way to victory in this exciting real-time multiplayer game.
       </p>
 
-      {!isAuthenticated && (
+      {isLoadingPlatformSettings ? (
+        <div className="mb-8 w-full max-w-md flex justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : !referralProgramEnabled && (
+        <Card className="mb-8 w-full max-w-md bg-yellow-50 border border-yellow-200">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-center text-xl text-yellow-700">
+                <AlertCircle className="mr-2"/> Referral Program Notice
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-yellow-600 text-center">
+              The referral and earning program is currently temporarily disabled by the administrators.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {!isAuthenticated && referralProgramEnabled && !isLoadingPlatformSettings && (
         <Card className="mb-8 w-full max-w-md bg-secondary/30">
           <CardHeader>
             <CardTitle className="flex items-center justify-center text-xl"><UserPlus className="mr-2 text-accent" /> Join {APP_NAME} &amp; Refer Friends!</CardTitle>
@@ -111,7 +149,7 @@ export default function HomePage() {
         </Card>
       )}
 
-      {isAuthenticated && userDisplayName && (
+      {isAuthenticated && userDisplayName && referralProgramEnabled && !isLoadingPlatformSettings && (
         <Card className="mb-8 w-full max-w-md bg-green-50 border border-green-200">
           <CardHeader>
             <CardTitle className="text-xl text-green-700">Welcome back, {userDisplayName}!</CardTitle>
@@ -153,6 +191,31 @@ export default function HomePage() {
           </CardContent>
         </Card>
       )}
+      
+      {isAuthenticated && userDisplayName && !referralProgramEnabled && !isLoadingPlatformSettings && (
+         <Card className="mb-8 w-full max-w-md bg-secondary/30">
+          <CardHeader>
+            <CardTitle className="text-xl">Welcome back, {userDisplayName}!</CardTitle>
+             <CardDescription>The referral program is currently disabled.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+             <Button 
+              variant="outline" 
+              size="sm" 
+              className="w-full" 
+              onClick={() => handleNavigation('/earnings', 'earnings')}
+              disabled={isNavigatingEarnings}
+            >
+              {isNavigatingEarnings ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DollarSign className="mr-2 h-4 w-4" />}
+              {isNavigatingEarnings ? 'Loading...' : 'View Earnings Dashboard'}
+            </Button>
+            <Button variant="outline" size="sm" className="w-full" onClick={handleLogout}>
+              <LogOut className="mr-2 h-4 w-4" /> Logout
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12 w-full max-w-md">
         <Button
@@ -216,4 +279,3 @@ export default function HomePage() {
     </div>
   );
 }
-

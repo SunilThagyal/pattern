@@ -1,13 +1,13 @@
 
 export interface Player {
-  id: string; // If authenticated, this is the User UID. If anonymous, this is patternPartyPlayerId.
+  id: string; 
   name: string;
   score: number;
   isOnline: boolean;
   isHost?: boolean;
-  referredByPlayerId?: string | null; // UID of the authenticated player who referred this player (set at sign-up)
-  referralRewardsThisSession?: number; // Conceptual rewards earned in this room session (visual only)
-  isAnonymous?: boolean; // Flag to indicate if the player is anonymous
+  referredByPlayerId?: string | null; 
+  referralRewardsThisSession?: number; 
+  isAnonymous?: boolean; 
 }
 
 export interface Guess {
@@ -32,9 +32,14 @@ export interface RoomConfig {
   maxWordLength: number;
 }
 
+export interface PlatformSettings {
+  referralProgramEnabled: boolean;
+  // Potentially other global settings like platformWithdrawalsEnabled (though currently handled by .env)
+}
+
 export interface Room {
   id: string;
-  hostId: string; // UID of the authenticated host, or patternPartyPlayerId if host is anonymous
+  hostId: string; 
   players: { [playerId: string]: Player };
   config: RoomConfig;
   currentDrawerId?: string | null;
@@ -45,7 +50,7 @@ export interface Room {
   drawingData: DrawingPoint[];
   gameState: 'waiting' | 'word_selection' | 'drawing' | 'round_end' | 'game_over';
   currentRoundNumber: number;
-  roundStartedAt?: number | null; // Timestamp for when the current drawing round started
+  roundStartedAt?: number | null; 
   roundEndsAt?: number | null;
   wordSelectionEndsAt?: number | null;
   correctGuessersThisRound?: string[];
@@ -66,29 +71,27 @@ export type RoomCreationData = Pick<Room, 'id' | 'hostId' | 'players' | 'gameSta
   lastRoundScoreChanges?: null;
 };
 
-// New types for global user data and earnings
 export interface UserProfile {
   userId: string;
   displayName: string;
   email?: string;
-  referralCode: string; // This is their own userId (kept for potential internal use)
-  shortReferralCode?: string; // The new 5-character shareable code
-  totalEarnings: number; // Represents current available balance (after withdrawals are deducted)
-  referredBy?: string | null; // UID of the user who referred them
+  referralCode: string; 
+  shortReferralCode?: string; 
+  totalEarnings: number; 
+  referredBy?: string | null; 
   createdAt: number;
   isBlocked?: boolean;
   blockReason?: string;
 }
 
-// For displaying in admin panel user list
 export interface DisplayUser extends UserProfile {
-  referredUsersCount: number; // Calculated client-side
-  totalWithdrawn?: number; // Calculated client-side for user detail modal
-  grossLifetimeEarnings?: number; // Sum of all positive earning transactions
+  referredUsersCount: number; 
+  totalWithdrawn?: number; 
+  grossLifetimeEarnings?: number; 
 }
 
 export interface ReferralEntry {
-  id?: string; // Firebase key
+  id?: string; 
   referredUserName: string;
   timestamp: number;
 }
@@ -97,43 +100,41 @@ export type TransactionStatus = 'Earned' | 'Pending' | 'Approved' | 'Rejected';
 export type TransactionType = 'earning' | 'withdrawal';
 
 export interface Transaction {
-  id?: string; // Will be the key from Firebase push
-  date: number; // Timestamp
+  id?: string; 
+  date: number; 
   description: string;
-  amount: number; // Positive for earnings, typically negative or handled as debit for withdrawals
+  amount: number; 
   type: TransactionType;
   status: TransactionStatus;
   notes?: string;
-  withdrawalRequestId?: string; // Link back to the withdrawal request if this transaction is a withdrawal
+  withdrawalRequestId?: string; 
 }
 
 export interface WithdrawalRequest {
-  id?: string; // Will be the key from Firebase push, or originalId in DisplayWithdrawalRequest
+  id?: string; 
   userId: string;
   amount: number;
   method: 'upi' | 'paytm' | 'bank';
-  details: Record<string, string>; // e.g., { upiId: '...' } or { accountNumber: '...', ifsc: '...' }
-  status: 'Pending' | 'Approved' | 'Rejected'; // Status of the withdrawal request itself
-  requestDate: number; // Timestamp
-  processedDate?: number; // Timestamp
-  adminNotes?: string; // For rejection reasons or other admin notes
-  transactionId?: string; // ID of the corresponding transaction in /transactions/{userId}
+  details: Record<string, string>; 
+  status: 'Pending' | 'Approved' | 'Rejected'; 
+  requestDate: number; 
+  processedDate?: number; 
+  adminNotes?: string; 
+  transactionId?: string; 
 }
 
-// For displaying withdrawal requests in admin panel (includes original ID for Firebase path)
 export interface AdminDisplayWithdrawalRequest extends WithdrawalRequest { 
-  originalId: string; // Firebase key of the request
+  originalId: string; 
 }
 
 
 export interface AdminDashboardStats {
   totalUsers: number;
-  totalPlatformEarnings: number; // This will now be based on gross lifetime earnings
+  totalPlatformEarnings: number; 
   totalApprovedWithdrawalsAmount: number;
   totalPendingWithdrawalsAmount: number;
 }
 
-// Type for withdrawal search filter
 export type WithdrawalFilterCriteria = {
     status: 'all' | 'Pending' | 'Approved' | 'Rejected';
     method: 'all' | 'upi' | 'paytm' | 'bank';
