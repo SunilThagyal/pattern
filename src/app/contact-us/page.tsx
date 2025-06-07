@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea'; // Assuming you have this component
+import { Textarea } from '@/components/ui/textarea';
 import { APP_NAME } from '@/lib/config';
 import { Mail } from 'lucide-react';
 
@@ -51,9 +51,8 @@ export default function ContactUsPage() {
           </form>
           <div className="mt-8 text-center text-muted-foreground">
             <p className="text-sm">
-              Alternatively, you can email us directly at: <a href="mailto:support@example.com" className="text-primary hover:underline">support@example.com</a>
+              Alternatively, you can email us directly at: <a href="mailto:drawly.devifyo.com" className="text-primary hover:underline">drawly.devifyo.com</a>
             </p>
-            <p className="text-xs mt-1">(Please replace with your actual support email address)</p>
           </div>
         </CardContent>
       </Card>
