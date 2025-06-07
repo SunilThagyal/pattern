@@ -6,19 +6,20 @@ import { database } from '@/lib/firebase';
 import { ref, get, update, serverTimestamp } from 'firebase/database';
 import type { WithdrawalRequest, TransactionStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input'; // For rejection reason
-import { Textarea } from '@/components/ui/textarea'; // For rejection reason
-import { Label } from '@/components/ui/label'; // Added import
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle, MessageSquare, AlertTriangle } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, ShieldAlert, Eye, EyeOff } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface DisplayWithdrawalRequest extends WithdrawalRequest {
-  originalId: string; // The key of the withdrawal request under the user's ID
+  originalId: string;
 }
 
 interface UserWithdrawalRequests {
@@ -26,7 +27,16 @@ interface UserWithdrawalRequests {
   requests: DisplayWithdrawalRequest[];
 }
 
+const ADMIN_EMAIL = "admin@devifyo.com";
+const ADMIN_PASSWORD = "pass@admin";
+
 export default function AdminPage() {
+  const [isAuthenticatedAdmin, setIsAuthenticatedAdmin] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+
   const [allRequests, setAllRequests] = useState<UserWithdrawalRequests[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +45,14 @@ export default function AdminPage() {
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
   const [currentRequestToReject, setCurrentRequestToReject] = useState<DisplayWithdrawalRequest | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
-  const [processingAction, setProcessingAction] = useState<string | null>(null); // Stores 'userId_requestId'
+  const [processingAction, setProcessingAction] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isAuthenticatedAdmin) {
+      setIsLoading(false); // Don't load requests if not authenticated
+      return;
+    }
+
     const fetchWithdrawalRequests = async () => {
       setIsLoading(true);
       setError(null);
@@ -53,15 +68,15 @@ export default function AdminPage() {
             for (const reqId in userRequestsData) {
               userRequestsList.push({
                 ...userRequestsData[reqId],
-                userId: userId, // Ensure userId is part of the request object for easy access
-                originalId: reqId, // Store the original Firebase key
+                userId: userId,
+                originalId: reqId,
               });
             }
             if (userRequestsList.length > 0) {
               loadedRequests.push({ userId, requests: userRequestsList.sort((a,b) => b.requestDate - a.requestDate) });
             }
           }
-          setAllRequests(loadedRequests.sort((a,b) => { // Sort users by most recent request first
+          setAllRequests(loadedRequests.sort((a,b) => {
             const lastReqA = a.requests[0]?.requestDate || 0;
             const lastReqB = b.requests[0]?.requestDate || 0;
             return lastReqB - lastReqA;
@@ -78,7 +93,27 @@ export default function AdminPage() {
       }
     };
     fetchWithdrawalRequests();
-  }, [toast]);
+  }, [toast, isAuthenticatedAdmin]);
+
+  const handleAdminLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (emailInput === ADMIN_EMAIL && passwordInput === ADMIN_PASSWORD) {
+      setIsAuthenticatedAdmin(true);
+      setAuthError(null);
+      sessionStorage.setItem('isAdminAuthenticated_drawly', 'true'); // Basic session persistence
+    } else {
+      setAuthError("Invalid email or password.");
+      setIsAuthenticatedAdmin(false);
+    }
+  };
+
+  useEffect(() => {
+    // Check session storage on component mount
+    if (sessionStorage.getItem('isAdminAuthenticated_drawly') === 'true') {
+      setIsAuthenticatedAdmin(true);
+    }
+  }, []);
+
 
   const updateRequestAndTransactionStatus = async (
     userId: string,
@@ -106,7 +141,6 @@ export default function AdminPage() {
       
       toast({ title: "Success", description: `Request ${requestId} has been ${newStatus.toLowerCase()}.` });
       
-      // Refresh data
       setAllRequests(prev => prev.map(userReqs => {
         if (userReqs.userId === userId) {
           return {
@@ -168,6 +202,64 @@ export default function AdminPage() {
     }
   };
 
+  if (!isAuthenticatedAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle className="text-2xl text-center">Admin Login</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700 flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5" />
+              <div>
+                <strong>Security Notice:</strong> This is a PROTOTYPE admin login.
+                It is NOT secure. Do NOT use real credentials.
+              </div>
+            </div>
+            <form onSubmit={handleAdminLogin} className="space-y-4">
+              <div>
+                <Label htmlFor="adminEmail">Email</Label>
+                <Input
+                  id="adminEmail"
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder="admin@devifyo.com"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="adminPassword">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="adminPassword"
+                    type={showPassword ? "text" : "password"}
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    placeholder="pass@admin"
+                    required
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+              {authError && <p className="text-sm text-destructive">{authError}</p>}
+              <Button type="submit" className="w-full">Login</Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
 
   if (isLoading) {
     return <div className="flex justify-center items-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
@@ -212,7 +304,7 @@ export default function AdminPage() {
                     <TableCell>{req.method.toUpperCase()}</TableCell>
                     <TableCell className="text-xs">
                       {Object.entries(req.details).map(([key, value]) => (
-                        <div key={key}><strong>{key}:</strong> {value}</div>
+                        <div key={key}><strong>{key}:</strong> {String(value)}</div>
                       ))}
                       {req.adminNotes && <div className="mt-1 text-red-600"><strong>Admin:</strong> {req.adminNotes}</div>}
                     </TableCell>
@@ -290,3 +382,5 @@ export default function AdminPage() {
     </div>
   );
 }
+
+    
