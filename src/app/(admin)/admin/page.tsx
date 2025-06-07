@@ -273,10 +273,6 @@ export default function AdminPage() {
     <div className="space-y-6">
       <h2 className="text-2xl font-semibold text-foreground">Withdrawal Requests Management</h2>
       
-       <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-700">
-        <strong>Admin Panel Note:</strong> The current access control is a basic client-side simulation. Proper security requires backend authentication, authorization (e.g., admin roles via Firebase Custom Claims), and secure database rules.
-      </div>
-
       {allRequests.length === 0 ? (
         <p className="text-muted-foreground">No withdrawal requests found.</p>
       ) : (
@@ -382,7 +378,6 @@ export default function AdminPage() {
     </div>
   );
 }
-
     
 
     
