@@ -81,10 +81,11 @@ export interface UserProfile {
 // For displaying in admin panel user list
 export interface DisplayUser extends UserProfile {
   referredUsersCount: number; // Calculated client-side
+  totalWithdrawn?: number; // Calculated client-side for user detail modal
 }
 
 export interface ReferralEntry {
-  // referredUserId: string; // Key is the referredUserId
+  id?: string; // Firebase key
   referredUserName: string;
   timestamp: number;
 }
@@ -118,5 +119,13 @@ export interface WithdrawalRequest {
 
 // For displaying withdrawal requests in admin panel (includes original ID for Firebase path)
 export interface DisplayWithdrawalRequest extends WithdrawalRequest {
-  originalId: string;
+  originalId: string; // Firebase key of the request
+}
+
+export interface AdminDashboardStats {
+  totalUsers: number;
+  totalPlatformEarnings: number;
+  totalApprovedWithdrawalsAmount: number;
+  totalPendingWithdrawalsAmount: number;
+  // Add more stats as needed
 }
