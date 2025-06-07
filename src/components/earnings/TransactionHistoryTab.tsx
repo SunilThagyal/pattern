@@ -14,7 +14,7 @@ import { format, subDays, parseISO } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from '@/lib/utils';
 import { database } from '@/lib/firebase';
-import { ref, get, query } from 'firebase/database';
+import { ref, get, query, onValue, off, type DataSnapshot } from 'firebase/database'; // Added onValue, off, DataSnapshot
 import type { Transaction, TransactionStatus } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -40,24 +40,36 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
       return;
     }
     const transactionsRef = ref(database, `transactions/${authUserUid}`);
-    get(query(transactionsRef)).then((snapshot) => {
+    
+    // Use onValue for real-time updates
+    const listenerCallback = (snapshot: DataSnapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
         const loadedTransactions: Transaction[] = Object.keys(data)
           .map(key => ({ id: key, ...data[key] }))
           .sort((a, b) => b.date - a.date); 
         setAllTransactions(loadedTransactions);
-        setFilteredTransactions(loadedTransactions); 
+        // No need to setFilteredTransactions here directly, 
+        // the next useEffect will handle it when allTransactions changes.
       } else {
         setAllTransactions([]);
-        setFilteredTransactions([]);
       }
       setIsLoading(false);
-    }).catch(error => {
-      console.error("Error fetching transactions:", error);
-      toast({ title: "Error", description: "Could not load transaction history.", variant: "destructive" });
+    };
+    
+    const errorCallback = (error: Error) => { // Error callback for onValue
+      console.error("Error fetching transactions with onValue:", error);
+      toast({ title: "Error", description: "Could not load transaction history in real-time.", variant: "destructive" });
       setIsLoading(false);
-    });
+    };
+
+    onValue(query(transactionsRef), listenerCallback, errorCallback);
+
+    // Cleanup listener on component unmount
+    return () => {
+      off(transactionsRef, 'value', listenerCallback);
+    };
+
   }, [authUserUid, toast]);
 
   useEffect(() => {
@@ -214,3 +226,5 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     </div>
   );
 }
+
+    

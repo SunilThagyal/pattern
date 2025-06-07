@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useToast } from '@/hooks/use-toast';
 import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2 } from 'lucide-react';
 import { database } from '@/lib/firebase';
-import { ref, push, serverTimestamp, runTransaction, get, onValue } from 'firebase/database';
+import { ref, push, serverTimestamp, runTransaction, get, onValue, off } from 'firebase/database'; // Added off
 import type { Transaction, WithdrawalRequest, UserProfile } from '@/lib/types';
 
 const MIN_WITHDRAWAL_AMOUNT = 50;
@@ -38,10 +38,15 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
   useEffect(() => {
     if (authUserUid) {
       const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
-      const unsubscribe = onValue(userBalanceRef, (snapshot) => {
+      const listenerCallback = (snapshot: any) => { // Explicitly type snapshot or use a more specific type if available
         setCurrentBalance(snapshot.val() || 0);
-      });
-      return () => unsubscribe();
+      };
+      onValue(userBalanceRef, listenerCallback);
+      
+      return () => {
+        // Detach the listener when the component unmounts or authUserUid changes
+        off(userBalanceRef, 'value', listenerCallback);
+      };
     } else {
         setCurrentBalance(initialBalance);
     }
@@ -93,30 +98,37 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       amount,
       method: withdrawalMethod,
       details,
-      status: 'Pending', // Status of the request itself
+      status: 'Pending', 
       requestDate: serverTimestamp() as number,
     };
 
     const transactionData: Transaction = {
       date: serverTimestamp() as number,
       description: `Withdrawal Request via ${withdrawalMethod.toUpperCase()}`,
-      amount: -amount, // Negative to signify a debit from potential perspective
+      amount: -amount, 
       type: 'withdrawal',
-      status: 'Pending', // Status of the transaction record
+      status: 'Pending', 
       notes: `Method: ${withdrawalMethod.toUpperCase()}`,
     };
 
     try {
+      // 1. Save the withdrawal request
       const newWithdrawalRequestRef = push(ref(database, `withdrawalRequests/${authUserUid}`), withdrawalRequestData);
       transactionData.notes = `Ref ID: ${newWithdrawalRequestRef.key}. Method: ${withdrawalMethod.toUpperCase()}`;
 
-      const transactionsRef = ref(database, `transactions/${authUserUid}`);
-      await push(transactionsRef, transactionData);
+      // 2. Log the transaction
+      await push(ref(database, `transactions/${authUserUid}`), transactionData);
       
-      // Balance is NOT debited here. It's updated via onValue listener to actual totalEarnings.
-      // An admin would approve the request and then adjust totalEarnings via a backend process.
+      // 3. Atomically update (decrease) the user's totalEarnings
+      const userBalanceRef = ref(database, `users/${authUserUid}/totalEarnings`);
+      await runTransaction(userBalanceRef, (currentEarnings) => {
+        if (currentEarnings === null) {
+          return -amount; // Should not happen if user has balance, but as a safeguard
+        }
+        return (currentEarnings || 0) - amount;
+      });
 
-      toast({ title: "Withdrawal Requested (Simulation)", description: `Your request to withdraw ₹${amount} via ${withdrawalMethod.toUpperCase()} is pending. This is a simulation.`, variant: "default" });
+      toast({ title: "Withdrawal Requested", description: `Your request to withdraw ₹${amount} via ${withdrawalMethod.toUpperCase()} is pending. Your balance has been updated.`, variant: "default" });
       setWithdrawalAmount('');
       setWithdrawalMethod('');
       setUpiId('');
@@ -151,10 +163,10 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle className="text-xl">Request Withdrawal (Simulation)</DialogTitle>
+                <DialogTitle className="text-xl">Request Withdrawal</DialogTitle>
                 <DialogDescription>
                   Enter the amount and select your preferred method. Minimum withdrawal: ₹{MIN_WITHDRAWAL_AMOUNT}.
-                  Withdrawal requests are simulated and not actually processed.
+                  Your balance will be updated upon request.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleWithdrawalSubmit} className="space-y-4 mt-4">
@@ -239,19 +251,22 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg font-medium">Withdrawal Instructions (Simulation)</CardTitle>
+          <CardTitle className="text-lg font-medium">Withdrawal Instructions</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
           <p><strong>Minimum Withdrawal:</strong> You can request a withdrawal once your balance reaches at least ₹{MIN_WITHDRAWAL_AMOUNT}.</p>
-          <p><strong>Processing Time:</strong> In a real system, requests are typically reviewed within 3-5 business days. This is currently a simulation.</p>
+          <p><strong>Balance Update:</strong> Your available balance will be reduced by the requested amount immediately. The request status will be 'Pending'.</p>
+          <p><strong>Processing Time:</strong> In a real system, requests are reviewed. This is a simulation.</p>
           <p><strong>Verification:</strong> For security, identity verification might be required by a real system.</p>
           <p><strong>Fees:</strong> Standard transaction fees from payment processors may apply in a real system.</p>
         </CardContent>
       </Card>
        <p className="text-xs text-muted-foreground text-center mt-4">
-        Developer Note: This withdrawal system is a UI prototype. Real financial transactions and request processing
-        would require a secure backend implementation (e.g., Firebase Cloud Functions) and integration with payment gateways. Balance displayed is total earnings.
+        Developer Note: This withdrawal system updates balances on request. Real financial processing, approvals, and rejections
+        would require a secure backend implementation.
       </p>
     </div>
   );
 }
+
+    
