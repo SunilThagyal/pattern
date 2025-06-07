@@ -78,8 +78,13 @@ export interface UserProfile {
   createdAt: number;
 }
 
+// For displaying in admin panel user list
+export interface DisplayUser extends UserProfile {
+  referredUsersCount: number; // Calculated client-side
+}
+
 export interface ReferralEntry {
-  // referredUserId: string; // No longer needed here, key is the referredUserId
+  // referredUserId: string; // Key is the referredUserId
   referredUserName: string;
   timestamp: number;
 }
@@ -99,7 +104,7 @@ export interface Transaction {
 }
 
 export interface WithdrawalRequest {
-  id?: string; // Will be the key from Firebase push
+  id?: string; // Will be the key from Firebase push, or originalId in DisplayWithdrawalRequest
   userId: string;
   amount: number;
   method: 'upi' | 'paytm' | 'bank';
@@ -111,3 +116,7 @@ export interface WithdrawalRequest {
   transactionId?: string; // ID of the corresponding transaction in /transactions/{userId}
 }
 
+// For displaying withdrawal requests in admin panel (includes original ID for Firebase path)
+export interface DisplayWithdrawalRequest extends WithdrawalRequest {
+  originalId: string;
+}
