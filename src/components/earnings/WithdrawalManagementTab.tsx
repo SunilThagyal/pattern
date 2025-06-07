@@ -49,17 +49,34 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
     const settingsRef = ref(database, 'platformSettings');
     const userProfileRef = ref(database, `users/${authUserUid}`);
 
+    let settingsDataLoaded = false;
+    let profileDataLoaded = false;
+
+    const checkIfAllInitialDataLoaded = () => {
+      if (settingsDataLoaded && profileDataLoaded) {
+        setIsLoadingSettings(false);
+      }
+    };
+
     const platformSettingsListener = onValue(settingsRef, (snapshot) => {
+        let newSettings: PlatformSettings;
         if (snapshot.exists()) {
-            setPlatformSettings(snapshot.val());
+            newSettings = snapshot.val() as PlatformSettings;
+            setPlatformSettings({
+                referralProgramEnabled: newSettings.referralProgramEnabled !== false,
+                platformWithdrawalsEnabled: newSettings.platformWithdrawalsEnabled !== false,
+            });
         } else {
-             setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
+             newSettings = { referralProgramEnabled: true, platformWithdrawalsEnabled: true };
+             setPlatformSettings(newSettings);
         }
-        checkIfDoneLoading();
+        settingsDataLoaded = true;
+        checkIfAllInitialDataLoaded();
     }, (error) => {
-        console.error("Error fetching platform settings:", error);
+        console.error("Error fetching platform settings via onValue:", error);
         setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true }); // Fallback
-        checkIfDoneLoading();
+        settingsDataLoaded = true;
+        checkIfAllInitialDataLoaded();
     });
 
     const userProfileListener = onValue(userProfileRef, (snapshot) => {
@@ -68,28 +85,19 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
             setUserProfile(profile);
             setCurrentBalance(profile.totalEarnings || 0);
         } else {
-            setUserProfile(null); // Should ideally not happen if authUserUid is valid
+            setUserProfile(null);
             setCurrentBalance(initialBalance);
         }
-        checkIfDoneLoading();
+        profileDataLoaded = true;
+        checkIfAllInitialDataLoaded();
     }, (error) => {
-        console.error("Error fetching user profile:", error);
+        console.error("Error fetching user profile via onValue:", error);
         setUserProfile(null);
         setCurrentBalance(initialBalance);
-        checkIfDoneLoading();
+        profileDataLoaded = true;
+        checkIfAllInitialDataLoaded();
     });
     
-    let settingsLoaded = false;
-    let profileLoaded = false;
-
-    const checkIfDoneLoading = () => {
-        if(settingsLoaded && profileLoaded) setIsLoadingSettings(false);
-    };
-
-    get(settingsRef).then(s => { settingsLoaded = true; if(!s.exists()) setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true }); else setPlatformSettings(s.val()); checkIfDoneLoading(); });
-    get(userProfileRef).then(p => { profileLoaded = true; if(!p.exists()) setUserProfile(null); else setUserProfile(p.val()); checkIfDoneLoading(); });
-
-
     return () => {
       off(settingsRef, 'value', platformSettingsListener);
       off(userProfileRef, 'value', userProfileListener);
@@ -206,7 +214,8 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
   const userCanWithdraw = userProfile ? userProfile.canWithdraw !== false : true; // Default to true if profile not loaded or field undefined
   const isWithdrawalDisabled = isLoadingSettings || !platformSettings.platformWithdrawalsEnabled || !userCanWithdraw;
   let disabledReason = "";
-  if (!platformSettings.platformWithdrawalsEnabled) disabledReason = "Platform withdrawals are temporarily disabled.";
+  if (isLoadingSettings) disabledReason = "Loading settings...";
+  else if (!platformSettings.platformWithdrawalsEnabled) disabledReason = "Platform withdrawals are temporarily disabled.";
   else if (!userCanWithdraw) disabledReason = "Withdrawals are currently disabled for your account.";
   else if (currentBalance < MIN_WITHDRAWAL_AMOUNT) disabledReason = `Minimum balance of ₹${MIN_WITHDRAWAL_AMOUNT} required.`;
 
@@ -234,7 +243,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                 title={disabledReason || "Request a withdrawal"}
               >
                 {!platformSettings.platformWithdrawalsEnabled || !userCanWithdraw ? <Ban className="mr-2 h-5 w-5" /> : <DollarSign className="mr-2 h-5 w-5" />}
-                {isWithdrawalDisabled ? (userCanWithdraw ? "Platform Disabled" : "Account Disabled") : "Withdraw Funds"}
+                {isWithdrawalDisabled ? (userCanWithdraw ? (platformSettings.platformWithdrawalsEnabled ? "Loading..." : "Platform Disabled") : "Account Disabled") : "Withdraw Funds"}
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
@@ -312,7 +321,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         </CardContent>
       </Card>
       
-      {isWithdrawalDisabled && (
+      {isWithdrawalDisabled && !isLoadingSettings && ( // Don't show if still loading initial settings
          <div className="p-4 bg-orange-50 border border-orange-200 rounded-md text-orange-700 flex items-center">
           <Ban className="mr-3 h-5 w-5 flex-shrink-0" />
           <div>
@@ -346,3 +355,4 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
   );
 }
 
+    
