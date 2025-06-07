@@ -520,8 +520,8 @@ export default function AdminPage() {
           <CardHeader><CardTitle className="text-2xl text-center">Admin Login</CardTitle></CardHeader>
           <CardContent>
             <form onSubmit={handleAdminLogin} className="space-y-4">
-              <div><Label htmlFor="adminEmail">Email</Label><Input id="adminEmail" type="email" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} placeholder="admin@devifyo.com" required /></div>
-              <div><Label htmlFor="adminPassword">Password</Label><div className="relative"><Input id="adminPassword" type={showPassword ? "text" : "password"} value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} placeholder="pass@admin" required /><Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button></div></div>
+              <div><Label htmlFor="adminEmail">Email</Label><Input id="adminEmail" type="email" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} placeholder="Email" required /></div>
+              <div><Label htmlFor="adminPassword">Password</Label><div className="relative"><Input id="adminPassword" type={showPassword ? "text" : "password"} value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} placeholder="Password" required /><Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7" onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button></div></div>
               {authError && <p className="text-sm text-destructive">{authError}</p>}
               <Button type="submit" className="w-full">Login</Button>
             </form>

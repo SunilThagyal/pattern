@@ -16,7 +16,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         {children}
       </main>
       <footer className="py-4 text-center text-sm text-muted-foreground border-t border-border">
-        Admin Panel Prototype. Access should be restricted in a production environment.
+        &copy; {new Date().getFullYear()} {APP_NAME} Admin.
       </footer>
     </div>
   );
