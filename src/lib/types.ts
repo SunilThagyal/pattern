@@ -76,6 +76,8 @@ export interface UserProfile {
   totalEarnings: number; // Represents current available balance (after withdrawals are deducted)
   referredBy?: string | null; // UID of the user who referred them
   createdAt: number;
+  isBlocked?: boolean;
+  blockReason?: string;
 }
 
 // For displaying in admin panel user list
@@ -119,7 +121,7 @@ export interface WithdrawalRequest {
 }
 
 // For displaying withdrawal requests in admin panel (includes original ID for Firebase path)
-export interface AdminDisplayWithdrawalRequest extends WithdrawalRequest { // Renamed to avoid conflict if imported directly
+export interface AdminDisplayWithdrawalRequest extends WithdrawalRequest { 
   originalId: string; // Firebase key of the request
 }
 
@@ -130,3 +132,12 @@ export interface AdminDashboardStats {
   totalApprovedWithdrawalsAmount: number;
   totalPendingWithdrawalsAmount: number;
 }
+
+// Type for withdrawal search filter
+export type WithdrawalFilterCriteria = {
+    status: 'all' | 'Pending' | 'Approved' | 'Rejected';
+    method: 'all' | 'upi' | 'paytm' | 'bank';
+    dateFrom?: Date | null;
+    dateTo?: Date | null;
+    searchTerm: string;
+};

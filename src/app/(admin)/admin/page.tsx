@@ -3,8 +3,8 @@
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { database } from '@/lib/firebase';
-import { ref, get, update, serverTimestamp } from 'firebase/database';
-import type { WithdrawalRequest, TransactionStatus, UserProfile, DisplayUser, ReferralEntry, AdminDisplayWithdrawalRequest, Transaction, AdminDashboardStats } from '@/lib/types';
+import { ref, get, update, serverTimestamp, remove } from 'firebase/database';
+import type { WithdrawalRequest, TransactionStatus, UserProfile, DisplayUser, ReferralEntry, AdminDisplayWithdrawalRequest, Transaction, AdminDashboardStats, WithdrawalFilterCriteria } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -12,17 +12,21 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2 } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import type { DateRange } from "react-day-picker";
 
 interface UserWithdrawalRequests {
   userId: string;
   requests: AdminDisplayWithdrawalRequest[];
+  userEmail?: string; // For searching by email
 }
 
 const ADMIN_EMAIL = "admin@devifyo.com";
@@ -42,11 +46,20 @@ export default function AdminPage() {
   const [allRequests, setAllRequests] = useState<UserWithdrawalRequests[]>([]);
   const [withdrawalError, setWithdrawalError] = useState<string | null>(null);
   const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
-  const [currentRequestToReject, setCurrentRequestToReject] = useState<AdminDisplayWithdrawalRequest | null>(null);
+  const [currentRequestToProcess, setCurrentRequestToProcess] = useState<AdminDisplayWithdrawalRequest | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [processingAction, setProcessingAction] = useState<string | null>(null);
   const [selectedWithdrawalForModal, setSelectedWithdrawalForModal] = useState<AdminDisplayWithdrawalRequest | null>(null);
   const [isWithdrawalDetailModalOpen, setIsWithdrawalDetailModalOpen] = useState(false);
+  const [withdrawalFilters, setWithdrawalFilters] = useState<WithdrawalFilterCriteria>({
+    status: 'all',
+    method: 'all',
+    dateFrom: null,
+    dateTo: null,
+    searchTerm: '',
+  });
+  const [withdrawalDateRange, setWithdrawalDateRange] = useState<DateRange | undefined>(undefined);
+
 
   // User Management State
   const [allUsers, setAllUsers] = useState<DisplayUser[]>([]);
@@ -59,6 +72,10 @@ export default function AdminPage() {
   const [userSortOrder, setUserSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedUserTransactions, setSelectedUserTransactions] = useState<Transaction[]>([]);
   const [isLoadingUserTransactions, setIsLoadingUserTransactions] = useState(false);
+  const [isBlockUserDialogOpen, setIsBlockUserDialogOpen] = useState(false);
+  const [userToBlock, setUserToBlock] = useState<DisplayUser | null>(null);
+  const [blockReason, setBlockReason] = useState('');
+  const [processingBlock, setProcessingBlock] = useState(false);
 
 
   // Dashboard State
@@ -68,7 +85,7 @@ export default function AdminPage() {
     totalApprovedWithdrawalsAmount: 0,
     totalPendingWithdrawalsAmount: 0,
   });
-  const [dateFilter, setDateFilter] = useState<DateFilterOption>("all_time");
+  const [dashboardDateFilter, setDashboardDateFilter] = useState<DateFilterOption>("all_time");
 
   const { toast } = useToast();
 
@@ -82,33 +99,10 @@ export default function AdminPage() {
     setUserError(null);
 
     try {
-      // Fetch Withdrawal Requests
-      const withdrawalRequestsRef = ref(database, 'withdrawalRequests');
-      const withdrawalSnapshot = await get(withdrawalRequestsRef);
-      const loadedRequests: UserWithdrawalRequests[] = [];
-      if (withdrawalSnapshot.exists()) {
-        const usersData = withdrawalSnapshot.val();
-        for (const userId in usersData) {
-          const userRequestsData = usersData[userId];
-          const userRequestsList: AdminDisplayWithdrawalRequest[] = [];
-          for (const reqId in userRequestsData) {
-            userRequestsList.push({
-              ...userRequestsData[reqId],
-              userId: userId,
-              originalId: reqId,
-            });
-          }
-          if (userRequestsList.length > 0) {
-            loadedRequests.push({ userId, requests: userRequestsList.sort((a, b) => b.requestDate - a.requestDate) });
-          }
-        }
-      }
-      setAllRequests(loadedRequests.sort((a, b) => (b.requests[0]?.requestDate || 0) - (a.requests[0]?.requestDate || 0)));
-
-      // Fetch Users and Their Gross Lifetime Earnings
       const usersRef = ref(database, 'users');
       const usersSnapshot = await get(usersRef);
       let fetchedUsers: DisplayUser[] = [];
+      const userMapForWithdrawals = new Map<string, { email?: string }>();
 
       const allTransactionsRef = ref(database, 'transactions');
       const allTransactionsSnapshot = await get(allTransactionsRef);
@@ -129,6 +123,7 @@ export default function AdminPage() {
         const usersData = usersSnapshot.val();
         const loadedUsersPromises = Object.keys(usersData).map(async (userId) => {
           const userProfile = usersData[userId] as UserProfile;
+          userMapForWithdrawals.set(userId, { email: userProfile.email });
           
           const referralsRef = ref(database, `referrals/${userId}`);
           const referralsSnapshot = await get(referralsRef);
@@ -153,6 +148,29 @@ export default function AdminPage() {
       }
       setAllUsers(fetchedUsers);
 
+      // Fetch Withdrawal Requests
+      const withdrawalRequestsRef = ref(database, 'withdrawalRequests');
+      const withdrawalSnapshot = await get(withdrawalRequestsRef);
+      const loadedRequests: UserWithdrawalRequests[] = [];
+      if (withdrawalSnapshot.exists()) {
+        const usersData = withdrawalSnapshot.val();
+        for (const userId in usersData) {
+          const userRequestsData = usersData[userId];
+          const userRequestsList: AdminDisplayWithdrawalRequest[] = [];
+          for (const reqId in userRequestsData) {
+            userRequestsList.push({
+              ...userRequestsData[reqId],
+              userId: userId,
+              originalId: reqId,
+            });
+          }
+          if (userRequestsList.length > 0) {
+            loadedRequests.push({ userId, requests: userRequestsList.sort((a, b) => b.requestDate - a.requestDate), userEmail: userMapForWithdrawals.get(userId)?.email });
+          }
+        }
+      }
+      setAllRequests(loadedRequests.sort((a, b) => (b.requests[0]?.requestDate || 0) - (a.requests[0]?.requestDate || 0)));
+
     } catch (err) {
       console.error("Error fetching admin data:", err);
       setWithdrawalError("Failed to load withdrawal requests.");
@@ -169,37 +187,37 @@ export default function AdminPage() {
   
   useEffect(() => {
     if (!isDataLoading) {
-      let filteredWithdrawals = allRequests.flatMap(ur => ur.requests);
+      let filteredWithdrawalsForDashboard = allRequests.flatMap(ur => ur.requests);
       
       const now = new Date();
       let startDate: Date | null = null;
 
-      if (dateFilter === "today") {
+      if (dashboardDateFilter === "today") {
         startDate = startOfDay(now);
-      } else if (dateFilter === "last_7_days") {
+      } else if (dashboardDateFilter === "last_7_days") {
         startDate = startOfDay(subDays(now, 6));
-      } else if (dateFilter === "last_30_days") {
+      } else if (dashboardDateFilter === "last_30_days") {
         startDate = startOfDay(subDays(now, 29));
       }
 
       if (startDate) {
         const startTime = startDate.getTime();
-        filteredWithdrawals = filteredWithdrawals.filter(req => req.requestDate >= startTime);
+        filteredWithdrawalsForDashboard = filteredWithdrawalsForDashboard.filter(req => req.requestDate >= startTime);
       }
 
       const newStats: AdminDashboardStats = {
         totalUsers: allUsers.length,
-        totalPlatformEarnings: allUsers.reduce((sum, user) => sum + (user.grossLifetimeEarnings || 0), 0), // Use gross earnings
-        totalApprovedWithdrawalsAmount: filteredWithdrawals
+        totalPlatformEarnings: allUsers.reduce((sum, user) => sum + (user.grossLifetimeEarnings || 0), 0),
+        totalApprovedWithdrawalsAmount: filteredWithdrawalsForDashboard
           .filter(req => req.status === 'Approved')
           .reduce((sum, req) => sum + req.amount, 0),
-        totalPendingWithdrawalsAmount: filteredWithdrawals
+        totalPendingWithdrawalsAmount: filteredWithdrawalsForDashboard
           .filter(req => req.status === 'Pending')
           .reduce((sum, req) => sum + req.amount, 0),
       };
       setDashboardStats(newStats);
     }
-  }, [allRequests, allUsers, dateFilter, isDataLoading]);
+  }, [allRequests, allUsers, dashboardDateFilter, isDataLoading]);
 
 
   const sortedUsers = useMemo(() => {
@@ -266,17 +284,7 @@ export default function AdminPage() {
       
       toast({ title: "Success", description: `Request ${requestId} has been ${newStatus.toLowerCase()}.` });
       
-      setAllRequests(prev => prev.map(userReqs => {
-        if (userReqs.userId === userId) {
-          return {
-            ...userReqs,
-            requests: userReqs.requests.map(req => 
-              req.originalId === requestId ? { ...req, status: newStatus, adminNotes: adminNotes || req.adminNotes, processedDate: Date.now() } : req
-            ).sort((a, b) => b.requestDate - a.requestDate)
-          };
-        }
-        return userReqs;
-      }).sort((a, b) => (b.requests[0]?.requestDate || 0) - (a.requests[0]?.requestDate || 0)));
+      fetchData(); // Re-fetch all data to ensure consistency
 
     } catch (err) {
       console.error(`Error updating request ${requestId} to ${newStatus}:`, err);
@@ -286,7 +294,7 @@ export default function AdminPage() {
       if (newStatus === 'Rejected') {
         setIsRejectDialogOpen(false);
         setRejectionReason('');
-        setCurrentRequestToReject(null);
+        setCurrentRequestToProcess(null);
       }
     }
   };
@@ -296,16 +304,16 @@ export default function AdminPage() {
   };
 
   const openRejectDialog = (request: AdminDisplayWithdrawalRequest) => {
-    setCurrentRequestToReject(request);
+    setCurrentRequestToProcess(request);
     setIsRejectDialogOpen(true);
   };
 
   const handleConfirmReject = () => {
-    if (currentRequestToReject && rejectionReason.trim()) {
+    if (currentRequestToProcess && rejectionReason.trim()) {
       updateRequestAndTransactionStatus(
-        currentRequestToReject.userId,
-        currentRequestToReject.originalId,
-        currentRequestToReject.transactionId,
+        currentRequestToProcess.userId,
+        currentRequestToProcess.originalId,
+        currentRequestToProcess.transactionId,
         'Rejected',
         rejectionReason.trim()
       );
@@ -339,7 +347,6 @@ export default function AdminPage() {
     setSelectedUserTransactions([]);
 
     try {
-      // Fetch referrals
       const referralsRef = ref(database, `referrals/${user.userId}`);
       const referralsSnapshot = await get(referralsRef);
       if (referralsSnapshot.exists()) {
@@ -354,7 +361,6 @@ export default function AdminPage() {
     }
 
     try {
-      // Fetch transactions
       const transactionsRef = ref(database, `transactions/${user.userId}`);
       const transactionsSnapshot = await get(transactionsRef);
       let loadedTransactions: Transaction[] = [];
@@ -383,6 +389,96 @@ export default function AdminPage() {
   const toggleUserSortOrder = () => {
     setUserSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
   };
+
+  const openBlockUserDialog = (user: DisplayUser) => {
+    setUserToBlock(user);
+    setIsBlockUserDialogOpen(true);
+    setBlockReason(user.blockReason || ''); // Pre-fill if already blocked
+  };
+
+  const handleConfirmBlockUser = async () => {
+    if (!userToBlock || !blockReason.trim()) {
+      toast({ title: "Reason Required", description: "Please provide a reason for blocking the user.", variant: "destructive" });
+      return;
+    }
+    setProcessingBlock(true);
+    try {
+      await update(ref(database, `users/${userToBlock.userId}`), {
+        isBlocked: true,
+        blockReason: blockReason.trim(),
+      });
+      toast({ title: "User Blocked", description: `${userToBlock.displayName} has been blocked.` });
+      fetchData(); // Refresh user list
+      setIsBlockUserDialogOpen(false);
+      setUserToBlock(null);
+      setBlockReason('');
+    } catch (error) {
+      console.error("Error blocking user:", error);
+      toast({ title: "Error", description: "Could not block user.", variant: "destructive" });
+    } finally {
+      setProcessingBlock(false);
+    }
+  };
+
+  const handleUnblockUser = async (userId: string, userName: string) => {
+    setProcessingBlock(true);
+    try {
+      await update(ref(database, `users/${userId}`), {
+        isBlocked: false,
+        blockReason: null, // Or remove(ref(database, `users/${userId}/blockReason`))
+      });
+      toast({ title: "User Unblocked", description: `${userName} has been unblocked.` });
+      fetchData(); // Refresh user list
+      setIsUserDetailModalOpen(false); // Close detail modal if unblocked from there
+    } catch (error) {
+      console.error("Error unblocking user:", error);
+      toast({ title: "Error", description: "Could not unblock user.", variant: "destructive" });
+    } finally {
+      setProcessingBlock(false);
+    }
+  };
+  
+  const filteredWithdrawalRequests = useMemo(() => {
+    let result = [...allRequests];
+    const { status, method, dateFrom, dateTo, searchTerm } = withdrawalFilters;
+
+    result = result.map(userReqGroup => {
+        let filteredUserRequests = [...userReqGroup.requests];
+
+        // Filter by status
+        if (status !== 'all') {
+            filteredUserRequests = filteredUserRequests.filter(req => req.status === status);
+        }
+        // Filter by method
+        if (method !== 'all') {
+            filteredUserRequests = filteredUserRequests.filter(req => req.method === method);
+        }
+        // Filter by dateFrom
+        if (dateFrom && isValidDate(dateFrom)) {
+            const fromTime = startOfDay(dateFrom).getTime();
+            filteredUserRequests = filteredUserRequests.filter(req => req.requestDate >= fromTime);
+        }
+        // Filter by dateTo
+        if (dateTo && isValidDate(dateTo)) {
+            const toTime = endOfDay(dateTo).getTime();
+            filteredUserRequests = filteredUserRequests.filter(req => req.requestDate <= toTime);
+        }
+        // Filter by search term
+        if (searchTerm.trim()) {
+            const lowerSearchTerm = searchTerm.toLowerCase();
+            filteredUserRequests = filteredUserRequests.filter(req => 
+                req.userId.toLowerCase().includes(lowerSearchTerm) ||
+                (req.transactionId && req.transactionId.toLowerCase().includes(lowerSearchTerm)) ||
+                req.originalId.toLowerCase().includes(lowerSearchTerm) ||
+                (userReqGroup.userEmail && userReqGroup.userEmail.toLowerCase().includes(lowerSearchTerm))
+            );
+        }
+        return { ...userReqGroup, requests: filteredUserRequests };
+    }).filter(userReqGroup => userReqGroup.requests.length > 0); // Only keep users who have matching requests
+
+    return result;
+  }, [allRequests, withdrawalFilters]);
+
 
   if (!isAuthenticatedAdmin) {
     return (
@@ -420,9 +516,9 @@ export default function AdminPage() {
 
         <TabsContent value="dashboard" className="mt-6">
           <div className="mb-6 flex flex-col sm:flex-row gap-2 items-center">
-            <Label htmlFor="dateFilter" className="text-sm">Filter Stats By:</Label>
-            <Select value={dateFilter} onValueChange={(value) => setDateFilter(value as DateFilterOption)}>
-              <SelectTrigger className="w-full sm:w-[200px]">
+            <Label htmlFor="dashboardDateFilter" className="text-sm">Filter Stats By:</Label>
+            <Select value={dashboardDateFilter} onValueChange={(value) => setDashboardDateFilter(value as DateFilterOption)}>
+              <SelectTrigger id="dashboardDateFilter" className="w-full sm:w-[200px]">
                 <CalendarDays className="mr-2 h-4 w-4 text-muted-foreground"/>
                 <SelectValue placeholder="Select period" />
               </SelectTrigger>
@@ -452,11 +548,11 @@ export default function AdminPage() {
               </Card>
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><TrendingUp className="mr-2 h-4 w-4 text-green-500"/>Approved Withdrawals</CardTitle></CardHeader>
-                <CardContent><div className="text-2xl font-bold text-green-600">₹{dashboardStats.totalApprovedWithdrawalsAmount.toFixed(2)}</div><p className="text-xs text-muted-foreground">({dateFilter.replace(/_/g, ' ')})</p></CardContent>
+                <CardContent><div className="text-2xl font-bold text-green-600">₹{dashboardStats.totalApprovedWithdrawalsAmount.toFixed(2)}</div><p className="text-xs text-muted-foreground">({dashboardDateFilter.replace(/_/g, ' ')})</p></CardContent>
               </Card>
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><TrendingDown className="mr-2 h-4 w-4 text-yellow-500"/>Pending Withdrawals</CardTitle></CardHeader>
-                <CardContent><div className="text-2xl font-bold text-yellow-600">₹{dashboardStats.totalPendingWithdrawalsAmount.toFixed(2)}</div><p className="text-xs text-muted-foreground">({dateFilter.replace(/_/g, ' ')})</p></CardContent>
+                <CardContent><div className="text-2xl font-bold text-yellow-600">₹{dashboardStats.totalPendingWithdrawalsAmount.toFixed(2)}</div><p className="text-xs text-muted-foreground">({dashboardDateFilter.replace(/_/g, ' ')})</p></CardContent>
               </Card>
             </div>
           )}
@@ -480,16 +576,69 @@ export default function AdminPage() {
 
         <TabsContent value="withdrawals" className="mt-6">
           <h2 className="text-2xl font-semibold text-foreground mb-4">Withdrawal Requests</h2>
+           <Card className="mb-6">
+            <CardHeader><CardTitle className="text-lg">Filters & Search</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                        <Label htmlFor="withdrawalStatusFilter">Status</Label>
+                        <Select value={withdrawalFilters.status} onValueChange={(value) => setWithdrawalFilters(prev => ({ ...prev, status: value as WithdrawalFilterCriteria['status'] }))}>
+                            <SelectTrigger id="withdrawalStatusFilter"><SelectValue placeholder="Filter by status" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Statuses</SelectItem>
+                                <SelectItem value="Pending">Pending</SelectItem>
+                                <SelectItem value="Approved">Approved</SelectItem>
+                                <SelectItem value="Rejected">Rejected</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label htmlFor="withdrawalMethodFilter">Payment Method</Label>
+                        <Select value={withdrawalFilters.method} onValueChange={(value) => setWithdrawalFilters(prev => ({ ...prev, method: value as WithdrawalFilterCriteria['method'] }))}>
+                            <SelectTrigger id="withdrawalMethodFilter"><SelectValue placeholder="Filter by method" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Methods</SelectItem>
+                                <SelectItem value="upi">UPI</SelectItem>
+                                <SelectItem value="paytm">Paytm</SelectItem>
+                                <SelectItem value="bank">Bank</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="lg:col-span-2">
+                        <Label htmlFor="withdrawalDateFilter">Date Range</Label>
+                         <Popover>
+                            <PopoverTrigger asChild>
+                                <Button id="withdrawalDateFilter" variant={"outline"} className={cn("w-full justify-start text-left font-normal", !withdrawalDateRange && "text-muted-foreground")}>
+                                    <CalendarDays className="mr-2 h-4 w-4" />
+                                    {withdrawalDateRange?.from ? (withdrawalDateRange.to ? (<>{format(withdrawalDateRange.from, "LLL dd, y")} - {format(withdrawalDateRange.to, "LLL dd, y")}</>) : (format(withdrawalDateRange.from, "LLL dd, y"))) : (<span>Pick a date range</span>)}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                                <Calendar initialFocus mode="range" defaultMonth={withdrawalDateRange?.from} selected={withdrawalDateRange} onSelect={(range) => {setWithdrawalDateRange(range); setWithdrawalFilters(prev => ({...prev, dateFrom: range?.from || null, dateTo: range?.to || null }))}} numberOfMonths={2}/>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+                </div>
+                <div>
+                    <Label htmlFor="withdrawalSearch">Search</Label>
+                    <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input id="withdrawalSearch" type="text" placeholder="Search by User ID, Email, Txn ID, Req ID..." value={withdrawalFilters.searchTerm} onChange={(e) => setWithdrawalFilters(prev => ({ ...prev, searchTerm: e.target.value }))} className="pl-8" />
+                    </div>
+                </div>
+            </CardContent>
+           </Card>
+
           {isDataLoading ? (
             <div className="flex justify-center items-center h-64"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>
           ) : withdrawalError ? (
             <div className="text-center text-destructive p-4 bg-destructive/10 rounded-md flex items-center justify-center gap-2"><AlertTriangle /> {withdrawalError}</div>
-          ) : allRequests.length === 0 ? (
-            <p className="text-muted-foreground">No withdrawal requests found.</p>
+          ) : filteredWithdrawalRequests.length === 0 ? (
+            <p className="text-muted-foreground">No withdrawal requests found matching your criteria.</p>
           ) : (
-            allRequests.map(userReqs => (
+            filteredWithdrawalRequests.map(userReqs => (
               <Card key={userReqs.userId} className="mb-8 shadow-sm bg-card">
-                <CardHeader><CardTitle className="text-lg">User ID: <span className="font-mono text-sm bg-muted p-1 rounded">{userReqs.userId}</span></CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-lg">User ID: <span className="font-mono text-sm bg-muted p-1 rounded">{userReqs.userId}</span> {userReqs.userEmail && <span className="text-xs text-muted-foreground">({userReqs.userEmail})</span>}</CardTitle></CardHeader>
                 <CardContent>
                   <Table>
                     <TableHeader><TableRow><TableHead>Req ID</TableHead><TableHead>Date</TableHead><TableHead>Amount (₹)</TableHead><TableHead>Method</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
@@ -505,7 +654,7 @@ export default function AdminPage() {
                             {req.status === 'Pending' && (
                               <div className="flex gap-2">
                                 <Button size="sm" variant="outline" className="text-green-600 border-green-600 hover:bg-green-50 hover:text-green-700" onClick={(e) => { e.stopPropagation(); handleApprove(req);}} disabled={processingAction === `${req.userId}_${req.originalId}`}>{processingAction === `${req.userId}_${req.originalId}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}</Button>
-                                <Button size="sm" variant="outline" className="text-red-600 border-red-600 hover:bg-red-50 hover:text-red-700" onClick={(e) => { e.stopPropagation(); openRejectDialog(req);}} disabled={processingAction === `${req.userId}_${req.originalId}`}>{processingAction === `${req.userId}_${req.originalId}` && currentRequestToReject?.originalId !== req.originalId ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}</Button>
+                                <Button size="sm" variant="outline" className="text-red-600 border-red-600 hover:bg-red-50 hover:text-red-700" onClick={(e) => { e.stopPropagation(); openRejectDialog(req);}} disabled={processingAction === `${req.userId}_${req.originalId}`}>{processingAction === `${req.userId}_${req.originalId}` && currentRequestToProcess?.originalId !== req.originalId ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}</Button>
                               </div>
                             )}
                           </TableCell>
@@ -556,7 +705,10 @@ export default function AdminPage() {
                       {sortedUsers.map((user) => (
                         <TableRow key={user.userId} onClick={() => handleUserRowClick(user)} className="cursor-pointer hover:bg-muted/50">
                           <TableCell className="text-xs font-mono">{user.userId.substring(0,10)}...</TableCell>
-                          <TableCell className="font-medium">{user.displayName}</TableCell>
+                          <TableCell className="font-medium flex items-center">
+                            {user.displayName}
+                            {user.isBlocked && <Badge variant="destructive" className="ml-2 text-xs">Blocked</Badge>}
+                          </TableCell>
                           <TableCell>{user.email || 'N/A'}</TableCell>
                           <TableCell className="text-right font-semibold">₹{(user.grossLifetimeEarnings || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right font-semibold">₹{(user.totalEarnings || 0).toFixed(2)}</TableCell>
@@ -572,9 +724,9 @@ export default function AdminPage() {
 
       <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Reject Withdrawal Request</DialogTitle><DialogDescription>Please provide a reason for rejecting this withdrawal request. This will be saved as admin notes. User: {currentRequestToReject?.userId}, Amount: ₹{currentRequestToReject?.amount.toFixed(2)}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Reject Withdrawal Request</DialogTitle><DialogDescription>Please provide a reason for rejecting this withdrawal request. This will be saved as admin notes. User: {currentRequestToProcess?.userId}, Amount: ₹{currentRequestToProcess?.amount.toFixed(2)}</DialogDescription></DialogHeader>
           <div className="py-4 space-y-2"><Label htmlFor="rejectionReason">Rejection Reason</Label><Textarea id="rejectionReason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} placeholder="e.g., Insufficient details, suspected activity, etc." rows={3}/></div>
-          <DialogFooter><Button variant="outline" onClick={() => {setIsRejectDialogOpen(false); setRejectionReason(''); setCurrentRequestToReject(null);}} disabled={processingAction === `${currentRequestToReject?.userId}_${currentRequestToReject?.originalId}`}>Cancel</Button><Button onClick={handleConfirmReject} disabled={!rejectionReason.trim() || processingAction === `${currentRequestToReject?.userId}_${currentRequestToReject?.originalId}`} variant="destructive">{processingAction === `${currentRequestToReject?.userId}_${currentRequestToReject?.originalId}` && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Confirm Rejection</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => {setIsRejectDialogOpen(false); setRejectionReason(''); setCurrentRequestToProcess(null);}} disabled={processingAction === `${currentRequestToProcess?.userId}_${currentRequestToProcess?.originalId}`}>Cancel</Button><Button onClick={handleConfirmReject} disabled={!rejectionReason.trim() || processingAction === `${currentRequestToProcess?.userId}_${currentRequestToProcess?.originalId}`} variant="destructive">{processingAction === `${currentRequestToProcess?.userId}_${currentRequestToProcess?.originalId}` && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Confirm Rejection</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -600,9 +752,27 @@ export default function AdminPage() {
       {selectedUserForModal && (
         <Dialog open={isUserDetailModalOpen} onOpenChange={setIsUserDetailModalOpen}>
           <DialogContent className="sm:max-w-lg">
-            <DialogHeader><DialogTitle className="flex items-center gap-2"><Users size={20}/>User Details: {selectedUserForModal.displayName}</DialogTitle><DialogDescription>User ID: <span className="font-mono text-xs">{selectedUserForModal.userId}</span></DialogDescription></DialogHeader>
+            <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                    <Users size={20}/>User Details: {selectedUserForModal.displayName}
+                    {selectedUserForModal.isBlocked && <Badge variant="destructive" className="ml-2 text-sm">Blocked</Badge>}
+                </DialogTitle>
+                <DialogDescription>User ID: <span className="font-mono text-xs">{selectedUserForModal.userId}</span></DialogDescription>
+            </DialogHeader>
             <div className="py-4 space-y-4 text-sm max-h-[70vh] overflow-y-auto">
-                <Card><CardHeader className="pb-2"><CardTitle className="text-base">Profile Information</CardTitle></CardHeader>
+                <Card>
+                    <CardHeader className="pb-2 flex flex-row justify-between items-center">
+                        <CardTitle className="text-base">Profile Information</CardTitle>
+                        {!selectedUserForModal.isBlocked ? (
+                            <Button variant="destructive" size="sm" onClick={() => openBlockUserDialog(selectedUserForModal)} disabled={processingBlock}>
+                                {processingBlock ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Ban className="h-4 w-4 mr-1" />} Block User
+                            </Button>
+                        ) : (
+                             <Button variant="outline" size="sm" onClick={() => handleUnblockUser(selectedUserForModal.userId, selectedUserForModal.displayName)} disabled={processingBlock} className="text-green-600 border-green-600 hover:text-green-700 hover:bg-green-50">
+                                {processingBlock ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCheck className="h-4 w-4 mr-1" />} Unblock User
+                            </Button>
+                        )}
+                    </CardHeader>
                     <CardContent className="space-y-1 text-xs">
                         <div><strong>Email:</strong> {selectedUserForModal.email || 'N/A'}</div>
                         <div><strong>Account Created:</strong> {format(new Date(selectedUserForModal.createdAt), "PPP ppp")}</div>
@@ -611,6 +781,12 @@ export default function AdminPage() {
                         {isLoadingUserTransactions ? <Loader2 className="h-4 w-4 animate-spin" /> : <div><strong>Total Withdrawn (Approved):</strong> <span className="font-semibold text-red-600">₹{(selectedUserForModal.totalWithdrawn || 0).toFixed(2)}</span></div>}
                         <div><strong>Current Available Balance:</strong> <span className="font-semibold text-blue-600">₹{(selectedUserForModal.totalEarnings || 0).toFixed(2)}</span></div>
                         {selectedUserForModal.referredBy && <div><strong>Referred By User ID:</strong> <span className="font-mono">{selectedUserForModal.referredBy}</span></div>}
+                        {selectedUserForModal.isBlocked && selectedUserForModal.blockReason && (
+                            <div className="mt-2 p-1.5 bg-destructive/10 border border-destructive/20 rounded-sm">
+                                <p className="font-semibold text-destructive">Block Reason:</p>
+                                <p className="text-destructive/80">{selectedUserForModal.blockReason}</p>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
                  <Card><CardHeader className="pb-2"><CardTitle className="text-base">Referral Activity ({selectedUserForModal.referredUsersCount} users referred)</CardTitle></CardHeader>
@@ -637,6 +813,26 @@ export default function AdminPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog open={isBlockUserDialogOpen} onOpenChange={setIsBlockUserDialogOpen}>
+        <DialogContent>
+            <DialogHeader>
+                <DialogTitle>Block User: {userToBlock?.displayName}</DialogTitle>
+                <DialogDescription>Please provide a reason for blocking this user. This reason will be visible to the user if they attempt to access blocked features.</DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-2">
+                <Label htmlFor="blockReason">Reason for Blocking</Label>
+                <Textarea id="blockReason" value={blockReason} onChange={e => setBlockReason(e.target.value)} placeholder="e.g., Violation of terms, suspicious activity..." rows={3} />
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => {setIsBlockUserDialogOpen(false); setUserToBlock(null); setBlockReason('');}} disabled={processingBlock}>Cancel</Button>
+                <Button variant="destructive" onClick={handleConfirmBlockUser} disabled={processingBlock || !blockReason.trim()}>
+                    {processingBlock && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Confirm Block
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
