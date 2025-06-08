@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from '@/hooks/use-toast';
-import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2, Ban, PowerOff, Power } from 'lucide-react';
+import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2, Ban, PowerOff, Power, Mail } from 'lucide-react'; // Added Mail for PayPal
 import { database } from '@/lib/firebase';
 import { ref, push, serverTimestamp, runTransaction, get, onValue, off, type DataSnapshot, update } from 'firebase/database';
 import type { Transaction, WithdrawalRequest, UserProfile, PlatformSettings } from '@/lib/types';
@@ -27,16 +27,20 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const [withdrawalAmount, setWithdrawalAmount] = useState('');
-  const [withdrawalMethod, setWithdrawalMethod] = useState<'upi' | 'paytm' | 'bank' | ''>('');
+  const [withdrawalMethod, setWithdrawalMethod] = useState<'upi' | 'paytm' | 'bank' | 'paypal' | ''>(''); // Added paypal
   const [upiId, setUpiId] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState('');
   const [paytmNumber, setPaytmNumber] = useState('');
+  const [paypalEmail, setPaypalEmail] = useState(''); // Added for PayPal
 
   const { toast } = useToast();
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+
+  const currencySymbol = userProfile?.currency === 'USD' ? '$' : '₹';
+  const userCountry = userProfile?.country;
 
   useEffect(() => {
     if (!authUserUid) {
@@ -97,7 +101,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         profileDataLoaded = true;
         checkIfAllInitialDataLoaded();
     });
-    
+
     return () => {
       off(settingsRef, 'value', platformSettingsListener);
       off(userProfileRef, 'value', userProfileListener);
@@ -107,7 +111,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
 
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authUserUid || !platformSettings.platformWithdrawalsEnabled || (userProfile && userProfile.canWithdraw === false)) return;
+    if (!authUserUid || !platformSettings.platformWithdrawalsEnabled || (userProfile && userProfile.canWithdraw === false) || !userProfile) return;
 
     setIsWithdrawing(true);
 
@@ -118,7 +122,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       return;
     }
     if (amount < MIN_WITHDRAWAL_AMOUNT) {
-      toast({ title: "Minimum Amount Not Met", description: `Minimum withdrawal amount is ₹${MIN_WITHDRAWAL_AMOUNT}.`, variant: "destructive" });
+      toast({ title: "Minimum Amount Not Met", description: `Minimum withdrawal amount is ${currencySymbol}${MIN_WITHDRAWAL_AMOUNT}.`, variant: "destructive" });
       setIsWithdrawing(false);
       return;
     }
@@ -143,14 +147,19 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
     } else if (withdrawalMethod === 'paytm') {
         if(!paytmNumber.trim()) { toast({ title: "Paytm Number Required", variant: "destructive" }); setIsWithdrawing(false); return; }
         details = { paytmNumber: paytmNumber.trim() };
+    } else if (withdrawalMethod === 'paypal') {
+        if(!paypalEmail.trim()) { toast({ title: "PayPal Email Required", variant: "destructive" }); setIsWithdrawing(false); return; }
+        details = { paypalEmail: paypalEmail.trim() };
     }
 
-    const withdrawalRequestData: Omit<WithdrawalRequest, 'id' | 'transactionId'> = { 
+
+    const withdrawalRequestData: Omit<WithdrawalRequest, 'id' | 'transactionId'> = {
       userId: authUserUid,
       amount,
+      currency: userProfile.currency, // Store currency with the request
       method: withdrawalMethod,
       details,
-      status: 'Pending', 
+      status: 'Pending',
       requestDate: serverTimestamp() as number,
     };
 
@@ -162,16 +171,17 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         setIsWithdrawing(false);
         return;
     }
-    
+
     const transactionData: Transaction = {
       date: serverTimestamp() as number,
       description: `Withdrawal Request via ${withdrawalMethod.toUpperCase()}`,
-      amount: -amount, 
+      amount: -amount,
       type: 'withdrawal',
       status: 'Pending',
-      withdrawalRequestId: withdrawalRequestId, 
+      withdrawalRequestId: withdrawalRequestId,
+      currency: userProfile.currency, // Store currency with the transaction
     };
-    
+
     const transactionRef = push(ref(database, `transactions/${authUserUid}`), transactionData);
     const transactionId = transactionRef.key;
 
@@ -180,7 +190,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
         setIsWithdrawing(false);
         return;
     }
-    
+
     await update(ref(database, `withdrawalRequests/${authUserUid}/${withdrawalRequestId}`), { transactionId: transactionId });
     await update(ref(database, `transactions/${authUserUid}/${transactionId}`), { notes: `Txn ID: ${transactionId}; Req ID: ${withdrawalRequestId}`});
 
@@ -190,18 +200,19 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       await runTransaction(userBalanceRef, (currentEarnings) => {
         const earningsVal = currentEarnings || 0;
         if (earningsVal < amount) {
-          return; 
+          return;
         }
         return earningsVal - amount;
       });
 
-      toast({ title: "Withdrawal Requested", description: `Your request to withdraw ₹${amount.toFixed(2)} via ${withdrawalMethod.toUpperCase()} is pending. Your balance has been updated.`, variant: "default" });
+      toast({ title: "Withdrawal Requested", description: `Your request to withdraw ${currencySymbol}${amount.toFixed(2)} via ${withdrawalMethod.toUpperCase()} is pending. Your balance has been updated.`, variant: "default" });
       setWithdrawalAmount('');
       setWithdrawalMethod('');
       setUpiId('');
       setAccountNumber('');
       setIfscCode('');
       setPaytmNumber('');
+      setPaypalEmail('');
       setIsDialogOpen(false);
     } catch (error) {
       console.error("[WithdrawalTab] Withdrawal request error (post-record creation):", error);
@@ -210,14 +221,14 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       setIsWithdrawing(false);
     }
   };
-  
-  const userCanWithdraw = userProfile ? userProfile.canWithdraw !== false : true; // Default to true if profile not loaded or field undefined
+
+  const userCanWithdraw = userProfile ? userProfile.canWithdraw !== false : true;
   const isWithdrawalDisabled = isLoadingSettings || !platformSettings.platformWithdrawalsEnabled || !userCanWithdraw;
   let disabledReason = "";
   if (isLoadingSettings) disabledReason = "Loading settings...";
   else if (!platformSettings.platformWithdrawalsEnabled) disabledReason = "Platform withdrawals are temporarily disabled.";
   else if (!userCanWithdraw) disabledReason = "Withdrawals are currently disabled for your account.";
-  else if (currentBalance < MIN_WITHDRAWAL_AMOUNT) disabledReason = `Minimum balance of ₹${MIN_WITHDRAWAL_AMOUNT} required.`;
+  else if (currentBalance < MIN_WITHDRAWAL_AMOUNT) disabledReason = `Minimum balance of ${currencySymbol}${MIN_WITHDRAWAL_AMOUNT} required.`;
 
 
   if (isLoadingSettings) {
@@ -234,11 +245,11 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
            <CardDescription>This balance reflects your total confirmed earnings. It updates immediately when a withdrawal is requested.</CardDescription>
         </CardHeader>
         <CardContent className="flex items-baseline justify-between">
-          <p className="text-4xl font-bold text-foreground">₹{currentBalance.toFixed(2)}</p>
+          <p className="text-4xl font-bold text-foreground">{currencySymbol}{currentBalance.toFixed(2)}</p>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button 
-                size="lg" 
+              <Button
+                size="lg"
                 disabled={isWithdrawalDisabled || currentBalance < MIN_WITHDRAWAL_AMOUNT || isWithdrawing}
                 title={disabledReason || "Request a withdrawal"}
               >
@@ -250,19 +261,19 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
               <DialogHeader>
                 <DialogTitle className="text-xl">Request Withdrawal</DialogTitle>
                 <DialogDescription>
-                  Enter the amount and select your preferred method. Minimum withdrawal: ₹{MIN_WITHDRAWAL_AMOUNT}.
+                  Enter the amount and select your preferred method. Minimum withdrawal: {currencySymbol}{MIN_WITHDRAWAL_AMOUNT}.
                   Your balance will be updated immediately upon submitting the request.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleWithdrawalSubmit} className="space-y-4 mt-4">
                 <div>
-                  <Label htmlFor="withdrawalAmount" className="text-sm font-medium">Amount to Withdraw (₹)</Label>
+                  <Label htmlFor="withdrawalAmount" className="text-sm font-medium">Amount to Withdraw ({currencySymbol})</Label>
                   <Input
                     id="withdrawalAmount"
                     type="number"
                     value={withdrawalAmount}
                     onChange={(e) => setWithdrawalAmount(e.target.value)}
-                    placeholder={`Min ₹${MIN_WITHDRAWAL_AMOUNT}`}
+                    placeholder={`Min ${currencySymbol}${MIN_WITHDRAWAL_AMOUNT}`}
                     min={MIN_WITHDRAWAL_AMOUNT.toString()}
                     step="0.01"
                     required
@@ -272,31 +283,47 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                 </div>
                 <div>
                   <Label htmlFor="withdrawalMethod" className="text-sm font-medium">Withdrawal Method</Label>
-                  <Select value={withdrawalMethod} onValueChange={(value) => setWithdrawalMethod(value as 'upi' | 'paytm' | 'bank' | '')} disabled={isWithdrawing}>
+                  <Select value={withdrawalMethod} onValueChange={(value) => setWithdrawalMethod(value as any)} disabled={isWithdrawing}>
                     <SelectTrigger id="withdrawalMethod" className="w-full mt-1">
                       <SelectValue placeholder="Select method" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="upi"><CreditCard className="mr-2 h-4 w-4 inline-block"/> UPI</SelectItem>
-                      <SelectItem value="paytm"><Banknote className="mr-2 h-4 w-4 inline-block"/> Paytm Wallet</SelectItem>
-                      <SelectItem value="bank"><Landmark className="mr-2 h-4 w-4 inline-block"/> Bank Account</SelectItem>
+                      {userCountry === 'India' && (
+                        <>
+                          <SelectItem value="upi"><CreditCard className="mr-2 h-4 w-4 inline-block"/> UPI</SelectItem>
+                          <SelectItem value="paytm"><Banknote className="mr-2 h-4 w-4 inline-block"/> Paytm Wallet</SelectItem>
+                          <SelectItem value="bank"><Landmark className="mr-2 h-4 w-4 inline-block"/> Bank Account</SelectItem>
+                        </>
+                      )}
+                      {userCountry === 'Other' && (
+                        <SelectItem value="paypal"><Mail className="mr-2 h-4 w-4 inline-block"/> PayPal</SelectItem>
+                      )}
+                      {/* Fallback if country is not yet loaded or unexpected value */}
+                      {!userCountry && (
+                        <>
+                          <SelectItem value="upi"><CreditCard className="mr-2 h-4 w-4 inline-block"/> UPI</SelectItem>
+                          <SelectItem value="paytm"><Banknote className="mr-2 h-4 w-4 inline-block"/> Paytm Wallet</SelectItem>
+                          <SelectItem value="bank"><Landmark className="mr-2 h-4 w-4 inline-block"/> Bank Account</SelectItem>
+                          <SelectItem value="paypal"><Mail className="mr-2 h-4 w-4 inline-block"/> PayPal</SelectItem>
+                        </>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
 
-                {withdrawalMethod === 'upi' && (
+                {withdrawalMethod === 'upi' && userCountry === 'India' && (
                   <div>
                     <Label htmlFor="upiId" className="text-sm font-medium">UPI ID</Label>
                     <Input id="upiId" value={upiId} onChange={e => setUpiId(e.target.value)} placeholder="yourname@okhdfcbank" required className="mt-1" disabled={isWithdrawing}/>
                   </div>
                 )}
-                {withdrawalMethod === 'paytm' && (
+                {withdrawalMethod === 'paytm' && userCountry === 'India' && (
                   <div>
                     <Label htmlFor="paytmNumber" className="text-sm font-medium">Paytm Wallet Number</Label>
                     <Input id="paytmNumber" type="tel" value={paytmNumber} onChange={e => setPaytmNumber(e.target.value)} placeholder="Your Paytm registered mobile number" required className="mt-1" disabled={isWithdrawing}/>
                   </div>
                 )}
-                {withdrawalMethod === 'bank' && (
+                {withdrawalMethod === 'bank' && userCountry === 'India' && (
                   <div className="space-y-3">
                     <div>
                       <Label htmlFor="accountNumber" className="text-sm font-medium">Account Number</Label>
@@ -308,6 +335,13 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                     </div>
                   </div>
                 )}
+                {withdrawalMethod === 'paypal' && userCountry === 'Other' && (
+                  <div>
+                    <Label htmlFor="paypalEmail" className="text-sm font-medium">PayPal Email</Label>
+                    <Input id="paypalEmail" type="email" value={paypalEmail} onChange={e => setPaypalEmail(e.target.value)} placeholder="your.paypal.email@example.com" required className="mt-1" disabled={isWithdrawing}/>
+                  </div>
+                )}
+
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isWithdrawing}>Cancel</Button>
                   <Button type="submit" disabled={isWithdrawing || !withdrawalAmount || !withdrawalMethod || parseFloat(withdrawalAmount) > currentBalance || parseFloat(withdrawalAmount) < MIN_WITHDRAWAL_AMOUNT}>
@@ -320,14 +354,14 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           </Dialog>
         </CardContent>
       </Card>
-      
-      {isWithdrawalDisabled && !isLoadingSettings && ( // Don't show if still loading initial settings
+
+      {isWithdrawalDisabled && !isLoadingSettings && (
          <div className="p-4 bg-orange-50 border border-orange-200 rounded-md text-orange-700 flex items-center">
           <Ban className="mr-3 h-5 w-5 flex-shrink-0" />
           <div>
             <p className="text-sm font-semibold">
-                {disabledReason.includes("Platform") ? "Withdrawals Temporarily Disabled by Platform" : 
-                 disabledReason.includes("Account") ? "Withdrawals Disabled for Your Account" : 
+                {disabledReason.includes("Platform") ? "Withdrawals Temporarily Disabled by Platform" :
+                 disabledReason.includes("Account") ? "Withdrawals Disabled for Your Account" :
                  "Withdrawals Unavailable"}
             </p>
             <p className="text-xs">
@@ -344,7 +378,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           <CardTitle className="text-lg font-medium">Withdrawal Instructions</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-2">
-          <p><strong>Minimum Withdrawal:</strong> You can request a withdrawal once your balance reaches at least ₹{MIN_WITHDRAWAL_AMOUNT}.</p>
+          <p><strong>Minimum Withdrawal:</strong> You can request a withdrawal once your balance reaches at least {currencySymbol}{MIN_WITHDRAWAL_AMOUNT}.</p>
           <p><strong>Balance Update:</strong> Your available balance will be reduced by the requested amount immediately upon successful request submission. The request status will be 'Pending'.</p>
           <p><strong>Processing Time:</strong> Withdrawal requests are typically processed within [Specify processing time, e.g., 3-5 business days]. This is a simulation.</p>
           <p><strong>Rejection:</strong> If a withdrawal is rejected (e.g., due to incorrect details), the amount will be credited back to your available balance. You will see a 'Rejected' status and a corresponding refund transaction in your history.</p>
@@ -354,5 +388,3 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
     </div>
   );
 }
-
-    

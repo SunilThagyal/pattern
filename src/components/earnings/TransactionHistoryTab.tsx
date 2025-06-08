@@ -1,33 +1,34 @@
 
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from 'react'; // Added useMemo
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar as CalendarIcon, Filter, AlertTriangle, Loader2, Info, ChevronDown } from "lucide-react"; // Added ChevronDown
+import { Calendar as CalendarIcon, Filter, AlertTriangle, Loader2, Info, ChevronDown } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from "date-fns"; // Added date-fns functions
+import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from "date-fns";
 import type { DateRange } from "react-day-picker";
 import { cn } from '@/lib/utils';
 import { database } from '@/lib/firebase';
 import { ref, get, query, onValue, off, type DataSnapshot, push, serverTimestamp, runTransaction } from 'firebase/database';
-import type { Transaction, TransactionStatus, WithdrawalRequest } from '@/lib/types';
+import type { Transaction, TransactionStatus, WithdrawalRequest, UserProfile } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
 interface TransactionHistoryTabProps {
   authUserUid: string | null;
 }
 
-const ITEMS_PER_PAGE = 20; // Number of transactions to show per "page"
+const ITEMS_PER_PAGE = 20;
 
 export default function TransactionHistoryTab({ authUserUid }: TransactionHistoryTabProps) {
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null); // Added for currency
   const { toast } = useToast();
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -37,39 +38,48 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const processedRefundsRef = useRef<Set<string>>(new Set());
 
-  // State for modal
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [withdrawalRequestDetails, setWithdrawalRequestDetails] = useState<WithdrawalRequest | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isLoadingModalDetails, setIsLoadingModalDetails] = useState(false);
 
-  // State for "Load More"
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
+
+  const currencySymbol = userProfile?.currency === 'USD' ? '$' : '₹';
 
   useEffect(() => {
     if (!authUserUid) {
       setIsLoading(false);
       return;
     }
+    // Fetch user profile for currency
+    const userProfileRef = ref(database, `users/${authUserUid}`);
+    get(userProfileRef).then(snapshot => {
+      if (snapshot.exists()) {
+        setUserProfile(snapshot.val() as UserProfile);
+      }
+    }).catch(err => console.error("Error fetching user profile for currency:", err));
+
+
     const transactionsRef = ref(database, `transactions/${authUserUid}`);
-    
+
     const listenerCallback = async (snapshot: DataSnapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
         const loadedTransactions: Transaction[] = Object.keys(data)
           .map(key => ({ id: key, ...data[key] as Transaction }))
-          .sort((a, b) => b.date - a.date); 
-        
+          .sort((a, b) => b.date - a.date);
+
         for (const tx of loadedTransactions) {
-          if (tx.type === 'withdrawal' && 
-              tx.status === 'Rejected' && 
-              tx.id && 
+          if (tx.type === 'withdrawal' &&
+              tx.status === 'Rejected' &&
+              tx.id &&
               !processedRefundsRef.current.has(tx.id)) {
-            
+
             const refundDescriptionSuffix = `(Ref ID: ${tx.id})`;
             const alreadyRefunded = loadedTransactions.some(
-                existingTx => existingTx.description?.endsWith(refundDescriptionSuffix) && 
-                              existingTx.type === 'earning' && 
+                existingTx => existingTx.description?.endsWith(refundDescriptionSuffix) &&
+                              existingTx.type === 'earning' &&
                               existingTx.status === 'Earned'
             );
 
@@ -79,10 +89,11 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                     date: serverTimestamp() as number,
                     description: `Refund for rejected withdrawal ${refundDescriptionSuffix}`,
                     amount: refundAmount,
-                    type: 'earning', 
-                    status: 'Earned', 
+                    type: 'earning',
+                    status: 'Earned',
                     notes: `Automatic refund for rejected withdrawal ${tx.id}`,
-                    withdrawalRequestId: tx.withdrawalRequestId 
+                    withdrawalRequestId: tx.withdrawalRequestId,
+                    currency: tx.currency, // Preserve original currency
                 };
 
                 try {
@@ -91,15 +102,15 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                     await runTransaction(userBalanceRef, (currentEarnings) => {
                         return (currentEarnings || 0) + refundAmount;
                     });
-                    
-                    toast({ title: "Withdrawal Rejected & Refunded", description: `₹${refundAmount.toFixed(2)} has been credited back to your balance for rejected withdrawal.` });
-                    processedRefundsRef.current.add(tx.id); 
+
+                    toast({ title: "Withdrawal Rejected & Refunded", description: `${tx.currency === 'USD' ? '$' : '₹'}${refundAmount.toFixed(2)} has been credited back to your balance for rejected withdrawal.` });
+                    processedRefundsRef.current.add(tx.id);
                 } catch (error) {
                     console.error("[TransactionHistoryTab] Error processing simulated refund:", error);
                     toast({ title: "Refund Error", description: "Could not process automatic refund for a rejected withdrawal.", variant: "destructive"});
                 }
             } else {
-                processedRefundsRef.current.add(tx.id); 
+                processedRefundsRef.current.add(tx.id);
             }
           }
         }
@@ -109,8 +120,8 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
       }
       setIsLoading(false);
     };
-    
-    const errorCallback = (error: Error) => { 
+
+    const errorCallback = (error: Error) => {
       console.error("[TransactionHistoryTab] Error fetching transactions with onValue:", error);
       toast({ title: "Error", description: "Could not load transaction history in real-time.", variant: "destructive" });
       setIsLoading(false);
@@ -120,7 +131,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
 
     return () => {
       off(transactionsRef, 'value', listenerCallback);
-      processedRefundsRef.current.clear(); 
+      processedRefundsRef.current.clear();
     };
 
   }, [authUserUid, toast]);
@@ -136,11 +147,11 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
         const toTime = endOfDay(dateRange.to).getTime();
         currentFiltered = currentFiltered.filter(tx => tx.date <= toTime);
     }
-    
+
     if (statusFilter !== 'all') {
       currentFiltered = currentFiltered.filter(tx => tx.status.toLowerCase() === statusFilter.toLowerCase());
     }
-    
+
     return currentFiltered;
   }, [allTransactions, dateRange, statusFilter]);
 
@@ -156,11 +167,11 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     switch (status) {
       case 'Approved':
       case 'Earned':
-        return 'default'; 
+        return 'default';
       case 'Pending':
-        return 'secondary'; 
+        return 'secondary';
       case 'Rejected':
-        return 'destructive'; 
+        return 'destructive';
       default:
         return 'outline';
     }
@@ -181,7 +192,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
 
   const handleRowClick = async (transaction: Transaction) => {
     setSelectedTransaction(transaction);
-    setWithdrawalRequestDetails(null); 
+    setWithdrawalRequestDetails(null);
     setIsDetailModalOpen(true);
 
     if (transaction.type === 'withdrawal' && transaction.withdrawalRequestId && authUserUid) {
@@ -203,7 +214,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
   };
 
 
-  if (isLoading && !authUserUid) { // Show loader only if authUserUid is not yet available but expected
+  if (isLoading && !authUserUid) {
      return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
 
@@ -269,7 +280,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading && authUserUid ? ( // Show main loader if authUserUid is present and still loading
+          {isLoading && authUserUid ? (
              <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
            ) : transactionsToDisplay.length > 0 ? (
             <>
@@ -278,31 +289,34 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Amount (₹)</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
                   <TableHead className="text-center">Status</TableHead>
                   <TableHead>Notes/Ref ID</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {transactionsToDisplay.map((tx) => (
-                  <TableRow 
-                    key={tx.id} 
-                    onClick={() => handleRowClick(tx)}
-                    className="cursor-pointer hover:bg-muted/50"
-                  >
-                    <TableCell>{format(new Date(tx.date), "PP pp")}</TableCell>
-                    <TableCell className="font-medium">{tx.description}</TableCell>
-                    <TableCell className={cn("text-right font-semibold", tx.type === 'earning' ? 'text-green-600' : 'text-red-600')}>
-                      {tx.type === 'earning' ? '+' : ''}{tx.amount.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-center">
-                       <Badge variant={getStatusBadgeVariant(tx.status)} className={getStatusBadgeClass(tx.status)}>
-                        {tx.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{tx.notes || tx.id?.substring(0,10) || 'N/A'}</TableCell>
-                  </TableRow>
-                ))}
+                {transactionsToDisplay.map((tx) => {
+                  const txCurrencySymbol = tx.currency === 'USD' ? '$' : '₹';
+                  return (
+                    <TableRow
+                      key={tx.id}
+                      onClick={() => handleRowClick(tx)}
+                      className="cursor-pointer hover:bg-muted/50"
+                    >
+                      <TableCell>{format(new Date(tx.date), "PP pp")}</TableCell>
+                      <TableCell className="font-medium">{tx.description}</TableCell>
+                      <TableCell className={cn("text-right font-semibold", tx.type === 'earning' ? 'text-green-600' : 'text-red-600')}>
+                        {tx.type === 'earning' ? '+' : ''}{txCurrencySymbol}{tx.amount.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                         <Badge variant={getStatusBadgeVariant(tx.status)} className={getStatusBadgeClass(tx.status)}>
+                          {tx.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{tx.notes || tx.id?.substring(0,10) || 'N/A'}</TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
             {visibleCount < filteredTransactions.length && (
@@ -339,11 +353,11 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
             <div className="py-4 space-y-3 text-sm">
               <div className="flex justify-between"><span>Date:</span> <span>{format(new Date(selectedTransaction.date), "PPP ppp")}</span></div>
               <div className="flex justify-between"><span>Description:</span> <span className="text-right">{selectedTransaction.description}</span></div>
-              <div className="flex justify-between"><span>Amount:</span> <span className={cn(selectedTransaction.type === 'earning' ? 'text-green-600' : 'text-red-600', "font-semibold")}>₹{selectedTransaction.type === 'earning' ? '+' : ''}{selectedTransaction.amount.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span>Amount:</span> <span className={cn(selectedTransaction.type === 'earning' ? 'text-green-600' : 'text-red-600', "font-semibold")}>{selectedTransaction.type === 'earning' ? '+' : ''}{selectedTransaction.currency === 'USD' ? '$' : '₹'}{selectedTransaction.amount.toFixed(2)}</span></div>
               <div className="flex justify-between"><span>Type:</span> <span className="capitalize">{selectedTransaction.type}</span></div>
               <div className="flex justify-between items-center"><span>Status:</span> <Badge variant={getStatusBadgeVariant(selectedTransaction.status)} className={getStatusBadgeClass(selectedTransaction.status)}>{selectedTransaction.status}</Badge></div>
               {selectedTransaction.notes && <div className="flex justify-between"><span>Notes:</span> <span className="text-xs text-muted-foreground text-right">{selectedTransaction.notes}</span></div>}
-              
+
               {isLoadingModalDetails && (
                 <div className="flex items-center justify-center py-3">
                   <Loader2 className="h-5 w-5 animate-spin text-primary mr-2" /> Loading withdrawal details...
@@ -356,7 +370,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                   <p className="font-semibold text-foreground">Withdrawal Information:</p>
                   <div className="flex justify-between"><span>Method:</span> <span className="capitalize">{withdrawalRequestDetails.method}</span></div>
                   {Object.entries(withdrawalRequestDetails.details).map(([key, value]) => (
-                     <div className="flex justify-between" key={key}><span>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</span> 
+                     <div className="flex justify-between" key={key}><span>{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</span>
                      <span className="text-right break-all">{String(value)}</span></div>
                   ))}
                   {selectedTransaction.status === 'Rejected' && withdrawalRequestDetails.adminNotes && (

@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical, ChevronDown, Settings, AlertCircleIcon, PowerOff, Power } from 'lucide-react';
+import { Loader2, CheckCircle, XCircle, AlertTriangle, Eye, EyeOff, Users, CreditCard, Info, ExternalLink, SortAsc, SortDesc, RefreshCcw, LayoutDashboard, CalendarDays, TrendingUp, TrendingDown, CircleDollarSign, Users2, Ban, CheckCheck, Filter as FilterIcon, Search, EllipsisVertical, ChevronDown, Settings, AlertCircleIcon, PowerOff, Power, Globe } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { format, subDays, startOfDay, endOfDay, isValid as isValidDate } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,7 @@ interface UserWithdrawalRequests {
   userId: string;
   requests: AdminDisplayWithdrawalRequest[];
   userEmail?: string;
+  userCurrency?: 'INR' | 'USD';
 }
 
 type DateFilterOption = "all_time" | "today" | "last_7_days" | "last_30_days";
@@ -61,6 +62,7 @@ export default function AdminPage() {
     dateFrom: null,
     dateTo: null,
     searchTerm: '',
+    currency: 'all',
   });
   const [withdrawalDateRange, setWithdrawalDateRange] = useState<DateRange | undefined>(undefined);
   const [pendingWithdrawalCount, setPendingWithdrawalCount] = useState(0);
@@ -84,9 +86,12 @@ export default function AdminPage() {
 
   const [dashboardStats, setDashboardStats] = useState<AdminDashboardStats>({
     totalUsers: 0,
-    totalPlatformEarnings: 0,
-    totalApprovedWithdrawalsAmount: 0,
-    totalPendingWithdrawalsAmount: 0,
+    totalPlatformEarningsINR: 0,
+    totalPlatformEarningsUSD: 0,
+    totalApprovedWithdrawalsAmountINR: 0,
+    totalApprovedWithdrawalsAmountUSD: 0,
+    totalPendingWithdrawalsAmountINR: 0,
+    totalPendingWithdrawalsAmountUSD: 0,
   });
   const [dashboardDateFilter, setDashboardDateFilter] = useState<DateFilterOption>("all_time");
 
@@ -107,11 +112,10 @@ export default function AdminPage() {
       if (snapshot.exists()) {
         const settings = snapshot.val();
         setPlatformSettings({
-            referralProgramEnabled: settings.referralProgramEnabled !== false, // Default to true
-            platformWithdrawalsEnabled: settings.platformWithdrawalsEnabled !== false, // Default to true
+            referralProgramEnabled: settings.referralProgramEnabled !== false,
+            platformWithdrawalsEnabled: settings.platformWithdrawalsEnabled !== false,
         });
       } else {
-        // Initialize with default if not exists
         const defaultSettings = { referralProgramEnabled: true, platformWithdrawalsEnabled: true };
         await set(settingsRef, defaultSettings);
         setPlatformSettings(defaultSettings);
@@ -136,7 +140,7 @@ export default function AdminPage() {
       setIsUpdatingSettings(false);
     }
   };
-  
+
   const handleToggleUserWithdrawal = async (userId: string, currentCanWithdraw: boolean) => {
     if (!selectedUserForModal || selectedUserForModal.userId !== userId) return;
     setProcessingUserWithdrawalToggle(true);
@@ -144,7 +148,6 @@ export default function AdminPage() {
         const newCanWithdrawStatus = !currentCanWithdraw;
         await update(ref(database, `users/${userId}`), { canWithdraw: newCanWithdrawStatus });
         setSelectedUserForModal(prev => prev ? { ...prev, canWithdraw: newCanWithdrawStatus } : null);
-        // Optimistically update the main user list if the user is there
         setAllUsers(prevUsers => prevUsers.map(u => u.userId === userId ? {...u, canWithdraw: newCanWithdrawStatus} : u));
 
         toast({ title: "User Setting Updated", description: `Withdrawals for ${selectedUserForModal.displayName} are now ${newCanWithdrawStatus ? 'enabled' : 'disabled'}.` });
@@ -169,12 +172,12 @@ export default function AdminPage() {
     setVisibleWithdrawalGroupsCount(ITEMS_PER_PAGE);
 
     try {
-      await fetchPlatformSettings(); // Fetch platform settings
+      await fetchPlatformSettings();
 
       const usersRef = ref(database, 'users');
       const usersSnapshot = await get(usersRef);
       let fetchedUsers: DisplayUser[] = [];
-      const userMapForWithdrawals = new Map<string, { email?: string }>();
+      const userDetailsMap = new Map<string, { email?: string, currency?: 'INR' | 'USD', country?: 'India' | 'Other' }>();
 
       const allTransactionsRef = ref(database, 'transactions');
       const allTransactionsSnapshot = await get(allTransactionsRef);
@@ -190,13 +193,13 @@ export default function AdminPage() {
           userTransactionsMap.set(userId, userTxns);
         }
       }
-      
+
       if (usersSnapshot.exists()) {
         const usersData = usersSnapshot.val();
         const loadedUsersPromises = Object.keys(usersData).map(async (userId) => {
           const userProfile = usersData[userId] as UserProfile;
-          userMapForWithdrawals.set(userId, { email: userProfile.email });
-          
+          userDetailsMap.set(userId, { email: userProfile.email, currency: userProfile.currency, country: userProfile.country });
+
           const referralsRef = ref(database, `referrals/${userId}`);
           const referralsSnapshot = await get(referralsRef);
           const referredUsersCount = referralsSnapshot.exists() ? Object.keys(referralsSnapshot.val()).length : 0;
@@ -211,10 +214,12 @@ export default function AdminPage() {
 
           return {
             ...userProfile,
-            canWithdraw: userProfile.canWithdraw !== false, // Default to true if undefined
+            canWithdraw: userProfile.canWithdraw !== false,
             userId,
             referredUsersCount,
             grossLifetimeEarnings,
+            currency: userProfile.currency || 'INR', // Default to INR if not set
+            country: userProfile.country || 'India', // Default to India
           };
         });
         fetchedUsers = await Promise.all(loadedUsersPromises);
@@ -230,11 +235,13 @@ export default function AdminPage() {
         for (const userId in usersWithdrawalData) {
           const userRequestsData = usersWithdrawalData[userId];
           const userRequestsList: AdminDisplayWithdrawalRequest[] = [];
+          const userInfo = userDetailsMap.get(userId);
           for (const reqId in userRequestsData) {
              const request = {
               ...userRequestsData[reqId],
               userId: userId,
               originalId: reqId,
+              currency: userRequestsData[reqId].currency || userInfo?.currency || 'INR', // Ensure currency is set
             } as AdminDisplayWithdrawalRequest;
             userRequestsList.push(request);
             if (request.status === 'Pending') {
@@ -242,7 +249,12 @@ export default function AdminPage() {
             }
           }
           if (userRequestsList.length > 0) {
-            loadedRequests.push({ userId, requests: userRequestsList.sort((a, b) => b.requestDate - a.requestDate), userEmail: userMapForWithdrawals.get(userId)?.email });
+            loadedRequests.push({
+              userId,
+              requests: userRequestsList.sort((a, b) => b.requestDate - a.requestDate),
+              userEmail: userInfo?.email,
+              userCurrency: userInfo?.currency || 'INR',
+            });
           }
         }
       }
@@ -262,11 +274,11 @@ export default function AdminPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-  
+
   useEffect(() => {
     if (!isDataLoading) {
       let filteredWithdrawalsForDashboard = allRequests.flatMap(ur => ur.requests);
-      
+
       const now = new Date();
       let startDate: Date | null = null;
 
@@ -285,13 +297,12 @@ export default function AdminPage() {
 
       const newStats: AdminDashboardStats = {
         totalUsers: allUsers.length,
-        totalPlatformEarnings: allUsers.reduce((sum, user) => sum + (user.grossLifetimeEarnings || 0), 0),
-        totalApprovedWithdrawalsAmount: filteredWithdrawalsForDashboard
-          .filter(req => req.status === 'Approved')
-          .reduce((sum, req) => sum + req.amount, 0),
-        totalPendingWithdrawalsAmount: filteredWithdrawalsForDashboard
-          .filter(req => req.status === 'Pending')
-          .reduce((sum, req) => sum + req.amount, 0),
+        totalPlatformEarningsINR: allUsers.filter(u => u.currency === 'INR').reduce((sum, user) => sum + (user.grossLifetimeEarnings || 0), 0),
+        totalPlatformEarningsUSD: allUsers.filter(u => u.currency === 'USD').reduce((sum, user) => sum + (user.grossLifetimeEarnings || 0), 0),
+        totalApprovedWithdrawalsAmountINR: filteredWithdrawalsForDashboard.filter(req => req.status === 'Approved' && req.currency === 'INR').reduce((sum, req) => sum + req.amount, 0),
+        totalApprovedWithdrawalsAmountUSD: filteredWithdrawalsForDashboard.filter(req => req.status === 'Approved' && req.currency === 'USD').reduce((sum, req) => sum + req.amount, 0),
+        totalPendingWithdrawalsAmountINR: filteredWithdrawalsForDashboard.filter(req => req.status === 'Pending' && req.currency === 'INR').reduce((sum, req) => sum + req.amount, 0),
+        totalPendingWithdrawalsAmountUSD: filteredWithdrawalsForDashboard.filter(req => req.status === 'Pending' && req.currency === 'USD').reduce((sum, req) => sum + req.amount, 0),
       };
       setDashboardStats(newStats);
     }
@@ -307,7 +318,7 @@ export default function AdminPage() {
       } else if (userSortCriteria === 'referredUsersCount') {
         compareA = a.referredUsersCount || 0;
         compareB = b.referredUsersCount || 0;
-      } else { 
+      } else {
         compareA = a.displayName?.toLowerCase() || '';
         compareB = b.displayName?.toLowerCase() || '';
       }
@@ -368,10 +379,10 @@ export default function AdminPage() {
       } else {
         toast({ title: "Warning", description: `Transaction ID missing for request ${requestId}. Transaction status not updated.`, variant: "default" });
       }
-      
+
       toast({ title: "Success", description: `Request ${requestId} has been ${newStatus.toLowerCase()}.` });
-      
-      fetchData(); 
+
+      fetchData();
 
     } catch (err) {
       console.error(`Error updating request ${requestId} to ${newStatus}:`, err);
@@ -411,7 +422,7 @@ export default function AdminPage() {
 
  const getStatusBadgeClass = (status: WithdrawalRequest['status'] | TransactionStatus): string => {
     switch (status) {
-      case 'Approved': 
+      case 'Approved':
       case 'Earned':
         return 'bg-green-100 text-green-700 border-green-300';
       case 'Pending': return 'bg-yellow-100 text-yellow-700 border-yellow-300';
@@ -458,11 +469,11 @@ export default function AdminPage() {
           .sort((a, b) => b.date - a.date);
       }
       setSelectedUserTransactions(loadedTransactions);
-      
+
       const totalWithdrawn = loadedTransactions
         .filter(tx => tx.type === 'withdrawal' && tx.status === 'Approved')
         .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
-        
+
       setSelectedUserForModal(prevUser => prevUser ? {...prevUser, totalWithdrawn } : null);
 
     } catch (error) {
@@ -480,7 +491,7 @@ export default function AdminPage() {
   const openBlockUserDialog = (user: DisplayUser) => {
     setUserToBlock(user);
     setIsBlockUserDialogOpen(true);
-    setBlockReason(user.blockReason || ''); 
+    setBlockReason(user.blockReason || '');
   };
 
   const handleConfirmBlockUser = async () => {
@@ -495,7 +506,7 @@ export default function AdminPage() {
         blockReason: blockReason.trim(),
       });
       toast({ title: "User Blocked", description: `${userToBlock.displayName} has been blocked.` });
-      fetchData(); 
+      fetchData();
       setIsBlockUserDialogOpen(false);
       setUserToBlock(null);
       setBlockReason('');
@@ -512,11 +523,11 @@ export default function AdminPage() {
     try {
       await update(ref(database, `users/${userId}`), {
         isBlocked: false,
-        blockReason: null, 
+        blockReason: null,
       });
       toast({ title: "User Unblocked", description: `${userName} has been unblocked.` });
-      fetchData(); 
-      setIsUserDetailModalOpen(false); 
+      fetchData();
+      setIsUserDetailModalOpen(false);
     } catch (error) {
       console.error("Error unblocking user:", error);
       toast({ title: "Error", description: "Could not unblock user.", variant: "destructive" });
@@ -524,10 +535,10 @@ export default function AdminPage() {
       setProcessingBlock(false);
     }
   };
-  
+
   const filteredWithdrawalRequests = useMemo(() => {
     let result = [...allRequests];
-    const { status, method, dateFrom, dateTo, searchTerm } = withdrawalFilters;
+    const { status, method, dateFrom, dateTo, searchTerm, currency } = withdrawalFilters;
 
     result = result.map(userReqGroup => {
         let filteredUserRequests = [...userReqGroup.requests];
@@ -537,6 +548,9 @@ export default function AdminPage() {
         }
         if (method !== 'all') {
             filteredUserRequests = filteredUserRequests.filter(req => req.method === method);
+        }
+        if (currency !== 'all') {
+            filteredUserRequests = filteredUserRequests.filter(req => req.currency === currency);
         }
         if (dateFrom && isValidDate(dateFrom)) {
             const fromTime = startOfDay(dateFrom).getTime();
@@ -548,7 +562,7 @@ export default function AdminPage() {
         }
         if (searchTerm.trim()) {
             const lowerSearchTerm = searchTerm.toLowerCase();
-            filteredUserRequests = filteredUserRequests.filter(req => 
+            filteredUserRequests = filteredUserRequests.filter(req =>
                 req.userId.toLowerCase().includes(lowerSearchTerm) ||
                 (req.transactionId && req.transactionId.toLowerCase().includes(lowerSearchTerm)) ||
                 req.originalId.toLowerCase().includes(lowerSearchTerm) ||
@@ -556,7 +570,7 @@ export default function AdminPage() {
             );
         }
         return { ...userReqGroup, requests: filteredUserRequests };
-    }).filter(userReqGroup => userReqGroup.requests.length > 0); 
+    }).filter(userReqGroup => userReqGroup.requests.length > 0);
 
     setVisibleWithdrawalGroupsCount(ITEMS_PER_PAGE);
     return result;
@@ -613,7 +627,7 @@ export default function AdminPage() {
 
         <TabsContent value="dashboard" className="mt-6">
           <div className="mb-6 flex flex-col sm:flex-row gap-2 items-center">
-            <Label htmlFor="dashboardDateFilter" className="text-sm">Filter Stats By:</Label>
+            <Label htmlFor="dashboardDateFilter" className="text-sm">Filter Withdrawal Stats By:</Label>
             <Select value={dashboardDateFilter} onValueChange={(value) => setDashboardDateFilter(value as DateFilterOption)}>
               <SelectTrigger id="dashboardDateFilter" className="w-full sm:w-[200px]">
                 <CalendarDays className="mr-2 h-4 w-4 text-muted-foreground"/>
@@ -634,22 +648,33 @@ export default function AdminPage() {
                 ))}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-4">
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><Users2 className="mr-2 h-4 w-4"/>Total Users</CardTitle></CardHeader>
                 <CardContent><div className="text-2xl font-bold">{dashboardStats.totalUsers}</div></CardContent>
               </Card>
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><CircleDollarSign className="mr-2 h-4 w-4"/>Total Platform Gross Earnings</CardTitle></CardHeader>
-                <CardContent><div className="text-2xl font-bold">₹{dashboardStats.totalPlatformEarnings.toFixed(2)}</div></CardContent>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><CircleDollarSign className="mr-2 h-4 w-4"/>Platform Gross Earnings</CardTitle></CardHeader>
+                <CardContent>
+                    <div className="text-2xl font-bold">₹{dashboardStats.totalPlatformEarningsINR.toFixed(2)}</div>
+                    <div className="text-xl font-bold text-muted-foreground">${dashboardStats.totalPlatformEarningsUSD.toFixed(2)}</div>
+                </CardContent>
               </Card>
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><TrendingUp className="mr-2 h-4 w-4 text-green-500"/>Approved Withdrawals</CardTitle></CardHeader>
-                <CardContent><div className="text-2xl font-bold text-green-600">₹{dashboardStats.totalApprovedWithdrawalsAmount.toFixed(2)}</div><p className="text-xs text-muted-foreground">({dashboardDateFilter.replace(/_/g, ' ')})</p></CardContent>
+                <CardContent>
+                    <div className="text-2xl font-bold text-green-600">₹{dashboardStats.totalApprovedWithdrawalsAmountINR.toFixed(2)}</div>
+                    <div className="text-xl font-bold text-green-500">${dashboardStats.totalApprovedWithdrawalsAmountUSD.toFixed(2)}</div>
+                    <p className="text-xs text-muted-foreground">({dashboardDateFilter.replace(/_/g, ' ')})</p>
+                </CardContent>
               </Card>
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center text-muted-foreground"><TrendingDown className="mr-2 h-4 w-4 text-yellow-500"/>Pending Withdrawals</CardTitle></CardHeader>
-                <CardContent><div className="text-2xl font-bold text-yellow-600">₹{dashboardStats.totalPendingWithdrawalsAmount.toFixed(2)}</div><p className="text-xs text-muted-foreground">({dashboardDateFilter.replace(/_/g, ' ')})</p></CardContent>
+                <CardContent>
+                    <div className="text-2xl font-bold text-yellow-600">₹{dashboardStats.totalPendingWithdrawalsAmountINR.toFixed(2)}</div>
+                    <div className="text-xl font-bold text-yellow-500">${dashboardStats.totalPendingWithdrawalsAmountUSD.toFixed(2)}</div>
+                    <p className="text-xs text-muted-foreground">({dashboardDateFilter.replace(/_/g, ' ')})</p>
+                </CardContent>
               </Card>
             </div>
           )}
@@ -691,7 +716,7 @@ export default function AdminPage() {
                         <p className="text-sm font-semibold">Note on Global Settings</p>
                     </div>
                     <ul className="list-disc pl-5 mt-1 text-xs text-yellow-600 space-y-1">
-                        <li>Toggling "Referral Program" or "Platform Withdrawals" takes effect almost immediately for new user actions.</li>
+                        <li>Toggling these settings takes effect almost immediately for new user actions.</li>
                         <li>These settings are stored in Firebase and do not require an app restart/rebuild.</li>
                     </ul>
                  </div>
@@ -712,7 +737,7 @@ export default function AdminPage() {
            <Card className="mb-6">
             <CardHeader><CardTitle className="text-lg">Filters & Search</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <div>
                         <Label htmlFor="withdrawalStatusFilter">Status</Label>
                         <Select value={withdrawalFilters.status} onValueChange={(value) => setWithdrawalFilters(prev => ({ ...prev, status: value as WithdrawalFilterCriteria['status'] }))}>
@@ -734,6 +759,18 @@ export default function AdminPage() {
                                 <SelectItem value="upi">UPI</SelectItem>
                                 <SelectItem value="paytm">Paytm</SelectItem>
                                 <SelectItem value="bank">Bank</SelectItem>
+                                <SelectItem value="paypal">PayPal</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div>
+                        <Label htmlFor="withdrawalCurrencyFilter">Currency</Label>
+                        <Select value={withdrawalFilters.currency} onValueChange={(value) => setWithdrawalFilters(prev => ({ ...prev, currency: value as WithdrawalFilterCriteria['currency'] }))}>
+                            <SelectTrigger id="withdrawalCurrencyFilter"><SelectValue placeholder="Filter by currency" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Currencies</SelectItem>
+                                <SelectItem value="INR">INR (₹)</SelectItem>
+                                <SelectItem value="USD">USD ($)</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
@@ -775,13 +812,13 @@ export default function AdminPage() {
                   <CardHeader><CardTitle className="text-lg">User ID: <span className="font-mono text-sm bg-muted p-1 rounded">{userReqs.userId}</span> {userReqs.userEmail && <span className="text-xs text-muted-foreground">({userReqs.userEmail})</span>}</CardTitle></CardHeader>
                   <CardContent>
                     <Table>
-                      <TableHeader><TableRow><TableHead>Req ID</TableHead><TableHead>Date</TableHead><TableHead>Amount (₹)</TableHead><TableHead>Method</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                      <TableHeader><TableRow><TableHead>Req ID</TableHead><TableHead>Date</TableHead><TableHead>Amount</TableHead><TableHead>Method</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
                       <TableBody>
                         {userReqs.requests.map((req) => (
                           <TableRow key={req.originalId} >
                             <TableCell className="text-xs font-mono" onClick={() => handleWithdrawalRowClick(req)}>{req.originalId.substring(0,10)}...</TableCell>
                             <TableCell onClick={() => handleWithdrawalRowClick(req)}>{format(new Date(req.requestDate), "PP pp")}</TableCell>
-                            <TableCell className="font-semibold" onClick={() => handleWithdrawalRowClick(req)}>₹{req.amount.toFixed(2)}</TableCell>
+                            <TableCell className="font-semibold" onClick={() => handleWithdrawalRowClick(req)}>{req.currency === 'USD' ? '$' : '₹'}{req.amount.toFixed(2)}</TableCell>
                             <TableCell onClick={() => handleWithdrawalRowClick(req)}>{req.method.toUpperCase()}</TableCell>
                             <TableCell onClick={() => handleWithdrawalRowClick(req)}><Badge variant="outline" className={cn("text-xs", getStatusBadgeClass(req.status))}>{req.status}</Badge></TableCell>
                             <TableCell className="text-right">
@@ -856,9 +893,10 @@ export default function AdminPage() {
                         <TableHead>User ID</TableHead>
                         <TableHead>Display Name</TableHead>
                         <TableHead>Email</TableHead>
-                        <TableHead className="text-right">Gross Lifetime Earnings (₹)</TableHead>
-                        <TableHead className="text-right">Current Balance (₹)</TableHead>
-                        <TableHead className="text-center">Referrals Made</TableHead>
+                        <TableHead>Country</TableHead>
+                        <TableHead className="text-right">Gross Lifetime Earnings</TableHead>
+                        <TableHead className="text-right">Current Balance</TableHead>
+                        <TableHead className="text-center">Referrals</TableHead>
                         <TableHead className="text-center">Withdrawals</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -871,8 +909,11 @@ export default function AdminPage() {
                             {user.isBlocked && <Badge variant="destructive" className="ml-2 text-xs">Blocked</Badge>}
                           </TableCell>
                           <TableCell>{user.email || 'N/A'}</TableCell>
-                          <TableCell className="text-right font-semibold">₹{(user.grossLifetimeEarnings || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-right font-semibold">₹{(user.totalEarnings || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-xs">
+                            <Badge variant="outline" className="font-normal">{user.country || 'N/A'} ({user.currency || 'N/A'})</Badge>
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">{user.currency === 'USD' ? '$' : '₹'}{(user.grossLifetimeEarnings || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-semibold">{user.currency === 'USD' ? '$' : '₹'}{(user.totalEarnings || 0).toFixed(2)}</TableCell>
                           <TableCell className="text-center">{user.referredUsersCount}</TableCell>
                            <TableCell className="text-center">
                             {user.canWithdraw !== false ? (
@@ -900,7 +941,7 @@ export default function AdminPage() {
 
       <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Reject Withdrawal Request</DialogTitle><DialogDescription>Please provide a reason for rejecting this withdrawal request. This will be saved as admin notes. User: {currentRequestToProcess?.userId}, Amount: ₹{currentRequestToProcess?.amount.toFixed(2)}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Reject Withdrawal Request</DialogTitle><DialogDescription>Please provide a reason for rejecting this withdrawal request. This will be saved as admin notes. User: {currentRequestToProcess?.userId}, Amount: {currentRequestToProcess?.currency === 'USD' ? '$' : '₹'}{currentRequestToProcess?.amount.toFixed(2)}</DialogDescription></DialogHeader>
           <div className="py-4 space-y-2"><Label htmlFor="rejectionReason">Rejection Reason</Label><Textarea id="rejectionReason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} placeholder="e.g., Insufficient details, suspected activity, etc." rows={3}/></div>
           <DialogFooter><Button variant="outline" onClick={() => {setIsRejectDialogOpen(false); setRejectionReason(''); setCurrentRequestToProcess(null);}} disabled={processingAction === `${currentRequestToProcess?.userId}_${currentRequestToProcess?.originalId}`}>Cancel</Button><Button onClick={handleConfirmReject} disabled={!rejectionReason.trim() || processingAction === `${currentRequestToProcess?.userId}_${currentRequestToProcess?.originalId}`} variant="destructive">{processingAction === `${currentRequestToProcess?.userId}_${currentRequestToProcess?.originalId}` && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Confirm Rejection</Button></DialogFooter>
         </DialogContent>
@@ -912,7 +953,7 @@ export default function AdminPage() {
             <DialogHeader><DialogTitle className="flex items-center gap-2"><Info size={20}/>Withdrawal Request Details</DialogTitle><DialogDescription>Req ID: <span className="font-mono text-xs">{selectedWithdrawalForModal.originalId}</span> for User: <span className="font-mono text-xs">{selectedWithdrawalForModal.userId}</span></DialogDescription></DialogHeader>
             <div className="py-4 space-y-3 text-sm">
                 <div><strong>Request Date:</strong> {format(new Date(selectedWithdrawalForModal.requestDate), "PPP ppp")}</div>
-                <div><strong>Amount:</strong> <span className="font-semibold">₹{selectedWithdrawalForModal.amount.toFixed(2)}</span></div>
+                <div><strong>Amount:</strong> <span className="font-semibold">{selectedWithdrawalForModal.currency === 'USD' ? '$' : '₹'}{selectedWithdrawalForModal.amount.toFixed(2)}</span></div>
                 <div><strong>Method:</strong> <span className="capitalize">{selectedWithdrawalForModal.method}</span></div>
                 <div className="space-y-1"><strong>Payment Details:</strong>{Object.entries(selectedWithdrawalForModal.details).map(([key, value]) => (<div key={key} className="pl-2 text-xs"><span className="capitalize font-medium">{key.replace(/([A-Z])/g, ' $1')}:</span> {String(value)}</div>))}</div>
                 <div className="flex items-center gap-2"><strong>Status:</strong> <Badge variant="outline" className={cn("text-xs", getStatusBadgeClass(selectedWithdrawalForModal.status))}>{selectedWithdrawalForModal.status}</Badge></div>
@@ -962,11 +1003,12 @@ export default function AdminPage() {
                     </CardHeader>
                     <CardContent className="space-y-1 text-xs">
                         <div><strong>Email:</strong> {selectedUserForModal.email || 'N/A'}</div>
+                        <div><strong>Country:</strong> {selectedUserForModal.country || 'N/A'} ({selectedUserForModal.currency || 'N/A'})</div>
                         <div><strong>Account Created:</strong> {format(new Date(selectedUserForModal.createdAt), "PPP ppp")}</div>
                         <div><strong>Short Referral Code:</strong> <span className="font-mono text-primary">{selectedUserForModal.shortReferralCode || 'N/A'}</span></div>
-                        <div><strong>Gross Lifetime Earnings:</strong> <span className="font-semibold text-green-600">₹{(selectedUserForModal.grossLifetimeEarnings || 0).toFixed(2)}</span></div>
-                        {isLoadingUserTransactions ? <Loader2 className="h-4 w-4 animate-spin" /> : <div><strong>Total Withdrawn (Approved):</strong> <span className="font-semibold text-red-600">₹{(selectedUserForModal.totalWithdrawn || 0).toFixed(2)}</span></div>}
-                        <div><strong>Current Available Balance:</strong> <span className="font-semibold text-blue-600">₹{(selectedUserForModal.totalEarnings || 0).toFixed(2)}</span></div>
+                        <div><strong>Gross Lifetime Earnings:</strong> <span className="font-semibold text-green-600">{selectedUserForModal.currency === 'USD' ? '$' : '₹'}{(selectedUserForModal.grossLifetimeEarnings || 0).toFixed(2)}</span></div>
+                        {isLoadingUserTransactions ? <Loader2 className="h-4 w-4 animate-spin" /> : <div><strong>Total Withdrawn (Approved):</strong> <span className="font-semibold text-red-600">{selectedUserForModal.currency === 'USD' ? '$' : '₹'}{(selectedUserForModal.totalWithdrawn || 0).toFixed(2)}</span></div>}
+                        <div><strong>Current Available Balance:</strong> <span className="font-semibold text-blue-600">{selectedUserForModal.currency === 'USD' ? '$' : '₹'}{(selectedUserForModal.totalEarnings || 0).toFixed(2)}</span></div>
                         {selectedUserForModal.referredBy && <div><strong>Referred By User ID:</strong> <span className="font-mono">{selectedUserForModal.referredBy}</span></div>}
                         <div className={cn("flex items-center gap-1 font-semibold", selectedUserForModal.canWithdraw !== false ? "text-green-600" : "text-red-600")}>
                             <strong>Withdrawal Status:</strong> {selectedUserForModal.canWithdraw !== false ? "Enabled" : "Disabled"}
@@ -991,9 +1033,12 @@ export default function AdminPage() {
                          {isLoadingUserTransactions ? (<div className="flex items-center justify-center py-3"><Loader2 className="h-5 w-5 animate-spin text-primary mr-2" /> Loading transactions...</div>
                          ) : selectedUserTransactions.length > 0 ? (
                             <Table><TableHeader><TableRow><TableHead className="h-8">Date</TableHead><TableHead className="h-8">Description</TableHead><TableHead className="h-8 text-right">Amount</TableHead><TableHead className="h-8 text-center">Status</TableHead></TableRow></TableHeader>
-                                <TableBody>{selectedUserTransactions.slice(0,10).map(tx => (
-                                    <TableRow key={tx.id} className="text-xs"><TableCell>{format(new Date(tx.date), "MM/dd HH:mm")}</TableCell><TableCell>{tx.description}</TableCell><TableCell className={cn("text-right", tx.type === 'earning' ? 'text-green-500' : 'text-red-500')}>{tx.type === 'earning' ? '+' : ''}{tx.amount.toFixed(2)}</TableCell><TableCell className="text-center"><Badge variant="outline" size="sm" className={cn("text-[10px] px-1.5 py-0", getStatusBadgeClass(tx.status))}>{tx.status}</Badge></TableCell></TableRow>
-                                ))}</TableBody>
+                                <TableBody>{selectedUserTransactions.slice(0,10).map(tx => {
+                                    const txCurrencySymbol = tx.currency === 'USD' ? '$' : '₹';
+                                    return (
+                                    <TableRow key={tx.id} className="text-xs"><TableCell>{format(new Date(tx.date), "MM/dd HH:mm")}</TableCell><TableCell>{tx.description}</TableCell><TableCell className={cn("text-right", tx.type === 'earning' ? 'text-green-500' : 'text-red-500')}>{tx.type === 'earning' ? '+' : ''}{txCurrencySymbol}{tx.amount.toFixed(2)}</TableCell><TableCell className="text-center"><Badge variant="outline" size="sm" className={cn("text-[10px] px-1.5 py-0", getStatusBadgeClass(tx.status))}>{tx.status}</Badge></TableCell></TableRow>
+                                    );
+                                })}</TableBody>
                             </Table>
                          ) : (<p className="text-xs text-muted-foreground text-center py-2">No transactions found for this user.</p>)}
                     </CardContent>
@@ -1025,4 +1070,3 @@ export default function AdminPage() {
     </div>
   );
 }
-

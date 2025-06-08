@@ -8,12 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus, AlertCircle } from 'lucide-react';
+import { Loader2, LogIn, UserPlus, AlertCircle, Globe } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database } from '@/lib/firebase';
 import { ref, set, get, serverTimestamp, onValue, off } from 'firebase/database';
 import type { UserProfile, PlatformSettings } from '@/lib/types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 
 const GoogleIcon = () => (
   <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
@@ -37,9 +39,9 @@ const generateShortAlphaNumericCode = (length: number): string => {
 const LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY = 'drawlyDeviceOriginalReferrerUid';
 
 interface AuthFormProps {
-  passedReferralCodeProp?: string | null; 
-  initialActionProp?: string | null; 
-  forceSignupFromPath?: boolean; 
+  passedReferralCodeProp?: string | null;
+  initialActionProp?: string | null;
+  forceSignupFromPath?: boolean;
   redirectAfterAuth?: string | null;
 }
 
@@ -53,6 +55,7 @@ export default function AuthForm({
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [country, setCountry] = useState<'India' | 'Other'>('India'); // Added country state
 
   const [isSigningUp, setIsSigningUp] = useState(true);
 
@@ -93,7 +96,7 @@ export default function AuthForm({
         forceSignupModeForEffect = true;
       }
     }
-    
+
     setReferralCodeInput(codeToSet);
 
     if (forceSignupModeForEffect) {
@@ -101,7 +104,7 @@ export default function AuthForm({
     } else if (initialActionProp === 'login') {
       setIsSigningUp(false);
     } else {
-      setIsSigningUp(true); 
+      setIsSigningUp(true);
     }
 
   }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
@@ -114,19 +117,22 @@ export default function AuthForm({
     let finalEmail = email;
     let finalDisplayName = displayName;
     let finalPassword = password;
+    let finalCountry = country; // Use state for country
 
     if (isGoogleAuth) {
       const randomNum = Math.floor(Math.random() * 10000);
       finalEmail = `user${randomNum}.google@example.com`;
       finalDisplayName = `GoogleUser${randomNum}`;
       finalPassword = "google_simulated_password";
+      // For Google auth, country could be asked in a subsequent step or defaulted.
+      // For this simulation, we'll use the currently selected country.
       if (isSigningUp && !displayName.trim()) {
-        setDisplayName(finalDisplayName); 
+        setDisplayName(finalDisplayName);
       }
     }
 
-    if (!finalEmail.trim() || (isSigningUp && !finalDisplayName.trim()) || !finalPassword.trim()) {
-      toast({ title: "Error", description: "Please fill all required fields.", variant: "destructive" });
+    if (!finalEmail.trim() || (isSigningUp && !finalDisplayName.trim()) || !finalPassword.trim() || (isSigningUp && !finalCountry)) {
+      toast({ title: "Error", description: "Please fill all required fields, including country for signup.", variant: "destructive" });
       if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
       return;
     }
@@ -136,7 +142,7 @@ export default function AuthForm({
     try {
       if (isSigningUp) {
         let newShortReferralCode = '';
-        if (referralProgramEnabled) { // Only generate if program is enabled
+        if (referralProgramEnabled) {
             let codeExists = true;
             let attempts = 0;
             const MAX_CODE_GEN_ATTEMPTS = 10;
@@ -160,16 +166,19 @@ export default function AuthForm({
           userId: simulatedUid,
           displayName: finalDisplayName,
           email: finalEmail,
-          referralCode: simulatedUid, 
-          shortReferralCode: referralProgramEnabled ? newShortReferralCode : undefined, 
+          referralCode: simulatedUid,
+          shortReferralCode: referralProgramEnabled ? newShortReferralCode : undefined,
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
+          country: finalCountry, // Save country
+          currency: finalCountry === 'India' ? 'INR' : 'USD', // Set currency based on country
+          canWithdraw: true, // Default for new users
         };
 
-        if (referralProgramEnabled) { // Only process referrals if program is enabled
+        if (referralProgramEnabled) {
             let actualReferrerUid: string | null = null;
             const deviceOriginalReferrerUid = typeof window !== 'undefined' ? localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY) : null;
-            const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); 
+            const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase();
 
             if (deviceOriginalReferrerUid) {
               actualReferrerUid = deviceOriginalReferrerUid;
@@ -189,7 +198,7 @@ export default function AuthForm({
               const referrerMapSnap = await get(referrerMapRef);
               if (referrerMapSnap.exists()) {
                 const foundReferrerUid = referrerMapSnap.val() as string;
-                if (foundReferrerUid === simulatedUid) { 
+                if (foundReferrerUid === simulatedUid) {
                    toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
                 } else {
                   actualReferrerUid = foundReferrerUid;
@@ -211,16 +220,16 @@ export default function AuthForm({
                 timestamp: serverTimestamp() as number,
               });
             }
-        } // End of referralProgramEnabled block
+        }
 
         await set(ref(database, `users/${simulatedUid}`), newUserProfile);
         if (referralProgramEnabled && newShortReferralCode) {
-            await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid); 
+            await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
         }
 
         toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
 
-      } else { 
+      } else { // Login
         let foundUser: UserProfile | null = null;
         let foundUid: string | null = null;
 
@@ -242,9 +251,9 @@ export default function AuthForm({
           if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
           return;
         }
-        finalDisplayName = foundUser.displayName; 
+        finalDisplayName = foundUser.displayName;
         if (typeof window !== 'undefined') {
-          localStorage.setItem('drawlyUserUid', foundUid); 
+          localStorage.setItem('drawlyUserUid', foundUid);
         }
         toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
@@ -252,7 +261,7 @@ export default function AuthForm({
       if (typeof window !== 'undefined') {
         localStorage.setItem('drawlyAuthStatus', 'loggedIn');
         localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-        localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) ); 
+        localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) );
       }
       router.push(redirectAfterAuth || '/');
 
@@ -269,7 +278,7 @@ export default function AuthForm({
     handleAuth(false);
   };
 
-  const disableToggle = isLoadingEmail || isLoadingGoogle || 
+  const disableToggle = isLoadingEmail || isLoadingGoogle ||
                        (forceSignupFromPath && !!(passedReferralCodeProp && passedReferralCodeProp.trim() !== "")) ||
                        (!forceSignupFromPath && !!(passedReferralCodeProp && passedReferralCodeProp.trim() !== ""));
 
@@ -286,20 +295,41 @@ export default function AuthForm({
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-6">
             {isSigningUp && (
-              <div className="space-y-2">
-                <Label htmlFor="displayName_auth_form" className="text-lg">Display Name</Label>
-                <Input
-                  id="displayName_auth_form"
-                  name="displayName"
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Your game name"
-                  required={isSigningUp}
-                  className="text-base py-6"
-                  disabled={isLoadingEmail || isLoadingGoogle}
-                />
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="displayName_auth_form" className="text-lg">Display Name</Label>
+                  <Input
+                    id="displayName_auth_form"
+                    name="displayName"
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Your game name"
+                    required={isSigningUp}
+                    className="text-base py-6"
+                    disabled={isLoadingEmail || isLoadingGoogle}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="country_auth_form" className="text-lg flex items-center">
+                    <Globe size={18} className="mr-2 text-muted-foreground"/> Country
+                  </Label>
+                  <Select
+                    value={country}
+                    onValueChange={(value: 'India' | 'Other') => setCountry(value)}
+                    required
+                    disabled={isLoadingEmail || isLoadingGoogle}
+                  >
+                    <SelectTrigger id="country_auth_form" className="text-base py-6">
+                      <SelectValue placeholder="Select your country" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="India">India (INR ₹)</SelectItem>
+                      <SelectItem value="Other">Other (USD $)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
             )}
             <div className="space-y-2">
               <Label htmlFor="email_auth_form" className="text-lg">Email</Label>
@@ -335,15 +365,15 @@ export default function AuthForm({
                    <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
                 </Label>
                 <Input
-                  id="referral_code" 
-                  name="referral_code" 
+                  id="referral_code"
+                  name="referral_code"
                   type="text"
-                  value={referralCodeInput} 
-                  onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())} 
+                  value={referralCodeInput}
+                  onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
                   placeholder="Enter 5-character code"
                   className="text-base py-3"
                   maxLength={5}
-                  disabled={isLoadingEmail || isLoadingGoogle || isLoadingPlatformSettings || !referralProgramEnabled} 
+                  disabled={isLoadingEmail || isLoadingGoogle || isLoadingPlatformSettings || !referralProgramEnabled}
                 />
                 {isLoadingPlatformSettings && <p className="text-xs text-muted-foreground"><Loader2 className="h-3 w-3 mr-1 animate-spin inline-block"/>Loading referral status...</p>}
                 {!isLoadingPlatformSettings && !referralProgramEnabled && (
@@ -394,8 +424,8 @@ export default function AuthForm({
                 type="button"
             >
               {isSigningUp
-                ? (disableToggle) 
-                    ? "Complete Sign Up with Referral" 
+                ? (disableToggle)
+                    ? "Complete Sign Up with Referral"
                     : "Already have an account? Login"
                 : "Don't have an account? Sign Up"}
             </Button>

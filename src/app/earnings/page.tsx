@@ -34,7 +34,7 @@ export default function EarningsDashboardPage() {
           setUserProfile(snapshot.val() as UserProfile);
         } else {
           console.warn("User profile not found in DB for UID:", storedUid);
-          setUserProfile(null); 
+          setUserProfile(null);
         }
         setIsLoading(false);
       }).catch(error => {
@@ -44,7 +44,7 @@ export default function EarningsDashboardPage() {
       });
     } else {
       setIsLoading(false);
-      setUserProfile(null); 
+      setUserProfile(null);
     }
   }, []);
 
@@ -112,6 +112,7 @@ export default function EarningsDashboardPage() {
     );
   }
 
+  const currencySymbol = userProfile.currency === 'USD' ? '$' : '₹';
 
   return (
     <div className="container mx-auto py-8 px-4 md:px-6 lg:px-8">
@@ -123,7 +124,7 @@ export default function EarningsDashboardPage() {
                 {APP_NAME} Earnings Dashboard
                 </h1>
                 <p className="text-muted-foreground mt-1">
-                Welcome, {userProfile.displayName || 'Player'}! Track your referrals, manage earnings, and view transactions.
+                Welcome, {userProfile.displayName || 'Player'}! Your current balance is <span className="font-semibold text-primary">{currencySymbol}{userProfile.totalEarnings.toFixed(2)}</span>.
                 </p>
             </div>
             <Button variant="outline" onClick={() => router.push('/')} className="self-start sm:self-center">
@@ -159,4 +160,3 @@ export default function EarningsDashboardPage() {
     </div>
   );
 }
-

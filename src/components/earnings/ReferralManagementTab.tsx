@@ -20,12 +20,12 @@ interface ReferralManagementTabProps {
 }
 
 interface DisplayReferral extends ReferralEntry {
-    id: string; 
+    id: string;
 }
 
 interface ReferralStats {
     totalReferrals: number;
-    totalEarningsFromReferrals: number;
+    totalEarningsFromReferrals: number; // This will show based on user's currency
     gamesByReferralsToday: number;
     activeReferralsLast7Days: number;
 }
@@ -35,7 +35,7 @@ interface ReferralEarningsMap {
 }
 
 const parseRewardTransactionDescription = (description: string): { referredUserName: string; rounds: number; players: number } | null => {
-    const match = description.match(/^Reward from (.*?) \(Played (\d+) rounds? with (\d+) players?\)$/i); 
+    const match = description.match(/^Reward from (.*?) \(Played (\d+) rounds? with (\d+) players?\)$/i);
     if (match && match[1] && match[2] && match[3]) {
         return {
             referredUserName: match[1].trim(),
@@ -62,18 +62,20 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
   const [referralProgramEnabled, setReferralProgramEnabled] = useState(true);
   const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
 
+  const currencySymbol = userProfile?.currency === 'USD' ? '$' : '₹';
+
   useEffect(() => {
     const settingsRef = ref(database, 'platformSettings');
     const listener = onValue(settingsRef, (snapshot) => {
       if (snapshot.exists()) {
         setReferralProgramEnabled(snapshot.val().referralProgramEnabled !== false);
       } else {
-        setReferralProgramEnabled(true); 
+        setReferralProgramEnabled(true);
       }
       setIsLoadingPlatformSettings(false);
     }, (error) => {
       console.error("Error fetching platform settings for ReferralTab:", error);
-      setReferralProgramEnabled(true); 
+      setReferralProgramEnabled(true);
       setIsLoadingPlatformSettings(false);
     });
     return () => off(settingsRef, 'value', listener);
@@ -81,7 +83,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
 
   useEffect(() => {
     if (!authUserUid || !userProfile || isLoadingPlatformSettings) {
-      if (!isLoadingPlatformSettings) setIsLoading(false); // Only set loading to false if platform settings are loaded
+      if (!isLoadingPlatformSettings) setIsLoading(false);
       return;
     }
 
@@ -96,7 +98,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
         if (referralsSnapshot.exists()) {
           const referralsData = referralsSnapshot.val();
           loadedReferrals = Object.keys(referralsData).map(key => ({
-            id: key, 
+            id: key,
             ...referralsData[key]
           }));
         }
@@ -108,7 +110,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
           const transactionsData = transactionsSnapshot.val();
           loadedTransactions = Object.keys(transactionsData)
             .map(key => ({ id: key, ...transactionsData[key] }))
-            .sort((a, b) => b.date - a.date); 
+            .sort((a, b) => b.date - a.date);
         }
 
         let gamesTodayCount = 0;
@@ -117,15 +119,17 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
         const todayStart = startOfDay(new Date());
         const todayEnd = endOfDay(new Date());
         const sevenDaysAgoStart = startOfDay(subDays(new Date(), 6));
+        let totalEarningsThisUserFromReferrals = 0;
 
         loadedTransactions.forEach(tx => {
           if (tx.type === 'earning') {
             const parsedInfo = parseRewardTransactionDescription(tx.description);
             if (parsedInfo && parsedInfo.referredUserName) {
+              totalEarningsThisUserFromReferrals += tx.amount; // Summing up all referral earnings
               const txDateValue = new Date(tx.date).getTime();
               if (txDateValue >= todayStart.getTime() && txDateValue <= todayEnd.getTime()) gamesTodayCount++;
               if (txDateValue >= sevenDaysAgoStart.getTime() && txDateValue <= todayEnd.getTime()) activeUserNamesLast7Days.add(parsedInfo.referredUserName);
-              
+
               const matchingReferralInList = loadedReferrals.find(r => r.referredUserName === parsedInfo.referredUserName);
               if (matchingReferralInList) {
                 newReferralEarningsMap[matchingReferralInList.id] = (newReferralEarningsMap[matchingReferralInList.id] || 0) + tx.amount;
@@ -133,11 +137,11 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
             }
           }
         });
-        
+
         setReferralEarningsMap(newReferralEarningsMap);
         setReferralStats({
           totalReferrals: loadedReferrals.length,
-          totalEarningsFromReferrals: userProfile.totalEarnings || 0,
+          totalEarningsFromReferrals: totalEarningsThisUserFromReferrals, // Use the calculated sum
           gamesByReferralsToday: gamesTodayCount,
           activeReferralsLast7Days: activeUserNamesLast7Days.size,
         });
@@ -150,13 +154,32 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
       }
     };
 
-    if (referralProgramEnabled) { // Only fetch referral specific data if program is enabled
+    if (referralProgramEnabled) {
         fetchData();
     } else {
-        setIsLoading(false); // If program disabled, no need to load referral specifics
+        setIsLoading(false);
         setReferrals([]);
         setReferralEarningsMap({});
-        setReferralStats({ totalReferrals: 0, totalEarningsFromReferrals: userProfile.totalEarnings || 0, gamesByReferralsToday: 0, activeReferralsLast7Days: 0 });
+        // Even if program is off, show their past earnings if any, which is now part of userProfile.totalEarnings.
+        // For "Total Earnings from Referrals" card, it should probably show 0 if program is off, or sum of specific referral txns.
+        // Let's show sum of specific referral transactions for historical accuracy.
+        const fetchHistoricalReferralEarnings = async () => {
+            let historicalReferralEarnings = 0;
+            try {
+                const transactionsSnapshot = await get(ref(database, `transactions/${authUserUid}`));
+                if (transactionsSnapshot.exists()) {
+                    const transactionsData = transactionsSnapshot.val();
+                    Object.values(transactionsData).forEach((tx: any) => {
+                        if (tx.type === 'earning' && parseRewardTransactionDescription(tx.description)) {
+                            historicalReferralEarnings += tx.amount;
+                        }
+                    });
+                }
+            } catch (e) { console.error("Error fetching historical referral earnings:", e); }
+            setReferralStats({ totalReferrals: 0, totalEarningsFromReferrals: historicalReferralEarnings, gamesByReferralsToday: 0, activeReferralsLast7Days: 0 });
+        };
+        fetchHistoricalReferralEarnings();
+
     }
 
   }, [authUserUid, userProfile, toast, isLoadingPlatformSettings, referralProgramEnabled]);
@@ -172,7 +195,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
     }
   };
 
-  if (isLoading || isLoadingPlatformSettings) { 
+  if (isLoading || isLoadingPlatformSettings) {
     return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
 
@@ -187,8 +210,9 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
           </CardHeader>
           <CardContent>
             <p className="text-sm text-yellow-600">
-              The referral and earning program is currently disabled by the administrators. 
+              The referral and earning program is currently disabled by the administrators.
               You can still view your overall transaction history and manage withdrawals if applicable.
+              Your past referral earnings (if any): {currencySymbol}{referralStats.totalEarningsFromReferrals.toFixed(2)}.
             </p>
           </CardContent>
         </Card>
@@ -252,7 +276,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">₹{referralStats.totalEarningsFromReferrals.toFixed(2)}</div>
+              <div className="text-2xl font-bold">{currencySymbol}{referralStats.totalEarningsFromReferrals.toFixed(2)}</div>
               <p className="text-xs text-muted-foreground">
                 Lifetime earnings from your referrals.
               </p>
@@ -298,7 +322,7 @@ export default function ReferralManagementTab({ authUserUid, userProfile }: Refe
                   <TableRow>
                     <TableHead>Name/Username</TableHead>
                     <TableHead className="text-center">Referred On</TableHead>
-                    <TableHead className="text-right">Earnings Generated (₹)</TableHead>
+                    <TableHead className="text-right">Earnings Generated ({currencySymbol})</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
