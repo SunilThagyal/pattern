@@ -18,6 +18,8 @@ import type { UserProfile } from '@/lib/types';
 
 type PaymentMethod = 'upi' | 'paytm' | 'bank' | 'paypal';
 
+const SPECIAL_VALUE_NONE = "_NONE_"; // Define a constant for clarity
+
 export default function EditProfilePage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -103,16 +105,14 @@ export default function EditProfilePage() {
         paymentDetailsToSave.ifscCode = ifscCode.trim();
     } else if (defaultPaymentMethod === 'paypal' && paypalEmail.trim()) paymentDetailsToSave.paypalEmail = paypalEmail.trim();
     
-    // Only save payment details if a method is selected and corresponding details are provided
     if (defaultPaymentMethod && Object.keys(paymentDetailsToSave).length > 0) {
         updates.defaultPaymentDetails = paymentDetailsToSave;
     } else if (defaultPaymentMethod && Object.keys(paymentDetailsToSave).length === 0) {
-        // If a method is selected but no details are entered for it, prompt user or clear method
         toast({ title: "Payment Details Missing", description: `Please enter details for ${defaultPaymentMethod.toUpperCase()} or clear the default method selection.`, variant: "destructive" });
         setIsSaving(false);
         return;
-    } else { // No method selected
-        updates.defaultPaymentDetails = undefined; // Clear details if no method is selected
+    } else { 
+        updates.defaultPaymentDetails = {}; // Clear details if no method is selected by setting to empty object or undefined
     }
 
 
@@ -131,8 +131,12 @@ export default function EditProfilePage() {
     }
   };
   
-  const handlePaymentMethodChange = (value: PaymentMethod | '') => {
-    setDefaultPaymentMethod(value);
+  const handlePaymentMethodChange = (value: string) => { // Value from Select onValueChange is always string
+    if (value === SPECIAL_VALUE_NONE) {
+        setDefaultPaymentMethod('');
+    } else {
+        setDefaultPaymentMethod(value as PaymentMethod);
+    }
     // Clear previous details when method changes to avoid saving stale data if user doesn't update
     setUpiId('');
     setAccountNumber('');
@@ -220,14 +224,14 @@ export default function EditProfilePage() {
                  <p className="text-xs text-muted-foreground mb-3">Set your preferred way to receive withdrawals. This will pre-fill the withdrawal form.</p>
                   <Select 
                     value={defaultPaymentMethod} 
-                    onValueChange={(value: PaymentMethod | '') => handlePaymentMethodChange(value)} 
+                    onValueChange={(value: string) => handlePaymentMethodChange(value)} 
                     disabled={isSaving}
                    >
                     <SelectTrigger id="defaultPaymentMethod" className="w-full mt-1 text-base py-3">
                       <SelectValue placeholder="None (Select during withdrawal)" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None (Select during withdrawal)</SelectItem>
+                      <SelectItem value={SPECIAL_VALUE_NONE}>None (Select during withdrawal)</SelectItem>
                       {country === 'India' ? (
                         <>
                           <SelectItem value="upi">UPI</SelectItem>
@@ -289,3 +293,4 @@ export default function EditProfilePage() {
     </div>
   );
 }
+
