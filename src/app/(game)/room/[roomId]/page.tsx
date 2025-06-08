@@ -36,6 +36,7 @@ import {
 const MaxGuesserPoints = 100;
 const BaseDrawerPointsPerGuess = 50;
 const FirstGuesserBonus = 10;
+const MIN_PLAYERS_TO_START_GAME = 2;
 
 
 const WordSelectionDialog = dynamic(() => import('@/components/game/WordSelectionDialog').then(mod => mod.WordSelectionDialog), {
@@ -384,6 +385,7 @@ const DrawingCanvas = React.memo(({
                 variant="secondary"
                 className="shadow-xl animate-pulse"
                 disabled={!canStartGame || isStartingNextRoundOrGame}
+                title={!canStartGame ? `Need at least ${MIN_PLAYERS_TO_START_GAME} online players to start.` : startButtonInfo.text}
               >
                 {isStartingNextRoundOrGame ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -394,6 +396,9 @@ const DrawingCanvas = React.memo(({
                     </>
                 )}
               </Button>
+            )}
+            {!isHost && (gameState === 'waiting' || gameState === 'game_over') && (
+                 <p className="text-white text-lg font-semibold bg-black/50 p-3 rounded-md">Waiting for the host to start the game...</p>
             )}
           </div>
         )}
@@ -888,7 +893,7 @@ export default function GameRoomPage() {
 
   const gameOverProcessedRef = useRef(false);
 
-  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true });
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
   const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
 
   useEffect(() => {
@@ -898,12 +903,12 @@ export default function GameRoomPage() {
         setPlatformSettings(snapshot.val());
       } else {
         // Default if not set in DB, consider this the "true" default
-        setPlatformSettings({ referralProgramEnabled: true });
+        setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
       }
       setIsLoadingPlatformSettings(false);
     }, (error) => {
       console.error("Error fetching platform settings for GameRoom:", error);
-      setPlatformSettings({ referralProgramEnabled: true }); // Fallback
+      setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true }); // Fallback
       setIsLoadingPlatformSettings(false);
     });
     return () => off(settingsRef, 'value', listener);
@@ -1000,10 +1005,11 @@ export default function GameRoomPage() {
     }
 
     const onlinePlayers = Object.values(currentRoomData.players || {}).filter(p => p.isOnline && p.id);
-    if (onlinePlayers.length < 1 && (currentRoomData.gameState === 'waiting' || currentRoomData.gameState === 'game_over' || currentRoomData.gameState === 'round_end')) {
-         toast({title: "Not enough players", description: "Need at least 1 online player to start/continue.", variant: "default"});
+    if (onlinePlayers.length < MIN_PLAYERS_TO_START_GAME && (currentRoomData.gameState === 'waiting' || currentRoomData.gameState === 'game_over' || currentRoomData.gameState === 'round_end')) {
+         toast({title: "Not Enough Players", description: `Need at least ${MIN_PLAYERS_TO_START_GAME} online players to start/continue.`, variant: "default"});
          if(currentRoomData.gameState !== 'waiting' && currentRoomData.gameState !== 'game_over'){
             await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
+            addSystemMessage(`Game ended: Not enough players to continue (need ${MIN_PLAYERS_TO_START_GAME}).`);
          }
          return;
     }
@@ -1315,12 +1321,28 @@ export default function GameRoomPage() {
     setIsStartingNextRoundOrGame(true);
     try {
         const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
-        if (!currentRoomSnapshot.exists()) return;
+        if (!currentRoomSnapshot.exists()) {
+            toast({ title: "Error", description: "Room not found.", variant: "destructive" });
+            return;
+        }
         const currentRoomData: Room = currentRoomSnapshot.val();
 
-        if (!currentRoomData || !playerId || currentRoomData.hostId !== playerId) return;
+        if (!currentRoomData || !playerId || currentRoomData.hostId !== playerId) {
+            toast({ title: "Error", description: "Only the host can start the game.", variant: "destructive" });
+            return;
+        }
 
         if (currentRoomData.gameState === 'waiting' || currentRoomData.gameState === 'game_over') {
+            const onlinePlayersCount = Object.values(currentRoomData.players || {}).filter(p => p.isOnline).length;
+            if (onlinePlayersCount < MIN_PLAYERS_TO_START_GAME) {
+                toast({
+                    title: "Cannot Start Game",
+                    description: `At least ${MIN_PLAYERS_TO_START_GAME} online players are required. Currently: ${onlinePlayersCount}.`,
+                    variant: "default"
+                });
+                return;
+            }
+
             if (currentRoomData.gameState === 'game_over') {
                 await prepareNewGameSession();
             }
@@ -1666,23 +1688,26 @@ export default function GameRoomPage() {
             clearInterval(countdownInterval);
             setRoundEndCountdown(null);
 
-            const currentRoomStateSnap = await get(ref(database, `rooms/${roomId}/gameState`));
-            if (currentRoomStateSnap.exists() && currentRoomStateSnap.val() === 'round_end') {
-                const playersSnap = await get(ref(database, `rooms/${roomId}/players`));
-                if (playersSnap.exists()) {
-                    const playersData = playersSnap.val();
-                    const onlinePlayersCount = Object.values(playersData || {}).filter((p: any) => p.isOnline).length;
-                    if (onlinePlayersCount > 0) {
-                        selectWordForNewRound();
+            const currentRoomSnap = await get(ref(database, `rooms/${roomId}`));
+            if (currentRoomSnap.exists()) {
+                const currentRoomState = currentRoomSnap.val() as Room;
+                 if (currentRoomState.gameState === 'round_end') {
+                    const playersSnap = await get(ref(database, `rooms/${roomId}/players`));
+                    if (playersSnap.exists()) {
+                        const playersData = playersSnap.val();
+                        const onlinePlayersCount = Object.values(playersData || {}).filter((p: any) => p.isOnline).length;
+                        if (onlinePlayersCount >= MIN_PLAYERS_TO_START_GAME) {
+                            selectWordForNewRound();
+                        } else {
+                            await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
+                            addSystemMessage(`Game ended: Not enough players to continue (need ${MIN_PLAYERS_TO_START_GAME}).`);
+                            toast({title: "Not Enough Players", description: `Game ended as fewer than ${MIN_PLAYERS_TO_START_GAME} players are online.`, variant: "default"});
+                        }
                     } else {
                         await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
-                        addSystemMessage("Game ended: No active players.");
-                        toast({title: "No Active Players", description: "Game ended as no players are online.", variant: "default"});
+                        addSystemMessage("Game ended: Player data missing.");
+                        toast({title: "Game Error", description: "Cannot proceed, player data missing.", variant: "destructive"});
                     }
-                } else {
-                    await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over' });
-                    addSystemMessage("Game ended: Player data missing.");
-                    toast({title: "Game Error", description: "Cannot proceed, player data missing.", variant: "destructive"});
                 }
             }
         }, NEXT_ROUND_DELAY_SECONDS * 1000);
@@ -1875,13 +1900,14 @@ export default function GameRoomPage() {
                         amount: actualReward,
                         type: 'earning',
                         status: 'Earned',
+                        currency: referrerProfileSnap.val().currency || 'INR',
                       };
                       await push(transactionsRef, newTransaction);
                       
                       const roomPlayerReferrerRef = ref(database, `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`);
                       await runTransaction(roomPlayerReferrerRef, (currentRoomRewards) => (currentRoomRewards || 0) + actualReward);
 
-                      addSystemMessage(`[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ₹${actualReward.toFixed(2)} because ${p.name} completed a full game!`);
+                      addSystemMessage(`[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${referrerProfileSnap.val().currency === 'USD' ? '$' : '₹'}${actualReward.toFixed(2)} because ${p.name} completed a full game!`);
 
                     } catch (e) {
                       console.error("Error awarding dynamic referral reward:", e);
@@ -1961,7 +1987,7 @@ export default function GameRoomPage() {
             isHost={room.hostId === playerId}
             onStartGame={manageGameStart}
             startButtonInfo={startButtonInfo}
-            canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players || {}).filter((p: Player)=>p.isOnline).length >= 1}
+            canStartGame={(room.gameState === 'waiting' || room.gameState === 'game_over') && Object.values(room.players || {}).filter((p: Player)=>p.isOnline).length >= MIN_PLAYERS_TO_START_GAME}
             isStartingNextRoundOrGame={isStartingNextRoundOrGame}
             aiSketchDataUri={room.aiSketchDataUri}
             onDrawWithAI={isCurrentPlayerDrawing ? handleDrawWithAI : undefined}
@@ -2039,7 +2065,7 @@ export default function GameRoomPage() {
             players={playersArray}
             isHost={room.hostId === playerId}
             onPlayAgain={manageGameStart}
-            canPlayAgain={Object.values(room.players || {}).filter(p=>p.isOnline).length >= 1}
+            canPlayAgain={Object.values(room.players || {}).filter(p=>p.isOnline).length >= MIN_PLAYERS_TO_START_GAME}
             roundEndCountdown={roundEndCountdown}
             isStartingNextRoundOrGame={isStartingNextRoundOrGame}
         />
@@ -2133,3 +2159,4 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     }
     return finalWords.slice(0, count);
 };
+
