@@ -49,8 +49,10 @@ export interface UserProfile {
   isBlocked?: boolean;
   blockReason?: string;
   canWithdraw?: boolean;
-  country: 'India' | 'Other'; // Added
-  currency: 'INR' | 'USD';    // Added
+  country: 'India' | 'Other';
+  currency: 'INR' | 'USD';
+  defaultPaymentMethod?: 'upi' | 'paytm' | 'bank' | 'paypal';
+  defaultPaymentDetails?: Record<string, string>;
 }
 
 export interface DisplayUser extends UserProfile {
@@ -77,15 +79,15 @@ export interface Transaction {
   status: TransactionStatus;
   notes?: string;
   withdrawalRequestId?: string;
-  currency?: 'INR' | 'USD'; // Added for transactions, reflects user's currency at time of tx
+  currency?: 'INR' | 'USD';
 }
 
 export interface WithdrawalRequest {
   id?: string;
   userId: string;
   amount: number;
-  currency: 'INR' | 'USD'; // Added
-  method: 'upi' | 'paytm' | 'bank' | 'paypal'; // Added 'paypal'
+  currency: 'INR' | 'USD';
+  method: 'upi' | 'paytm' | 'bank' | 'paypal';
   details: Record<string, string>;
   status: 'Pending' | 'Approved' | 'Rejected';
   requestDate: number;
@@ -101,8 +103,8 @@ export interface AdminDisplayWithdrawalRequest extends WithdrawalRequest {
 
 export interface AdminDashboardStats {
   totalUsers: number;
-  totalPlatformEarningsINR: number; // Specific for INR sums for now
-  totalPlatformEarningsUSD: number; // Specific for USD sums for now
+  totalPlatformEarningsINR: number;
+  totalPlatformEarningsUSD: number;
   totalApprovedWithdrawalsAmountINR: number;
   totalApprovedWithdrawalsAmountUSD: number;
   totalPendingWithdrawalsAmountINR: number;
@@ -111,7 +113,7 @@ export interface AdminDashboardStats {
 
 export type WithdrawalFilterCriteria = {
     status: 'all' | 'Pending' | 'Approved' | 'Rejected';
-    method: 'all' | 'upi' | 'paytm' | 'bank' | 'paypal'; // Added 'paypal'
+    method: 'all' | 'upi' | 'paytm' | 'bank' | 'paypal';
     dateFrom?: Date | null;
     dateTo?: Date | null;
     searchTerm: string;

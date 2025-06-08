@@ -9,17 +9,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from '@/hooks/use-toast';
-import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2, Ban, PowerOff, Power, Mail } from 'lucide-react'; // Added Mail for PayPal
+import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2, Ban, PowerOff, Power, Mail } from 'lucide-react';
 import { database } from '@/lib/firebase';
 import { ref, push, serverTimestamp, runTransaction, get, onValue, off, type DataSnapshot, update } from 'firebase/database';
 import type { Transaction, WithdrawalRequest, UserProfile, PlatformSettings } from '@/lib/types';
 
 const MIN_WITHDRAWAL_AMOUNT = 50;
+type PaymentMethod = 'upi' | 'paytm' | 'bank' | 'paypal' | '';
 
-interface WithdrawalManagementTabProps {
-  authUserUid: string | null;
-  initialBalance: number;
-}
 
 export default function WithdrawalManagementTab({ authUserUid, initialBalance }: WithdrawalManagementTabProps) {
   const [currentBalance, setCurrentBalance] = useState(initialBalance);
@@ -27,12 +24,12 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const [withdrawalAmount, setWithdrawalAmount] = useState('');
-  const [withdrawalMethod, setWithdrawalMethod] = useState<'upi' | 'paytm' | 'bank' | 'paypal' | ''>(''); // Added paypal
+  const [withdrawalMethod, setWithdrawalMethod] = useState<PaymentMethod>('');
   const [upiId, setUpiId] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState('');
   const [paytmNumber, setPaytmNumber] = useState('');
-  const [paypalEmail, setPaypalEmail] = useState(''); // Added for PayPal
+  const [paypalEmail, setPaypalEmail] = useState('');
 
   const { toast } = useToast();
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
@@ -88,6 +85,17 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
             const profile = snapshot.val() as UserProfile;
             setUserProfile(profile);
             setCurrentBalance(profile.totalEarnings || 0);
+            // Pre-fill default payment method when user profile loads
+            if (profile.defaultPaymentMethod && profile.defaultPaymentDetails) {
+                setWithdrawalMethod(profile.defaultPaymentMethod);
+                const details = profile.defaultPaymentDetails;
+                if (profile.defaultPaymentMethod === 'upi') setUpiId(details.upiId || '');
+                else if (profile.defaultPaymentMethod === 'paytm') setPaytmNumber(details.paytmNumber || '');
+                else if (profile.defaultPaymentMethod === 'bank') {
+                    setAccountNumber(details.accountNumber || '');
+                    setIfscCode(details.ifscCode || '');
+                } else if (profile.defaultPaymentMethod === 'paypal') setPaypalEmail(details.paypalEmail || '');
+            }
         } else {
             setUserProfile(null);
             setCurrentBalance(initialBalance);
@@ -156,8 +164,8 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
     const withdrawalRequestData: Omit<WithdrawalRequest, 'id' | 'transactionId'> = {
       userId: authUserUid,
       amount,
-      currency: userProfile.currency, // Store currency with the request
-      method: withdrawalMethod,
+      currency: userProfile.currency, 
+      method: withdrawalMethod as 'upi' | 'paytm' | 'bank' | 'paypal', // type assertion
       details,
       status: 'Pending',
       requestDate: serverTimestamp() as number,
@@ -179,7 +187,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       type: 'withdrawal',
       status: 'Pending',
       withdrawalRequestId: withdrawalRequestId,
-      currency: userProfile.currency, // Store currency with the transaction
+      currency: userProfile.currency,
     };
 
     const transactionRef = push(ref(database, `transactions/${authUserUid}`), transactionData);
@@ -200,19 +208,24 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       await runTransaction(userBalanceRef, (currentEarnings) => {
         const earningsVal = currentEarnings || 0;
         if (earningsVal < amount) {
-          return;
+          return; // Abort transaction
         }
         return earningsVal - amount;
       });
 
       toast({ title: "Withdrawal Requested", description: `Your request to withdraw ${currencySymbol}${amount.toFixed(2)} via ${withdrawalMethod.toUpperCase()} is pending. Your balance has been updated.`, variant: "default" });
       setWithdrawalAmount('');
-      setWithdrawalMethod('');
-      setUpiId('');
-      setAccountNumber('');
-      setIfscCode('');
-      setPaytmNumber('');
-      setPaypalEmail('');
+      // Keep withdrawalMethod and details pre-filled if they came from defaults
+      // Only clear them if they were not from defaults or if desired
+      // For now, let's clear them only if not matching the default
+      if (userProfile?.defaultPaymentMethod !== withdrawalMethod) {
+        setWithdrawalMethod('');
+        setUpiId('');
+        setAccountNumber('');
+        setIfscCode('');
+        setPaytmNumber('');
+        setPaypalEmail('');
+      }
       setIsDialogOpen(false);
     } catch (error) {
       console.error("[WithdrawalTab] Withdrawal request error (post-record creation):", error);
@@ -234,6 +247,29 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
   if (isLoadingSettings) {
     return <div className="flex justify-center items-center p-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
+  
+  // Effect to handle opening the dialog and potentially pre-filling from defaults
+  // This needs to be separate because `isDialogOpen` is controlled by the DialogTrigger
+  useEffect(() => {
+    if (isDialogOpen && userProfile && userProfile.defaultPaymentMethod && userProfile.defaultPaymentDetails) {
+        // Only pre-fill if the current method is empty or different from default
+        // Or if the form is being opened for the first time with defaults set
+        if(withdrawalMethod === '' || withdrawalMethod !== userProfile.defaultPaymentMethod) {
+            setWithdrawalMethod(userProfile.defaultPaymentMethod);
+            const details = userProfile.defaultPaymentDetails;
+            if (userProfile.defaultPaymentMethod === 'upi') setUpiId(details.upiId || '');
+            else if (userProfile.defaultPaymentMethod === 'paytm') setPaytmNumber(details.paytmNumber || '');
+            else if (userProfile.defaultPaymentMethod === 'bank') {
+                setAccountNumber(details.accountNumber || '');
+                setIfscCode(details.ifscCode || '');
+            } else if (userProfile.defaultPaymentMethod === 'paypal') setPaypalEmail(details.paypalEmail || '');
+        }
+    } else if (!isDialogOpen) {
+        // Optionally reset form when dialog closes if not pre-filled from defaults
+        // Or reset specific fields if they were manually entered
+    }
+  }, [isDialogOpen, userProfile, withdrawalMethod]);
+
 
   return (
     <div className="space-y-6">
@@ -283,7 +319,15 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                 </div>
                 <div>
                   <Label htmlFor="withdrawalMethod" className="text-sm font-medium">Withdrawal Method</Label>
-                  <Select value={withdrawalMethod} onValueChange={(value) => setWithdrawalMethod(value as any)} disabled={isWithdrawing}>
+                  <Select 
+                    value={withdrawalMethod} 
+                    onValueChange={(value: PaymentMethod) => {
+                        setWithdrawalMethod(value);
+                        // Clear details if method is changed manually, to avoid sending stale data
+                        setUpiId(''); setAccountNumber(''); setIfscCode(''); setPaytmNumber(''); setPaypalEmail('');
+                    }} 
+                    disabled={isWithdrawing}
+                   >
                     <SelectTrigger id="withdrawalMethod" className="w-full mt-1">
                       <SelectValue placeholder="Select method" />
                     </SelectTrigger>
@@ -298,13 +342,12 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                       {userCountry === 'Other' && (
                         <SelectItem value="paypal"><Mail className="mr-2 h-4 w-4 inline-block"/> PayPal</SelectItem>
                       )}
-                      {/* Fallback if country is not yet loaded or unexpected value */}
-                      {!userCountry && (
+                      {!userCountry && ( // Fallback if country not loaded
                         <>
-                          <SelectItem value="upi"><CreditCard className="mr-2 h-4 w-4 inline-block"/> UPI</SelectItem>
-                          <SelectItem value="paytm"><Banknote className="mr-2 h-4 w-4 inline-block"/> Paytm Wallet</SelectItem>
-                          <SelectItem value="bank"><Landmark className="mr-2 h-4 w-4 inline-block"/> Bank Account</SelectItem>
-                          <SelectItem value="paypal"><Mail className="mr-2 h-4 w-4 inline-block"/> PayPal</SelectItem>
+                          <SelectItem value="upi">UPI</SelectItem>
+                          <SelectItem value="paytm">Paytm Wallet</SelectItem>
+                          <SelectItem value="bank">Bank Account</SelectItem>
+                          <SelectItem value="paypal">PayPal</SelectItem>
                         </>
                       )}
                     </SelectContent>

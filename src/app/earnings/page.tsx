@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import ReferralManagementTab from '@/components/earnings/ReferralManagementTab';
 import WithdrawalManagementTab from '@/components/earnings/WithdrawalManagementTab';
 import TransactionHistoryTab from '@/components/earnings/TransactionHistoryTab';
-import { DollarSign, Users, CreditCard, History, Loader2, Home, AlertOctagon, Mail } from 'lucide-react';
+import { DollarSign, Users, CreditCard, History, Loader2, Home, AlertOctagon, Mail, Settings2 } from 'lucide-react';
 import { APP_NAME } from '@/lib/config';
 import { database } from '@/lib/firebase';
 import { ref, get } from 'firebase/database';
@@ -127,10 +127,17 @@ export default function EarningsDashboardPage() {
                 Welcome, {userProfile.displayName || 'Player'}! Your current balance is <span className="font-semibold text-primary">{currencySymbol}{userProfile.totalEarnings.toFixed(2)}</span>.
                 </p>
             </div>
-            <Button variant="outline" onClick={() => router.push('/')} className="self-start sm:self-center">
-                <Home className="mr-2 h-4 w-4" />
-                Back to Game Lobby
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2 self-start sm:self-center">
+                 <Link href="/profile/edit" passHref>
+                    <Button variant="outline">
+                        <Settings2 className="mr-2 h-4 w-4" /> Edit Profile
+                    </Button>
+                </Link>
+                <Button variant="outline" onClick={() => router.push('/')}>
+                    <Home className="mr-2 h-4 w-4" />
+                    Back to Game Lobby
+                </Button>
+            </div>
         </div>
       </header>
 
