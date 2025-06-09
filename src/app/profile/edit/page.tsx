@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, User, Globe, Banknote, Save, Home, Settings2, AlertCircle, Phone, MaleFemale } from 'lucide-react';
+import { Loader2, User, Globe, Banknote, Save, Home, Settings2, AlertCircle, Phone, UserCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database } from '@/lib/firebase';
@@ -219,7 +219,7 @@ export default function EditProfilePage() {
 
             <div className="space-y-2">
               <Label htmlFor="gender" className="text-lg flex items-center">
-                <MaleFemale className="mr-2 text-muted-foreground" /> Gender <span className="text-destructive ml-1">*</span>
+                <UserCircle2 className="mr-2 text-muted-foreground" /> Gender <span className="text-destructive ml-1">*</span>
               </Label>
               <Select
                 value={gender}
@@ -298,7 +298,7 @@ export default function EditProfilePage() {
                  </Label>
                  <p className="text-xs text-muted-foreground mb-3">Set your preferred way to receive withdrawals. This will pre-fill the withdrawal form.</p>
                   <Select 
-                    value={defaultPaymentMethod} 
+                    value={defaultPaymentMethod || SPECIAL_VALUE_NONE} 
                     onValueChange={(value: string) => handlePaymentMethodChange(value)} 
                     disabled={isSaving}
                    >
@@ -369,3 +369,4 @@ export default function EditProfilePage() {
   );
 }
 
+    

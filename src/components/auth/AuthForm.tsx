@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, MaleFemale } from 'lucide-react';
+import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database } from '@/lib/firebase';
@@ -56,7 +56,7 @@ export default function AuthForm({
   const [displayName, setDisplayName] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
   const [country, setCountry] = useState<'India' | 'Other'>('India');
-  const [gender, setGender] = useState<'male' | 'female' | 'other' | 'prefer_not_to_say' | ''>('');
+  const [gender, setGender] = useState<UserProfile['gender'] | ''>('');
   const [countryCode, setCountryCode] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
 
@@ -362,11 +362,11 @@ export default function AuthForm({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="gender_auth_form" className="text-lg flex items-center">
-                    <MaleFemale size={18} className="mr-2 text-muted-foreground"/> Gender <span className="text-destructive">*</span>
+                    <UserCircle2 size={18} className="mr-2 text-muted-foreground"/> Gender <span className="text-destructive">*</span>
                   </Label>
                   <Select
                     value={gender}
-                    onValueChange={(value: 'male' | 'female' | 'other' | 'prefer_not_to_say' | '') => setGender(value)}
+                    onValueChange={(value: UserProfile['gender'] | '') => setGender(value)}
                     required
                     disabled={isLoadingEmail || isLoadingGoogle}
                   >
@@ -541,3 +541,4 @@ export default function AuthForm({
   );
 }
 
+    
