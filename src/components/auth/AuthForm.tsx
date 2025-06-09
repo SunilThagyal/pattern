@@ -154,61 +154,72 @@ export default function AuthForm({
 
 
   useEffect(() => {
-    const newDeterminedSigningUpState = determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp);
-    if (newDeterminedSigningUpState !== isSigningUp) {
-        setIsSigningUp(newDeterminedSigningUpState);
+    // This effect runs when props determining the initial mode change.
+    const propDrivenIsSigningUp = determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp);
+    setIsSigningUp(propDrivenIsSigningUp);
+
+    // Handle authActionState based on initialActionProp, but preserve 'awaitingVerification'
+    if (initialActionProp === 'resetPassword') {
+      setAuthActionState('resetPassword');
+    } else if (authActionState !== 'awaitingVerification') { // Don't override if user is in verification flow
+      setAuthActionState('default');
     }
 
+    // Clear all errors when these controlling props change
+    setError(null);
+    setDisplayNameError('');
+    setEmailError('');
+    setPasswordError('');
+    setCountryCodeError('');
+    setPhoneNumberError('');
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
+
+
+  useEffect(() => {
     let codeToSet = '';
     if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
       codeToSet = passedReferralCodeProp.trim().toUpperCase();
     }
     setReferralCodeInput(codeToSet);
-
-    if (authActionState !== 'awaitingVerification') {
-        setAuthActionState('default');
-    }
-    setError(null);
-    setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
-
-  }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath, isSigningUp, authActionState]);
+  }, [passedReferralCodeProp]);
 
 
   const handleFirebaseEmailAuth = async () => {
     setError(null);
-    setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
-    setIsLoadingEmail(true);
-
+    // Re-validate on submit attempt as well, in case onBlur didn't catch something or was bypassed.
     const currentEmailError = validateEmail(email);
     const currentPasswordError = validatePassword(password);
+    setEmailError(currentEmailError);
+    setPasswordError(currentPasswordError);
+
+    let currentDisplayNameError = '';
+    let currentCountryCodeError = '';
+    let currentPhoneNumberError = '';
 
     if (isSigningUp) {
-      const currentDisplayNameError = validateDisplayName(displayName);
-      const currentCountryCodeError = validateCountryCode(countryCode);
-      const currentPhoneNumberError = validatePhoneNumber(phoneNumber);
-
+      currentDisplayNameError = validateDisplayName(displayName);
+      currentCountryCodeError = validateCountryCode(countryCode);
+      currentPhoneNumberError = validatePhoneNumber(phoneNumber);
       setDisplayNameError(currentDisplayNameError);
-      setEmailError(currentEmailError);
-      setPasswordError(currentPasswordError);
       setCountryCodeError(currentCountryCodeError);
       setPhoneNumberError(currentPhoneNumberError);
 
-
       if (currentDisplayNameError || currentEmailError || currentPasswordError || currentCountryCodeError || currentPhoneNumberError || !country || !gender) {
          setError("Please fill all required fields and correct any errors.");
-         setIsLoadingEmail(false);
+         setIsLoadingEmail(false); // Ensure loading state is reset if client-side validation fails
          return;
       }
     } else { // Login
-       setEmailError(currentEmailError);
-       setPasswordError(currentPasswordError);
        if (currentEmailError || currentPasswordError) {
           setError("Please correct the errors above.");
-          setIsLoadingEmail(false);
+          setIsLoadingEmail(false); // Ensure loading state is reset
           return;
        }
     }
 
+    setIsLoadingEmail(true);
 
     if (isSigningUp) {
       try {
@@ -301,6 +312,7 @@ export default function AuthForm({
         console.error("Firebase Signup Error:", fbError);
         if (fbError.code === 'auth/email-already-in-use') {
             setError("This email is already in use. Please login or use a different email.");
+            setEmailError("This email is already in use.");
         } else if (fbError.code === 'auth/weak-password') {
             setPasswordError("Password should be at least 6 characters.");
         } else {
@@ -315,7 +327,7 @@ export default function AuthForm({
           if (!user.emailVerified) {
             setUnverifiedUserEmail(user.email);
             setAuthActionState('awaitingVerification');
-            setIsLoadingEmail(false);
+            setIsLoadingEmail(false); // Stop loading here as user is in verification state
             return;
           }
 
@@ -427,7 +439,7 @@ export default function AuthForm({
 
         setUnverifiedUserEmail(newEmailForVerification.trim());
         setNewEmailForVerification('');
-        toast({ title: "Email Updated", description: `Your email has been updated to ${newEmailForVerification.trim()}. A new verification email has been sent. Please check your inbox.` });
+        toast({ title: "Email Updated", description: `Your email has been updated to ${newEmailForVerification.trim()}. A new verification link has been sent. Please check your inbox.` });
     } catch (error: any)
       {
         console.error("Error updating email:", error);
@@ -509,10 +521,6 @@ export default function AuthForm({
     }, 1500);
   };
 
-  const disableToggle = isLoadingEmail || isLoadingGoogle ||
-                       (forceSignupFromPath && !!(passedReferralCodeProp && passedReferralCodeProp.trim() !== "")) ||
-                       (!forceSignupFromPath && !!(passedReferralCodeProp && passedReferralCodeProp.trim() !== ""));
-
   const signupFieldsValid = displayName.trim() && country && gender && countryCode.trim() && phoneNumber.trim() && email.trim() && password.trim();
   const signupErrorsClear = !displayNameError && !emailError && !passwordError && !countryCodeError && !phoneNumberError;
   const canSubmitSignup = signupFieldsValid && signupErrorsClear;
@@ -592,7 +600,7 @@ export default function AuthForm({
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3">
             {error && (
                 <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-center text-sm text-destructive">
                     <AlertCircle className="inline-block mr-1 h-4 w-4" /> {error}
@@ -675,7 +683,7 @@ export default function AuthForm({
                     </div>
                     <div className="col-span-2 space-y-1">
                         <Label htmlFor="phone_number_auth_form" className="flex items-center">
-                           Phone <span className="text-destructive ml-1">*</span>
+                           <Phone size={16} className="mr-1 text-muted-foreground"/> Phone <span className="text-destructive ml-1">*</span>
                         </Label>
                         <Input
                             id="phone_number_auth_form"
@@ -766,7 +774,7 @@ export default function AuthForm({
               </div>
             )}
           </CardContent>
-          <CardFooter className="flex flex-col gap-3">
+          <CardFooter className="flex flex-col gap-2 pt-4">
             <Button type="submit" className="w-full text-base py-5" disabled={isSubmitDisabled}>
               {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> :
                 (authActionState === 'resetPassword' ? <Mail className="mr-2 h-5 w-5" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />))
@@ -808,20 +816,24 @@ export default function AuthForm({
                     if (authActionState === 'resetPassword') {
                         setAuthActionState('default');
                         setIsSigningUp(false);
-                    } else if (!disableToggle) {
-                        setIsSigningUp(!isSigningUp);
+                    } else {
+                        setIsSigningUp(prev => !prev);
                     }
                     setError(null);
-                    setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
+                    setDisplayNameError('');
+                    setEmailError('');
+                    setPasswordError('');
+                    setCountryCodeError('');
+                    setPhoneNumberError('');
                 }}
                 className="mt-1"
-                disabled={disableToggle && authActionState !== 'resetPassword'}
+                disabled={isLoadingEmail || isLoadingGoogle}
                 type="button"
             >
               {authActionState === 'resetPassword'
                 ? <><ArrowLeft className="mr-1 h-4 w-4"/> Back to Login</>
                 : isSigningUp
-                    ? (disableToggle ? "Complete Sign Up with Referral" : "Already have an account? Login")
+                    ? "Already have an account? Login"
                     : "Don't have an account? Sign Up"}
             </Button>
 
@@ -837,4 +849,3 @@ export default function AuthForm({
     </div>
   );
 }
-
