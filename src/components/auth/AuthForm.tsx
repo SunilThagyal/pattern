@@ -8,13 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2 } from 'lucide-react';
+import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2, Mail } from 'lucide-react'; // Added Mail
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
-import { database } from '@/lib/firebase';
-import { ref, set, get, serverTimestamp, onValue, off } from 'firebase/database';
+import { database, auth } from '@/lib/firebase'; // Import auth
+import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut } from "firebase/auth"; // Firebase auth functions
 import type { UserProfile, PlatformSettings } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ref, set, get, serverTimestamp, onValue, off } from 'firebase/database';
 
 
 const GoogleIcon = () => (
@@ -62,6 +63,8 @@ export default function AuthForm({
 
 
   const [isSigningUp, setIsSigningUp] = useState(true);
+  const [isForgotPassword, setIsForgotPassword] = useState(false); // For forgot password UI state
+  const [error, setError] = useState<string | null>(null); // For displaying auth errors
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
@@ -80,9 +83,9 @@ export default function AuthForm({
         setReferralProgramEnabled(true);
       }
       setIsLoadingPlatformSettings(false);
-    }, (error) => {
-      console.error("Error fetching platform settings for AuthForm:", error);
-      setReferralProgramEnabled(true); 
+    }, (err) => {
+      console.error("Error fetching platform settings for AuthForm:", err);
+      setReferralProgramEnabled(true);
       setIsLoadingPlatformSettings(false);
     });
 
@@ -114,198 +117,244 @@ export default function AuthForm({
   }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
 
 
-  const handleAuth = async (isGoogleAuth: boolean = false) => {
-    if (isGoogleAuth) setIsLoadingGoogle(true);
-    else setIsLoadingEmail(true);
+  const handleFirebaseEmailAuth = async () => {
+    setError(null); // Clear previous errors
+    setIsLoadingEmail(true);
 
-    let finalEmail = email;
-    let finalDisplayName = displayName;
-    let finalPassword = password;
-    let finalCountry = country;
-    let finalGender = gender;
-    let finalCountryCode = countryCode;
-    let finalPhoneNumber = phoneNumber;
-
-
-    if (isGoogleAuth) {
-      const randomNum = Math.floor(Math.random() * 10000);
-      finalEmail = `user${randomNum}.google@example.com`;
-      finalDisplayName = `GoogleUser${randomNum}`;
-      finalPassword = "google_simulated_password";
-      // For Google auth, additional details might be defaulted or skipped in simulation
-      if (isSigningUp && !displayName.trim()) {
-        setDisplayName(finalDisplayName);
-      }
-      if (isSigningUp && !gender) setGender('prefer_not_to_say'); // Default gender for simulated Google
-      finalGender = gender || 'prefer_not_to_say';
-      if (isSigningUp && !countryCode.trim()) setCountryCode('+1'); // Default country code
-      finalCountryCode = countryCode.trim() || '+1';
-      if (isSigningUp && !phoneNumber.trim()) setPhoneNumber('0000000000'); // Default phone
-      finalPhoneNumber = phoneNumber.trim() || '0000000000';
-
-    }
-
-    if (!finalEmail.trim() || !finalPassword.trim() ||
-        (isSigningUp && (!finalDisplayName.trim() || !finalCountry || !finalGender || !finalCountryCode.trim() || !finalPhoneNumber.trim()))) {
-      toast({ title: "Error", description: "Please fill all required fields: Display Name, Country, Gender, Country Code, Phone Number, Email, and Password.", variant: "destructive" });
-      if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+    if (!email.trim() || !password.trim()) {
+      setError("Email and password are required.");
+      setIsLoadingEmail(false);
       return;
     }
-    
-    if (isSigningUp && finalCountryCode.trim() && !finalCountryCode.startsWith('+')) {
-        toast({ title: "Invalid Country Code", description: "Country code must start with a '+' sign (e.g., +1, +91).", variant: "destructive" });
-        if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-        return;
-    }
-    if (isSigningUp && finalPhoneNumber.trim() && !/^\d{7,15}$/.test(finalPhoneNumber.trim())) {
-        toast({ title: "Invalid Phone Number", description: "Phone number must be between 7 to 15 digits.", variant: "destructive" });
-        if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-        return;
-    }
 
-
-    const simulatedUid = `uid_${finalDisplayName.replace(/\s+/g, '_').toLowerCase()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    try {
-      if (isSigningUp) {
-        let newShortReferralCode = '';
-        if (referralProgramEnabled) {
-            let codeExists = true;
-            let attempts = 0;
-            const MAX_CODE_GEN_ATTEMPTS = 10;
-
-            while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
-                newShortReferralCode = generateShortAlphaNumericCode(5);
-                const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
-                const shortCodeSnap = await get(shortCodeMapRef);
-                codeExists = shortCodeSnap.exists();
-                attempts++;
-            }
-
-            if (codeExists) {
-                toast({ title: "Signup Error", description: "Could not generate a unique referral code. Please try again later.", variant: "destructive" });
-                if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-                return;
-            }
+    if (isSigningUp) {
+        if (!displayName.trim() || !country || !gender || !countryCode.trim() || !phoneNumber.trim()) {
+            setError("Please fill all required fields: Display Name, Country, Gender, Country Code, and Phone Number.");
+            setIsLoadingEmail(false);
+            return;
+        }
+        if (countryCode.trim() && !countryCode.startsWith('+')) {
+            setError("Country code must start with a '+' sign (e.g., +1, +91).");
+            setIsLoadingEmail(false);
+            return;
+        }
+        if (phoneNumber.trim() && !/^\d{7,15}$/.test(phoneNumber.trim())) {
+            setError("Phone number must be between 7 to 15 digits.");
+            setIsLoadingEmail(false);
+            return;
         }
 
-        const newUserProfile: UserProfile = {
-          userId: simulatedUid,
-          displayName: finalDisplayName,
-          email: finalEmail,
-          referralCode: simulatedUid,
-          shortReferralCode: referralProgramEnabled ? newShortReferralCode : undefined,
-          totalEarnings: 0,
-          createdAt: serverTimestamp() as number,
-          country: finalCountry,
-          currency: finalCountry === 'India' ? 'INR' : 'USD',
-          gender: finalGender as UserProfile['gender'], // Ensure type safety
-          countryCode: finalCountryCode.trim(),
-          phoneNumber: finalPhoneNumber.trim(),
-          canWithdraw: true, 
-        };
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
 
-        if (referralProgramEnabled) {
+        if (user) {
+          await sendEmailVerification(user);
+          toast({ title: "Sign Up Successful!", description: `Welcome, ${displayName}! A verification email has been sent to ${email}. Please verify your email to continue.` });
+
+          let newShortReferralCode = '';
+          if (referralProgramEnabled) {
+              let codeExists = true;
+              let attempts = 0;
+              const MAX_CODE_GEN_ATTEMPTS = 10;
+              while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
+                  newShortReferralCode = generateShortAlphaNumericCode(5);
+                  const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
+                  const shortCodeSnap = await get(shortCodeMapRef);
+                  codeExists = shortCodeSnap.exists();
+                  attempts++;
+              }
+              if (codeExists) throw new Error("Could not generate unique referral code.");
+          }
+
+          const newUserProfile: UserProfile = {
+            userId: user.uid,
+            displayName: displayName.trim(),
+            email: user.email || email,
+            referralCode: user.uid, // Using Firebase UID as primary referral identifier
+            shortReferralCode: referralProgramEnabled ? newShortReferralCode : undefined,
+            totalEarnings: 0,
+            createdAt: serverTimestamp() as number,
+            country: country,
+            currency: country === 'India' ? 'INR' : 'USD',
+            gender: gender as UserProfile['gender'],
+            countryCode: countryCode.trim(),
+            phoneNumber: phoneNumber.trim(),
+            canWithdraw: true,
+          };
+
+          if (referralProgramEnabled) {
             let actualReferrerUid: string | null = null;
             const deviceOriginalReferrerUid = typeof window !== 'undefined' ? localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY) : null;
             const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase();
 
             if (deviceOriginalReferrerUid) {
               actualReferrerUid = deviceOriginalReferrerUid;
-              if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
-                const mapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
-                const mapSnap = await get(mapRef);
-                if (mapSnap.exists() && mapSnap.val() !== deviceOriginalReferrerUid) {
-                     toast({
-                        title: "Referral Overridden",
-                        description: "This device is already linked to a referrer. The original referral has been applied.",
-                        variant: "default"
-                     });
+               if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
+                    const mapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
+                    const mapSnap = await get(mapRef);
+                    if (mapSnap.exists() && mapSnap.val() !== deviceOriginalReferrerUid) {
+                         toast({ title: "Referral Overridden", description: "This device is already linked to a referrer. The original referral has been applied.", variant: "default" });
+                    }
                 }
-              }
             } else if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
               const referrerMapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
               const referrerMapSnap = await get(referrerMapRef);
               if (referrerMapSnap.exists()) {
                 const foundReferrerUid = referrerMapSnap.val() as string;
-                if (foundReferrerUid === simulatedUid) {
+                if (foundReferrerUid === user.uid) {
                    toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
                 } else {
                   actualReferrerUid = foundReferrerUid;
-                  if (typeof window !== 'undefined') {
-                    localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid);
-                  }
+                  if (typeof window !== 'undefined') localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid);
                   toast({title: "Referral Applied!", description: `You were successfully referred.`});
                 }
               } else {
                 toast({ title: "Referral Code Invalid", description: "The referral code was not found. Proceeding without referral.", variant: "default" });
               }
             }
-
-            if (actualReferrerUid) {
+             if (actualReferrerUid) {
               newUserProfile.referredBy = actualReferrerUid;
-              const referralsBranchRef = ref(database, `referrals/${actualReferrerUid}/${simulatedUid}`);
-              await set(referralsBranchRef, {
-                referredUserName: finalDisplayName,
+              await set(ref(database, `referrals/${actualReferrerUid}/${user.uid}`), {
+                referredUserName: displayName.trim(),
                 timestamp: serverTimestamp() as number,
               });
             }
-        }
+          }
 
-        await set(ref(database, `users/${simulatedUid}`), newUserProfile);
-        if (referralProgramEnabled && newShortReferralCode) {
-            await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
+          await set(ref(database, `users/${user.uid}`), newUserProfile);
+          if (referralProgramEnabled && newShortReferralCode) {
+            await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
+          }
+          
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+            localStorage.setItem('drawlyUserDisplayName', displayName.trim());
+            localStorage.setItem('drawlyUserUid', user.uid);
+          }
+          router.push(redirectAfterAuth || '/');
         }
-
-        toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}! Please note: Email verification is not implemented in this prototype.` });
-
-      } else { // Login
-        let foundUser: UserProfile | null = null;
-        let foundUid: string | null = null;
-
-        const allUsersRef = ref(database, 'users');
-        const allUsersSnap = await get(allUsersRef);
-        if (allUsersSnap.exists()) {
-            const usersData = allUsersSnap.val();
-            for (const uid_key in usersData) {
-                if (usersData[uid_key].email === finalEmail) {
-                    foundUser = usersData[uid_key] as UserProfile;
-                    foundUid = uid_key;
-                    break;
-                }
-            }
+      } catch (fbError: any) {
+        console.error("Firebase Signup Error:", fbError);
+        if (fbError.code === 'auth/email-already-in-use') {
+            setError("This email is already in use. Please login or use a different email.");
+        } else if (fbError.code === 'auth/weak-password') {
+            setError("Password should be at least 6 characters.");
+        } else {
+            setError(fbError.message || "Signup failed. Please try again.");
         }
-
-        if (!foundUser || !foundUid) {
-          toast({ title: "Login Failed", description: "No account found with this email. Please check your credentials or sign up.", variant: "destructive" });
-          if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
-          return;
-        }
-        finalDisplayName = foundUser.displayName;
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('drawlyUserUid', foundUid);
-        }
-        toast({ title: "Login Successful!", description: `Welcome back, ${finalDisplayName}!` });
       }
+    } else { // Login
+      try {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        if (user) {
+          const userProfileRef = ref(database, `users/${user.uid}`);
+          const snapshot = await get(userProfileRef);
+          let userDisplayNameFromDB = "Player";
+          if (snapshot.exists()) {
+            userDisplayNameFromDB = snapshot.val().displayName || "Player";
+          }
 
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-        localStorage.setItem('drawlyUserDisplayName', finalDisplayName);
-        localStorage.setItem('drawlyUserUid', isSigningUp ? simulatedUid : (localStorage.getItem('drawlyUserUid') || simulatedUid) );
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+            localStorage.setItem('drawlyUserDisplayName', userDisplayNameFromDB);
+            localStorage.setItem('drawlyUserUid', user.uid);
+          }
+          toast({ title: "Login Successful!", description: `Welcome back, ${userDisplayNameFromDB}!` });
+          if (!user.emailVerified) {
+            toast({ title: "Email Not Verified", description: "Please check your email to verify your account. Some features might be limited.", variant: "default" });
+          }
+          router.push(redirectAfterAuth || '/');
+        }
+      } catch (fbError: any) {
+        console.error("Firebase Login Error:", fbError);
+        if (fbError.code === 'auth/user-not-found' || fbError.code === 'auth/wrong-password' || fbError.code === 'auth/invalid-credential') {
+            setError("Invalid email or password. Please try again or sign up.");
+        } else {
+            setError(fbError.message || "Login failed. Please try again.");
+        }
       }
-      router.push(redirectAfterAuth || '/');
+    }
+    setIsLoadingEmail(false);
+  };
 
-    } catch (error) {
-      console.error("Auth error:", error);
-      toast({ title: "Authentication Error", description: "Something went wrong. Please try again.", variant: "destructive" });
+  const handleForgotPassword = async () => {
+    setError(null);
+    if (!email.trim()) {
+      setError("Please enter your email address to reset password.");
+      return;
+    }
+    setIsLoadingEmail(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      toast({ title: "Password Reset Email Sent", description: `If an account exists for ${email}, a password reset link has been sent. Please check your inbox (and spam folder).` });
+      setIsForgotPassword(false); // Go back to login/signup view
+    } catch (fbError: any) {
+      console.error("Forgot Password Error:", fbError);
+       if (fbError.code === 'auth/user-not-found') {
+            setError("No account found with this email address.");
+        } else {
+            setError(fbError.message || "Failed to send password reset email. Please try again.");
+        }
     } finally {
-      if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+      setIsLoadingEmail(false);
     }
   };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    handleAuth(false);
+    if (isForgotPassword) {
+      handleForgotPassword();
+    } else {
+      handleFirebaseEmailAuth();
+    }
+  };
+  
+  const handleGoogleAuthSimulated = () => {
+    setIsLoadingGoogle(true);
+    // Simulate Google Auth
+    const randomNum = Math.floor(Math.random() * 10000);
+    const simulatedEmail = `user${randomNum}.google@example.com`;
+    const simulatedDisplayName = `GoogleUser${randomNum}`;
+    const simulatedUid = `uid_google_${randomNum}`;
+
+    toast({ title: "Google Sign-In (Simulated)", description: `Simulating login for ${simulatedDisplayName}. This is not real Google Sign-In.` });
+    
+    // For this prototype, we'll assume a successful simulated login/signup
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+      localStorage.setItem('drawlyUserDisplayName', simulatedDisplayName);
+      localStorage.setItem('drawlyUserUid', simulatedUid);
+    }
+    
+    // Simulate creating/checking a profile in RTDB
+    const userProfileRef = ref(database, `users/${simulatedUid}`);
+    get(userProfileRef).then((snapshot) => {
+        if(!snapshot.exists()){
+            // Create a basic profile for simulated Google user
+            const newUserProfile: UserProfile = {
+                userId: simulatedUid,
+                displayName: simulatedDisplayName,
+                email: simulatedEmail,
+                referralCode: simulatedUid,
+                totalEarnings: 0,
+                createdAt: serverTimestamp() as number,
+                country: 'India', 
+                currency: 'INR',
+                gender: 'prefer_not_to_say',
+                countryCode: '+91',
+                phoneNumber: '0000000000',
+                canWithdraw: true,
+            };
+            set(userProfileRef, newUserProfile);
+        }
+    });
+
+    setTimeout(() => {
+        setIsLoadingGoogle(false);
+        router.push(redirectAfterAuth || '/');
+    }, 1500);
   };
 
   const disableToggle = isLoadingEmail || isLoadingGoogle ||
@@ -317,15 +366,26 @@ export default function AuthForm({
     <div className="flex flex-col items-center justify-center min-h-screen py-12">
       <Card className="w-full max-w-md shadow-xl">
         <CardHeader>
-          <CardTitle className="text-3xl text-center">{isSigningUp ? "Sign Up" : "Login"} to {APP_NAME}</CardTitle>
+          <CardTitle className="text-3xl text-center">
+            {isForgotPassword ? "Reset Password" : (isSigningUp ? "Sign Up" : "Login")} to {APP_NAME}
+          </CardTitle>
           <CardDescription className="text-center">
-            {isSigningUp ? "Create an account to play, refer friends, and earn rewards!" : "Welcome back! Log in to continue."}
-            {isSigningUp && <p className="text-xs mt-1 text-blue-600">Note: Email verification is conceptual in this prototype.</p>}
+            {isForgotPassword
+              ? "Enter your email to receive a password reset link."
+              : isSigningUp
+                ? "Create an account to play, refer friends, and earn rewards!"
+                : "Welcome back! Log in to continue."}
+            {isSigningUp && !isForgotPassword && <p className="text-xs mt-1 text-blue-600">A verification email will be sent to complete your registration.</p>}
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-6">
-            {isSigningUp && (
+            {error && (
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-center text-sm text-destructive">
+                    <AlertCircle className="inline-block mr-1 h-4 w-4" /> {error}
+                </div>
+            )}
+            {!isForgotPassword && isSigningUp && (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="displayName_auth_form" className="text-lg">Display Name <span className="text-destructive">*</span></Label>
@@ -398,7 +458,7 @@ export default function AuthForm({
                     </div>
                     <div className="col-span-2 space-y-2">
                         <Label htmlFor="phone_number_auth_form" className="text-lg flex items-center">
-                           Phone Number <span className="text-destructive">*</span>
+                           Phone <span className="text-destructive">*</span>
                         </Label>
                         <Input
                             id="phone_number_auth_form"
@@ -430,32 +490,35 @@ export default function AuthForm({
                 disabled={isLoadingEmail || isLoadingGoogle}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password_auth_form" className="text-lg">Password <span className="text-destructive">*</span></Label>
-              <Input
-                id="password_auth_form"
-                name="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                className="text-base py-6"
-                disabled={isLoadingEmail || isLoadingGoogle}
-              />
-            </div>
-            {!isSigningUp && (
+            {!isForgotPassword && (
+                 <div className="space-y-2">
+                    <Label htmlFor="password_auth_form" className="text-lg">Password <span className="text-destructive">*</span></Label>
+                    <Input
+                        id="password_auth_form"
+                        name="password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        required
+                        className="text-base py-6"
+                        disabled={isLoadingEmail || isLoadingGoogle}
+                    />
+                </div>
+            )}
+
+            {!isSigningUp && !isForgotPassword && (
                 <Button
                     type="button"
                     variant="link"
                     className="px-0 text-sm text-primary hover:underline"
-                    onClick={() => toast({ title: "Prototype Feature", description: "Forgot Password functionality is not implemented in this prototype."})}
+                    onClick={() => {setIsForgotPassword(true); setError(null);}}
                     disabled={isLoadingEmail || isLoadingGoogle}
                 >
                     Forgot Password?
                 </Button>
             )}
-            {isSigningUp && (
+            {isSigningUp && !isForgotPassword && (
               <div className="space-y-2">
                 <Label htmlFor="referral_code" className="text-lg flex items-center">
                    <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
@@ -482,48 +545,60 @@ export default function AuthForm({
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full text-lg py-6" disabled={isLoadingEmail || isLoadingGoogle}>
-              {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />)}
-              {isLoadingEmail ? 'Processing...' : (isSigningUp ? 'Sign Up with Email' : 'Login with Email')}
+              {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : 
+                (isForgotPassword ? <Mail className="mr-2 h-5 w-5" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />))
+              }
+              {isLoadingEmail ? 'Processing...' : 
+                (isForgotPassword ? "Send Reset Email" : (isSigningUp ? 'Sign Up with Email' : 'Login with Email'))
+              }
             </Button>
 
-            <div className="relative w-full my-2">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
-                  Or
-                </span>
-              </div>
-            </div>
+            {!isForgotPassword && (
+                <>
+                <div className="relative w-full my-2">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">
+                      Or
+                    </span>
+                  </div>
+                </div>
 
-            <Button
-              variant="outline"
-              className="w-full text-lg py-6"
-              onClick={() => handleAuth(true)}
-              disabled={isLoadingGoogle || isLoadingEmail}
-              type="button"
-            >
-              {isLoadingGoogle ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <GoogleIcon />}
-              {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google' : 'Login with Google')}
-            </Button>
+                <Button
+                  variant="outline"
+                  className="w-full text-lg py-6"
+                  onClick={handleGoogleAuthSimulated}
+                  disabled={isLoadingGoogle || isLoadingEmail}
+                  type="button"
+                >
+                  {isLoadingGoogle ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <GoogleIcon />}
+                  {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google (Simulated)' : 'Login with Google (Simulated)')}
+                </Button>
+                </>
+            )}
 
             <Button
                 variant="link"
                 onClick={() => {
-                    if (!disableToggle) {
+                    if (isForgotPassword) {
+                        setIsForgotPassword(false);
+                        setIsSigningUp(false); // Default to login after cancelling forgot password
+                    } else if (!disableToggle) {
                         setIsSigningUp(!isSigningUp);
                     }
+                    setError(null);
                 }}
                 className="mt-2"
-                disabled={disableToggle}
+                disabled={disableToggle && !isForgotPassword}
                 type="button"
             >
-              {isSigningUp
-                ? (disableToggle)
-                    ? "Complete Sign Up with Referral"
-                    : "Already have an account? Login"
-                : "Don't have an account? Sign Up"}
+              {isForgotPassword
+                ? "Back to Login"
+                : isSigningUp
+                    ? (disableToggle ? "Complete Sign Up with Referral" : "Already have an account? Login")
+                    : "Don't have an account? Sign Up"}
             </Button>
 
             <Link href="/" className="text-sm text-muted-foreground hover:text-primary mt-2">
@@ -533,9 +608,8 @@ export default function AuthForm({
         </form>
       </Card>
       <p className="text-xs text-muted-foreground mt-6 max-w-md text-center">
-        Note: Account creation and login are simulated for this prototype.
-        The 'one device → one original referrer' check is a client-side simulation using localStorage and can be bypassed.
-        Real-world applications require robust backend security for referral systems, email verification, and password recovery.
+        Using Firebase Authentication for email/password. Google Sign-In is simulated.
+        Real-world applications require robust backend security for referral systems.
       </p>
     </div>
   );
