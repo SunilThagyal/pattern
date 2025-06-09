@@ -1,6 +1,7 @@
+
 import { initializeApp, getApp, getApps } from "firebase/app";
 import { getDatabase } from "firebase/database";
-// import { getAuth } from "firebase/auth"; // If auth is needed later
+import { getAuth } from "firebase/auth"; // Ensure getAuth is imported
 // import { getAnalytics } from "firebase/analytics"; // If analytics is needed
 
 const firebaseConfig = {
@@ -23,7 +24,7 @@ if (!getApps().length) {
 }
 
 const database = getDatabase(app);
-// const auth = getAuth(app); // If auth is needed
+const auth = getAuth(app); // Initialize auth
 // const analytics = typeof window !== 'undefined' ? getAnalytics(app) : undefined; // If analytics is needed
 
-export { app, database };
+export { app, database, auth }; // Export auth
