@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2, Mail } from 'lucide-react'; // Added Mail
+import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2, Mail } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database, auth } from '@/lib/firebase'; // Import auth
@@ -63,8 +63,8 @@ export default function AuthForm({
 
 
   const [isSigningUp, setIsSigningUp] = useState(true);
-  const [isForgotPassword, setIsForgotPassword] = useState(false); // For forgot password UI state
-  const [error, setError] = useState<string | null>(null); // For displaying auth errors
+  const [isForgotPassword, setIsForgotPassword] = useState(false); 
+  const [error, setError] = useState<string | null>(null); 
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
@@ -118,7 +118,7 @@ export default function AuthForm({
 
 
   const handleFirebaseEmailAuth = async () => {
-    setError(null); // Clear previous errors
+    setError(null); 
     setIsLoadingEmail(true);
 
     if (!email.trim() || !password.trim()) {
@@ -134,7 +134,7 @@ export default function AuthForm({
             return;
         }
         if (countryCode.trim() && !countryCode.startsWith('+')) {
-            setError("Country code must start with a '+' sign (e.g., +1, +91).");
+            setError("Country code must start with a '+' sign (e.g., +91).");
             setIsLoadingEmail(false);
             return;
         }
@@ -171,7 +171,7 @@ export default function AuthForm({
             userId: user.uid,
             displayName: displayName.trim(),
             email: user.email || email,
-            referralCode: user.uid, // Using Firebase UID as primary referral identifier
+            referralCode: user.uid, 
             shortReferralCode: referralProgramEnabled ? newShortReferralCode : undefined,
             totalEarnings: 0,
             createdAt: serverTimestamp() as number,
@@ -263,7 +263,7 @@ export default function AuthForm({
           }
           toast({ title: "Login Successful!", description: `Welcome back, ${userDisplayNameFromDB}!` });
           if (!user.emailVerified) {
-            toast({ title: "Email Not Verified", description: "Please check your email to verify your account. Some features might be limited.", variant: "default" });
+            toast({ title: "Email Not Verified", description: "Please check your email to verify your account. Some features might be limited.", variant: "default", duration: 7000 });
           }
           router.push(redirectAfterAuth || '/');
         }
@@ -287,16 +287,22 @@ export default function AuthForm({
     }
     setIsLoadingEmail(true);
     try {
-      await sendPasswordResetEmail(auth, email);
-      toast({ title: "Password Reset Email Sent", description: `If an account exists for ${email}, a password reset link has been sent. Please check your inbox (and spam folder).` });
-      setIsForgotPassword(false); // Go back to login/signup view
+      await sendPasswordResetEmail(auth, email.trim());
+      toast({
+        title: "Password Reset Email Sent",
+        description: `If an account for ${email.trim()} exists, a password reset link has been sent. Please check your inbox and spam/junk folder.`,
+        duration: 7000 
+      });
+      setIsForgotPassword(false); 
     } catch (fbError: any) {
       console.error("Forgot Password Error:", fbError);
-       if (fbError.code === 'auth/user-not-found') {
-            setError("No account found with this email address.");
-        } else {
-            setError(fbError.message || "Failed to send password reset email. Please try again.");
-        }
+       if (fbError.code === 'auth/invalid-email') {
+            setError("The email address format is not valid. Please check and try again.");
+      } else if (fbError.code === 'auth/missing-email') { 
+            setError("Please enter your email address.");
+      } else {
+            setError("Could not send password reset email. Please ensure the email is correct or try again later.");
+      }
     } finally {
       setIsLoadingEmail(false);
     }
@@ -313,7 +319,6 @@ export default function AuthForm({
   
   const handleGoogleAuthSimulated = () => {
     setIsLoadingGoogle(true);
-    // Simulate Google Auth
     const randomNum = Math.floor(Math.random() * 10000);
     const simulatedEmail = `user${randomNum}.google@example.com`;
     const simulatedDisplayName = `GoogleUser${randomNum}`;
@@ -321,18 +326,15 @@ export default function AuthForm({
 
     toast({ title: "Google Sign-In (Simulated)", description: `Simulating login for ${simulatedDisplayName}. This is not real Google Sign-In.` });
     
-    // For this prototype, we'll assume a successful simulated login/signup
     if (typeof window !== 'undefined') {
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
       localStorage.setItem('drawlyUserDisplayName', simulatedDisplayName);
       localStorage.setItem('drawlyUserUid', simulatedUid);
     }
     
-    // Simulate creating/checking a profile in RTDB
     const userProfileRef = ref(database, `users/${simulatedUid}`);
     get(userProfileRef).then((snapshot) => {
         if(!snapshot.exists()){
-            // Create a basic profile for simulated Google user
             const newUserProfile: UserProfile = {
                 userId: simulatedUid,
                 displayName: simulatedDisplayName,
@@ -584,7 +586,7 @@ export default function AuthForm({
                 onClick={() => {
                     if (isForgotPassword) {
                         setIsForgotPassword(false);
-                        setIsSigningUp(false); // Default to login after cancelling forgot password
+                        setIsSigningUp(false); 
                     } else if (!disableToggle) {
                         setIsSigningUp(!isSigningUp);
                     }
@@ -609,10 +611,7 @@ export default function AuthForm({
       </Card>
       <p className="text-xs text-muted-foreground mt-6 max-w-md text-center">
         Using Firebase Authentication for email/password. Google Sign-In is simulated.
-        Real-world applications require robust backend security for referral systems.
       </p>
     </div>
   );
 }
-
-    
