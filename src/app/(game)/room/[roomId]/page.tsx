@@ -715,7 +715,13 @@ const WordDisplay = React.memo(({
                 elements.push(
                     <button
                         key={`drawer-clickable-${index}`}
-                        onClick={() => onLetterClick(char, index)}
+                        onClick={() => {
+                            if (typeof onLetterClick === 'function') {
+                                onLetterClick(char, index);
+                            } else {
+                                console.error('WordDisplay: onLetterClick is not a function. Prop received:', onLetterClick);
+                            }
+                        }}
                         className="font-bold text-primary hover:text-accent focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                         aria-label={`Reveal letter ${char}`}
                         title={`Click to reveal this letter: ${char.toUpperCase()}`}
@@ -840,7 +846,7 @@ const MobileTopBar = React.memo(({
           revealedPattern={room.revealedPattern}
           isCurrentPlayerDrawing={isCurrentPlayerDrawing}
           hasPlayerGuessedCorrectly={hasPlayerGuessedCorrectly}
-          onDrawerLetterClick={onDrawerLetterClick}
+          onLetterClick={onDrawerLetterClick}
           currentDrawerName={currentDrawerName}
         />
       </div>
@@ -1522,9 +1528,9 @@ export default function GameRoomPage() {
       }
       finalPlayerId = localPlayerId;
 
-      if (!localPlayerName) {
+      if (!localPlayerName) { // Name missing for anon, but ID might exist
         toast({ title: "Name Required", description: "Please enter your name to join.", variant: "default" });
-        routerHook.push(`/join/${roomId}`);
+        routerHook.push(`/join/${roomId}`); // Force re-entry of name, ID should be preserved by RoomForm
         return;
       }
       finalPlayerName = localPlayerName;
@@ -1537,16 +1543,16 @@ export default function GameRoomPage() {
     }
 
     if (currentRoomIdInStorage && currentRoomIdInStorage !== roomId && !finalIsAuthenticated) {
-        localStorage.removeItem('patternPartyPlayerId');
-        localStorage.removeItem('patternPartyPlayerName');
-        finalPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.removeItem('patternPartyPlayerId'); // Clear old ID
+        localStorage.removeItem('patternPartyPlayerName'); // Clear old name
+        finalPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`; // Generate new ID for new room
         localStorage.setItem('patternPartyPlayerId', finalPlayerId);
         toast({ title: "New Room Session", description: "Please confirm your name for this new room.", variant: "default" });
-        routerHook.push(`/join/${roomId}`); // Force re-entry of name with new ID for new room
+        routerHook.push(`/join/${roomId}`); // Force re-entry of name with new ID
         return;
-    } else if (!localPlayerName && !finalIsAuthenticated) { // If anon and name missing, force to join page
+    } else if (!localPlayerName && !finalIsAuthenticated) { 
         toast({ title: "Name Required", description: "Please enter your name to join the room.", variant: "default" });
-        routerHook.push(`/join/${roomId}`);
+        routerHook.push(`/join/${roomId}`); // If name is still missing somehow (e.g. cleared storage manually)
         return;
     }
     
@@ -1625,9 +1631,13 @@ export default function GameRoomPage() {
             let nameForSystemMessage = playerName; 
             if (playerSnap.exists()) {
               const existingPlayerData = playerSnap.val() as Player;
-              updatesForPlayer.name = (playerName && playerName.trim() !== '') ? playerName : (existingPlayerData.name || "Player");
-              if (isAuthenticated && authPlayerId === playerId && existingPlayerData.name !== playerName && existingPlayerData.name) {
-                  updatesForPlayer.name = existingPlayerData.name;
+              // Prefer existing Firebase name if current session name is empty, unless it's an authenticated user with a different display name
+              if (!playerName || playerName.trim() === '') {
+                updatesForPlayer.name = existingPlayerData.name || "Player";
+              } else if (isAuthenticated && authPlayerId === playerId && existingPlayerData.name && existingPlayerData.name !== playerName) {
+                updatesForPlayer.name = existingPlayerData.name; // Keep Firebase name for authenticated user if different
+              } else {
+                updatesForPlayer.name = playerName; // Use current session name
               }
               nameForSystemMessage = updatesForPlayer.name || "Player";
 
@@ -1660,7 +1670,7 @@ export default function GameRoomPage() {
       if (connectedListener && playerConnectionsRef) {
         off(playerConnectionsRef, 'value', connectedListener);
       }
-      if (playerOnlineStatusRef) { // Ensure onDisconnect is cancelled if component unmounts cleanly
+      if (playerOnlineStatusRef) { 
         onDisconnect(playerOnlineStatusRef).cancel();
       }
     };
@@ -1687,30 +1697,12 @@ export default function GameRoomPage() {
                             duration: 2500,
                         });
                     }
-                } else if (!prevPlayerInfo && currentPlayerInfo.isOnline) { // New player joined and is online
-                    // This toast might be redundant with the [[SYSTEM_JOINED]] chat message
-                    // toast({
-                    //     title: `${currentPlayerInfo.name} Joined`,
-                    //     duration: 2500,
-                    // });
                 }
             });
-
-            // Check for players who left
-            Object.keys(prevPlayersRef.current).forEach(pId => {
-                 if (!currentPlayers[pId] && prevPlayersRef.current![pId] && prevPlayersRef.current![pId].name && pId !== playerId) {
-                    // This toast might be redundant with the [[SYSTEM_LEFT]] chat message
-                    // toast({
-                    //    title: `${prevPlayersRef.current![pId].name} Left`,
-                    //    variant: "destructive",
-                    //    duration: 2500,
-                    // });
-                 }
-            });
         }
-        prevPlayersRef.current = JSON.parse(JSON.stringify(room.players)); // Deep copy for next comparison
+        prevPlayersRef.current = JSON.parse(JSON.stringify(room.players)); 
     } else if (!room?.players) {
-        prevPlayersRef.current = undefined; // Reset if room players are gone
+        prevPlayersRef.current = undefined; 
     }
   }, [room?.players, playerId, toast]);
 
@@ -2025,8 +2017,7 @@ export default function GameRoomPage() {
   if (!room || !playerId || !playerName || !room.config) return <div className="text-center p-8 h-screen flex flex-col justify-center items-center">Room data is not available or incomplete. <Link href="/" className="text-primary hover:underline">Go Home</Link></div>;
 
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
-  // const canGuess = room.gameState === 'drawing' && !isCurrentPlayerDrawing && !(room.correctGuessersThisRound || []).includes(playerId);
-  const isGuessInputDisabled = isSubmittingGuess; // Simplified for always-on chat
+  const isGuessInputDisabled = isSubmittingGuess; 
   const currentDrawerName = room.currentDrawerId && room.players[room.currentDrawerId] ? room.players[room.currentDrawerId].name : "Someone";
   const hasPlayerGuessedCorrectly = (room.correctGuessersThisRound || []).includes(playerId);
 
@@ -2253,10 +2244,4 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     return finalWords.slice(0, count);
 };
 
-
-
     
-
-
-
-
