@@ -540,9 +540,9 @@ const ChatArea = React.memo(({
 
     useEffect(() => {
         if (internalChatScrollRef.current) {
-            internalChatScrollRef.current.scrollTop = 0; // Scroll to top for new messages
+            internalChatScrollRef.current.scrollTop = 0; 
         }
-    }, [guesses]); // Trigger when guesses array itself changes reference, or its length
+    }, [guesses]); 
 
     return (
     <div className="flex flex-col h-full w-full bg-gray-50 border border-gray-300 rounded-sm">
@@ -569,7 +569,7 @@ const ChatArea = React.memo(({
                          messageContent = <span className="font-semibold text-orange-600">{g.playerName} left the room!</span>;
                         messageClasses = cn(messageClasses, "bg-orange-100");
                     } else if (g.text.startsWith("[[SYSTEM_REFERRAL_REWARD]]")) {
-                        if (!referralProgramEnabled) return null; // Don't show if program is off
+                        if (!referralProgramEnabled) return null; 
                         const parts = g.playerName.split(" because ");
                         const rewardPart = parts[0];
                         const reasonPart = parts[1] || "";
@@ -902,6 +902,7 @@ export default function GameRoomPage() {
 
   const gameOverProcessedRef = useRef(false);
   const prevPlayersRef = useRef<Room['players'] | undefined>(undefined);
+  const lastProcessedTimeoutRef = useRef<string | null>(null);
 
 
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings>({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
@@ -928,7 +929,7 @@ export default function GameRoomPage() {
   const playersArray = useMemo(() => {
     if (!room || !room.players) return [];
     return Object.values(room.players).filter(p => p && p.id && typeof p.name === 'string' && p.name.trim() !== '');
-  }, [room?.players]);
+  }, [room]);
 
   const memoizedDrawingData = useMemo(() => {
       return room ? (room.drawingData || []) : [];
@@ -1254,7 +1255,6 @@ export default function GameRoomPage() {
         const currentRoom: Room = currentRoomSnapshot.val();
 
         if (!currentRoom || !playerId || !playerName || !currentRoom.config || !currentRoom.roundStartedAt) {
-             // Allow message even if not drawing phase, just don't score
             if (!currentRoom || !playerId || !playerName) {
                 setIsSubmittingGuess(false);
                 return;
@@ -1282,13 +1282,13 @@ export default function GameRoomPage() {
         const newGuesses = [...currentGuesses, newGuess];
         const updates: Partial<Room> = { guesses: newGuesses };
 
-        if (isCorrectGuess && currentRoom.roundStartedAt) { // Ensure roundStartedAt for scoring
+        if (isCorrectGuess && currentRoom.roundStartedAt) { 
             let newCorrectGuessers = [...(currentRoom.correctGuessersThisRound || [])];
             newCorrectGuessers.push(playerId);
             updates.correctGuessersThisRound = newCorrectGuessers;
 
             let pointsAwardedToGuesser = 0;
-            const roundStartedAt = currentRoom.roundStartedAt; // Already checked
+            const roundStartedAt = currentRoom.roundStartedAt; 
             const roundTimeLimit = currentRoom.config.roundTimeoutSeconds;
             const guessTimestampForScoring = Date.now(); 
 
@@ -1527,10 +1527,10 @@ export default function GameRoomPage() {
         localStorage.setItem('patternPartyPlayerId', localPlayerId);
       }
       finalPlayerId = localPlayerId;
-
-      if (!localPlayerName) { // Name missing for anon, but ID might exist
+      
+      if (!localPlayerName && localPlayerId) { 
         toast({ title: "Name Required", description: "Please enter your name to join.", variant: "default" });
-        routerHook.push(`/join/${roomId}`); // Force re-entry of name, ID should be preserved by RoomForm
+        routerHook.push(`/join/${roomId}`); 
         return;
       }
       finalPlayerName = localPlayerName;
@@ -1543,16 +1543,16 @@ export default function GameRoomPage() {
     }
 
     if (currentRoomIdInStorage && currentRoomIdInStorage !== roomId && !finalIsAuthenticated) {
-        localStorage.removeItem('patternPartyPlayerId'); // Clear old ID
-        localStorage.removeItem('patternPartyPlayerName'); // Clear old name
-        finalPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`; // Generate new ID for new room
+        localStorage.removeItem('patternPartyPlayerId'); 
+        localStorage.removeItem('patternPartyPlayerName'); 
+        finalPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`; 
         localStorage.setItem('patternPartyPlayerId', finalPlayerId);
         toast({ title: "New Room Session", description: "Please confirm your name for this new room.", variant: "default" });
-        routerHook.push(`/join/${roomId}`); // Force re-entry of name with new ID
+        routerHook.push(`/join/${roomId}`); 
         return;
-    } else if (!localPlayerName && !finalIsAuthenticated) { 
+    } else if (!finalPlayerName && !finalIsAuthenticated) { 
         toast({ title: "Name Required", description: "Please enter your name to join the room.", variant: "default" });
-        routerHook.push(`/join/${roomId}`); // If name is still missing somehow (e.g. cleared storage manually)
+        routerHook.push(`/join/${roomId}`); 
         return;
     }
     
@@ -1631,13 +1631,12 @@ export default function GameRoomPage() {
             let nameForSystemMessage = playerName; 
             if (playerSnap.exists()) {
               const existingPlayerData = playerSnap.val() as Player;
-              // Prefer existing Firebase name if current session name is empty, unless it's an authenticated user with a different display name
               if (!playerName || playerName.trim() === '') {
                 updatesForPlayer.name = existingPlayerData.name || "Player";
               } else if (isAuthenticated && authPlayerId === playerId && existingPlayerData.name && existingPlayerData.name !== playerName) {
-                updatesForPlayer.name = existingPlayerData.name; // Keep Firebase name for authenticated user if different
+                updatesForPlayer.name = existingPlayerData.name; 
               } else {
-                updatesForPlayer.name = playerName; // Use current session name
+                updatesForPlayer.name = playerName;
               }
               nameForSystemMessage = updatesForPlayer.name || "Player";
 
@@ -1677,33 +1676,38 @@ export default function GameRoomPage() {
   }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage, authPlayerId]); 
 
   useEffect(() => {
-    // Player status change toasts
-    if (room && room.players && playerId) {
-        const currentPlayers = room.players;
-
-        if (prevPlayersRef.current) { // Only compare if we have a previous state
-            // Check for status changes or new players
-            Object.keys(currentPlayers).forEach(pId => {
-                const currentPlayerInfo = currentPlayers[pId];
-                const prevPlayerInfo = prevPlayersRef.current![pId];
-
-                if (pId === playerId || !currentPlayerInfo || !currentPlayerInfo.name) return;
-
-                if (prevPlayerInfo && prevPlayerInfo.name) { // Player existed before
-                    if (currentPlayerInfo.isOnline !== prevPlayerInfo.isOnline) {
-                        toast({
-                            title: `${currentPlayerInfo.name} is now ${currentPlayerInfo.isOnline ? "Online" : "Offline"}`,
-                            variant: currentPlayerInfo.isOnline ? "default" : "destructive",
-                            duration: 2500,
-                        });
-                    }
-                }
-            });
-        }
-        prevPlayersRef.current = JSON.parse(JSON.stringify(room.players)); 
-    } else if (!room?.players) {
-        prevPlayersRef.current = undefined; 
+    if (!room || !room.players || !playerId) {
+        prevPlayersRef.current = undefined;
+        return;
     }
+
+    const currentPlayers = room.players;
+    const previousPlayers = prevPlayersRef.current || {};
+
+    Object.keys(currentPlayers).forEach(pId => {
+        const currentPlayerInfo = currentPlayers[pId];
+        const prevPlayerInfo = previousPlayers[pId];
+
+        if (pId === playerId || !currentPlayerInfo || !currentPlayerInfo.name) return;
+
+        if (!prevPlayerInfo) { 
+            toast({
+                title: `${currentPlayerInfo.name} Joined!`,
+                description: `Welcome to the room, ${currentPlayerInfo.name}!`,
+                variant: "default",
+                duration: 3000,
+            });
+        } else { 
+            if (currentPlayerInfo.isOnline !== prevPlayerInfo.isOnline) {
+                toast({
+                    title: `${currentPlayerInfo.name} is now ${currentPlayerInfo.isOnline ? "Online" : "Offline"}`,
+                    variant: currentPlayerInfo.isOnline ? "default" : "destructive",
+                    duration: 2500,
+                });
+            }
+        }
+    });
+    prevPlayersRef.current = JSON.parse(JSON.stringify(currentPlayers));
   }, [room?.players, playerId, toast]);
 
 
@@ -1817,10 +1821,17 @@ export default function GameRoomPage() {
         get(ref(database, `rooms/${roomId}`)).then(snap => {
              if (snap.exists()) {
                  const latestRoomData = snap.val() as Room;
+                 const timeoutIdentifier = `${latestRoomData.currentDrawerId}_${latestRoomData.wordSelectionEndsAt}`;
+
                  if (latestRoomData.gameState === 'word_selection' &&
                      latestRoomData.hostId === playerId &&
                      !latestRoomData.currentPattern &&
-                     latestRoomData.wordSelectionEndsAt && Date.now() >= latestRoomData.wordSelectionEndsAt) {
+                     latestRoomData.wordSelectionEndsAt && Date.now() >= latestRoomData.wordSelectionEndsAt &&
+                     latestRoomData.currentDrawerId === room.currentDrawerId && 
+                     lastProcessedTimeoutRef.current !== timeoutIdentifier 
+                     ) {
+                    
+                    lastProcessedTimeoutRef.current = timeoutIdentifier;
 
                     const drawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
                     toast({
@@ -1838,11 +1849,18 @@ export default function GameRoomPage() {
            get(ref(database, `rooms/${roomId}`)).then(snap => {
              if (snap.exists()) {
                  const latestRoomData = snap.val() as Room;
+                 const timeoutIdentifier = `${latestRoomData.currentDrawerId}_${latestRoomData.wordSelectionEndsAt}`;
+
                  if (latestRoomData.gameState === 'word_selection' &&
                      latestRoomData.hostId === playerId &&
                      !latestRoomData.currentPattern &&
                      latestRoomData.wordSelectionEndsAt &&
-                     Date.now() >= latestRoomData.wordSelectionEndsAt) {
+                     Date.now() >= latestRoomData.wordSelectionEndsAt &&
+                     latestRoomData.currentDrawerId === room.currentDrawerId &&
+                     lastProcessedTimeoutRef.current !== timeoutIdentifier
+                     ) {
+                    
+                    lastProcessedTimeoutRef.current = timeoutIdentifier;
 
                     const currentDrawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
                     toast({
