@@ -8,14 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2, Mail } from 'lucide-react';
+import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2, Mail, ArrowLeft, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database, auth } from '@/lib/firebase'; // Import auth
-import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut } from "firebase/auth"; // Firebase auth functions
+import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut, updateEmail as firebaseUpdateEmail, type User } from "firebase/auth"; // Firebase auth functions
 import type { UserProfile, PlatformSettings } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ref, set, get, serverTimestamp, onValue, off } from 'firebase/database';
+import { ref, set, get, serverTimestamp, onValue, off, update } from 'firebase/database';
 
 
 const GoogleIcon = () => (
@@ -38,6 +38,8 @@ const generateShortAlphaNumericCode = (length: number): string => {
 };
 
 const LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY = 'drawlyDeviceOriginalReferrerUid';
+const LSTORAGE_LAST_VERIFICATION_EMAIL_SENT_AT = 'drawlyLastVerificationEmailSentAt';
+const EMAIL_RESEND_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
 
 interface AuthFormProps {
   passedReferralCodeProp?: string | null;
@@ -61,13 +63,18 @@ export default function AuthForm({
   const [countryCode, setCountryCode] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
 
+  const [authActionState, setAuthActionState] = useState<'default' | 'awaitingVerification' | 'resetPassword'>('default');
+  const [unverifiedUserEmail, setUnverifiedUserEmail] = useState<string | null>(null);
+  const [newEmailForVerification, setNewEmailForVerification] = useState('');
 
   const [isSigningUp, setIsSigningUp] = useState(true);
-  const [isForgotPassword, setIsForgotPassword] = useState(false); 
   const [error, setError] = useState<string | null>(null); 
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
+  const [isResendingVerification, setIsResendingVerification] = useState(false);
+  const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
+
   const router = useRouter();
   const { toast } = useToast();
 
@@ -113,6 +120,7 @@ export default function AuthForm({
     } else {
       setIsSigningUp(true);
     }
+    setAuthActionState('default'); // Reset to default view on prop changes
 
   }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
 
@@ -227,12 +235,10 @@ export default function AuthForm({
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
           }
           
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-            localStorage.setItem('drawlyUserDisplayName', displayName.trim());
-            localStorage.setItem('drawlyUserUid', user.uid);
-          }
-          router.push(redirectAfterAuth || '/');
+          // Don't set localStorage or redirect yet. User needs to verify.
+          // Transition to 'awaitingVerification' state
+          setUnverifiedUserEmail(user.email);
+          setAuthActionState('awaitingVerification');
         }
       } catch (fbError: any) {
         console.error("Firebase Signup Error:", fbError);
@@ -249,6 +255,13 @@ export default function AuthForm({
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
         if (user) {
+          if (!user.emailVerified) {
+            setUnverifiedUserEmail(user.email);
+            setAuthActionState('awaitingVerification');
+            setIsLoadingEmail(false);
+            return; // Stop here, user needs to verify
+          }
+
           const userProfileRef = ref(database, `users/${user.uid}`);
           const snapshot = await get(userProfileRef);
           let userDisplayNameFromDB = "Player";
@@ -262,9 +275,6 @@ export default function AuthForm({
             localStorage.setItem('drawlyUserUid', user.uid);
           }
           toast({ title: "Login Successful!", description: `Welcome back, ${userDisplayNameFromDB}!` });
-          if (!user.emailVerified) {
-            toast({ title: "Email Not Verified", description: "Please check your email to verify your account. Some features might be limited.", variant: "default", duration: 7000 });
-          }
           router.push(redirectAfterAuth || '/');
         }
       } catch (fbError: any) {
@@ -293,7 +303,7 @@ export default function AuthForm({
         description: `If an account for ${email.trim()} exists, a password reset link has been sent. Please check your inbox and spam/junk folder.`,
         duration: 7000 
       });
-      setIsForgotPassword(false); 
+      setAuthActionState('default'); // Go back to default login/signup view
     } catch (fbError: any) {
       console.error("Forgot Password Error:", fbError);
        if (fbError.code === 'auth/invalid-email') {
@@ -301,20 +311,100 @@ export default function AuthForm({
       } else if (fbError.code === 'auth/missing-email') { 
             setError("Please enter your email address.");
       } else {
-            setError("Could not send password reset email. Please ensure the email is correct or try again later.");
+            // Firebase doesn't usually confirm "user not found" for this to prevent email enumeration.
+            // So, the success message implies "if an account exists."
+            // This generic error is for other unexpected issues.
+            setError("Could not send password reset email at this time. Please try again later.");
       }
     } finally {
       setIsLoadingEmail(false);
     }
   };
 
+  const handleResendVerificationEmail = async () => {
+    if (!auth.currentUser) {
+      toast({ title: "Error", description: "No user session found. Please log in again.", variant: "destructive" });
+      setAuthActionState('default'); // Send back to login
+      return;
+    }
+    setIsResendingVerification(true);
+    const lastSent = Number(localStorage.getItem(LSTORAGE_LAST_VERIFICATION_EMAIL_SENT_AT));
+    if (Date.now() - lastSent < EMAIL_RESEND_COOLDOWN_MS) {
+      toast({ title: "Please Wait", description: `You can resend the verification email again in about ${Math.ceil((EMAIL_RESEND_COOLDOWN_MS - (Date.now() - lastSent)) / 60000)} minute(s).`, variant: "default" });
+      setIsResendingVerification(false);
+      return;
+    }
+
+    try {
+      await sendEmailVerification(auth.currentUser);
+      localStorage.setItem(LSTORAGE_LAST_VERIFICATION_EMAIL_SENT_AT, Date.now().toString());
+      toast({ title: "Verification Email Resent", description: `A new verification email has been sent to ${auth.currentUser.email}. Please check your inbox (and spam folder).` });
+    } catch (error: any) {
+      console.error("Error resending verification email:", error);
+      toast({ title: "Error", description: error.message || "Could not resend verification email.", variant: "destructive" });
+    } finally {
+      setIsResendingVerification(false);
+    }
+  };
+  
+  const handleUpdateEmail = async () => {
+    if (!auth.currentUser) {
+      toast({ title: "Error", description: "No user session found. Please log in again.", variant: "destructive" });
+      setAuthActionState('default');
+      return;
+    }
+    if (!newEmailForVerification.trim() || !/\S+@\S+\.\S+/.test(newEmailForVerification.trim())) {
+        toast({ title: "Invalid Email", description: "Please enter a valid new email address.", variant: "destructive" });
+        return;
+    }
+    setIsUpdatingEmail(true);
+    try {
+        const currentFbUser = auth.currentUser;
+        await firebaseUpdateEmail(currentFbUser, newEmailForVerification.trim());
+        // Update email in RTDB profile
+        await update(ref(database, `users/${currentFbUser.uid}`), { email: newEmailForVerification.trim() });
+        
+        await sendEmailVerification(currentFbUser); // Firebase user object (currentFbUser) updates automatically
+        
+        setUnverifiedUserEmail(newEmailForVerification.trim()); // Update displayed email
+        setNewEmailForVerification(''); // Clear input
+        toast({ title: "Email Updated", description: `Your email has been updated to ${newEmailForVerification.trim()}. A new verification email has been sent. Please check your inbox.` });
+    } catch (error: any) {
+        console.error("Error updating email:", error);
+        if (error.code === 'auth/requires-recent-login') {
+            toast({ title: "Action Requires Re-authentication", description: "For security, please log out and log back in before changing your email.", variant: "destructive", duration: 7000 });
+        } else if (error.code === 'auth/email-already-in-use') {
+            toast({ title: "Email In Use", description: "This email address is already associated with another account.", variant: "destructive"});
+        } else {
+            toast({ title: "Error", description: error.message || "Could not update email.", variant: "destructive" });
+        }
+    } finally {
+        setIsUpdatingEmail(false);
+    }
+  };
+
+  const handleUserLogoutForVerificationScreen = async () => {
+    await firebaseSignOut(auth);
+    localStorage.removeItem('drawlyAuthStatus');
+    localStorage.removeItem('drawlyUserDisplayName');
+    localStorage.removeItem('drawlyUserUid');
+    setAuthActionState('default');
+    setUnverifiedUserEmail(null);
+    setEmail(''); // Clear form fields
+    setPassword('');
+    setError(null);
+    toast({ title: "Logged Out" });
+  };
+
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (isForgotPassword) {
+    if (authActionState === 'resetPassword') {
       handleForgotPassword();
-    } else {
+    } else if (authActionState === 'default') {
       handleFirebaseEmailAuth();
     }
+    // No default submit action for 'awaitingVerification' state; buttons handle actions.
   };
   
   const handleGoogleAuthSimulated = () => {
@@ -364,20 +454,71 @@ export default function AuthForm({
                        (!forceSignupFromPath && !!(passedReferralCodeProp && passedReferralCodeProp.trim() !== ""));
 
 
+  if (authActionState === 'awaitingVerification') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen py-12">
+        <Card className="w-full max-w-md shadow-xl">
+          <CardHeader>
+            <CardTitle className="text-2xl text-center">Verify Your Email</CardTitle>
+            <CardDescription className="text-center">
+              Your email address <strong className="text-primary">{unverifiedUserEmail}</strong> is not verified.
+              Please check your inbox (and spam folder) for the verification link.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {error && (
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-center text-sm text-destructive">
+                    <AlertCircle className="inline-block mr-1 h-4 w-4" /> {error}
+                </div>
+            )}
+            <Button onClick={handleResendVerificationEmail} className="w-full" disabled={isResendingVerification || isUpdatingEmail}>
+              {isResendingVerification ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <RefreshCw className="mr-2 h-5 w-5" />}
+              {isResendingVerification ? 'Sending...' : 'Resend Verification Email'}
+            </Button>
+            
+            <div className="space-y-2 pt-4 border-t">
+                <Label htmlFor="newEmailForVerification" className="text-md">Incorrect email? Update it here:</Label>
+                <Input 
+                    id="newEmailForVerification" 
+                    type="email" 
+                    placeholder="Enter new email address"
+                    value={newEmailForVerification}
+                    onChange={(e) => setNewEmailForVerification(e.target.value)}
+                    disabled={isResendingVerification || isUpdatingEmail}
+                />
+                <Button onClick={handleUpdateEmail} variant="outline" className="w-full" disabled={isResendingVerification || isUpdatingEmail || !newEmailForVerification.trim()}>
+                    {isUpdatingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Mail className="mr-2 h-5 w-5" />}
+                    {isUpdatingEmail ? 'Updating...' : 'Update Email & Resend Verification'}
+                </Button>
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3">
+            <Button variant="link" onClick={handleUserLogoutForVerificationScreen} disabled={isResendingVerification || isUpdatingEmail}>
+              Logout
+            </Button>
+            <Link href="/" className="text-sm text-muted-foreground hover:text-primary">
+                Back to Home
+            </Link>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-12">
       <Card className="w-full max-w-md shadow-xl">
         <CardHeader>
           <CardTitle className="text-3xl text-center">
-            {isForgotPassword ? "Reset Password" : (isSigningUp ? "Sign Up" : "Login")} to {APP_NAME}
+            {authActionState === 'resetPassword' ? "Reset Password" : (isSigningUp ? "Sign Up" : "Login")} to {APP_NAME}
           </CardTitle>
           <CardDescription className="text-center">
-            {isForgotPassword
+            {authActionState === 'resetPassword'
               ? "Enter your email to receive a password reset link."
               : isSigningUp
-                ? "Create an account to play, refer friends, and earn rewards!"
+                ? "Create an account to play, refer friends, and earn rewards! A verification email will be sent to complete your registration."
                 : "Welcome back! Log in to continue."}
-            {isSigningUp && !isForgotPassword && <p className="text-xs mt-1 text-blue-600">A verification email will be sent to complete your registration.</p>}
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -387,7 +528,7 @@ export default function AuthForm({
                     <AlertCircle className="inline-block mr-1 h-4 w-4" /> {error}
                 </div>
             )}
-            {!isForgotPassword && isSigningUp && (
+            {authActionState === 'default' && isSigningUp && (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="displayName_auth_form" className="text-lg">Display Name <span className="text-destructive">*</span></Label>
@@ -492,7 +633,7 @@ export default function AuthForm({
                 disabled={isLoadingEmail || isLoadingGoogle}
               />
             </div>
-            {!isForgotPassword && (
+            {authActionState !== 'resetPassword' && (
                  <div className="space-y-2">
                     <Label htmlFor="password_auth_form" className="text-lg">Password <span className="text-destructive">*</span></Label>
                     <Input
@@ -509,18 +650,18 @@ export default function AuthForm({
                 </div>
             )}
 
-            {!isSigningUp && !isForgotPassword && (
+            {authActionState === 'default' && !isSigningUp && (
                 <Button
                     type="button"
                     variant="link"
                     className="px-0 text-sm text-primary hover:underline"
-                    onClick={() => {setIsForgotPassword(true); setError(null);}}
+                    onClick={() => {setAuthActionState('resetPassword'); setError(null);}}
                     disabled={isLoadingEmail || isLoadingGoogle}
                 >
                     Forgot Password?
                 </Button>
             )}
-            {isSigningUp && !isForgotPassword && (
+            {authActionState === 'default' && isSigningUp && (
               <div className="space-y-2">
                 <Label htmlFor="referral_code" className="text-lg flex items-center">
                    <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
@@ -548,14 +689,14 @@ export default function AuthForm({
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full text-lg py-6" disabled={isLoadingEmail || isLoadingGoogle}>
               {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : 
-                (isForgotPassword ? <Mail className="mr-2 h-5 w-5" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />))
+                (authActionState === 'resetPassword' ? <Mail className="mr-2 h-5 w-5" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />))
               }
               {isLoadingEmail ? 'Processing...' : 
-                (isForgotPassword ? "Send Reset Email" : (isSigningUp ? 'Sign Up with Email' : 'Login with Email'))
+                (authActionState === 'resetPassword' ? "Send Reset Email" : (isSigningUp ? 'Sign Up with Email' : 'Login with Email'))
               }
             </Button>
 
-            {!isForgotPassword && (
+            {authActionState !== 'resetPassword' && (
                 <>
                 <div className="relative w-full my-2">
                   <div className="absolute inset-0 flex items-center">
@@ -584,8 +725,8 @@ export default function AuthForm({
             <Button
                 variant="link"
                 onClick={() => {
-                    if (isForgotPassword) {
-                        setIsForgotPassword(false);
+                    if (authActionState === 'resetPassword') {
+                        setAuthActionState('default');
                         setIsSigningUp(false); 
                     } else if (!disableToggle) {
                         setIsSigningUp(!isSigningUp);
@@ -593,11 +734,11 @@ export default function AuthForm({
                     setError(null);
                 }}
                 className="mt-2"
-                disabled={disableToggle && !isForgotPassword}
+                disabled={disableToggle && authActionState !== 'resetPassword'}
                 type="button"
             >
-              {isForgotPassword
-                ? "Back to Login"
+              {authActionState === 'resetPassword'
+                ? <><ArrowLeft className="mr-1 h-4 w-4"/> Back to Login</>
                 : isSigningUp
                     ? (disableToggle ? "Complete Sign Up with Referral" : "Already have an account? Login")
                     : "Don't have an account? Sign Up"}
@@ -610,8 +751,9 @@ export default function AuthForm({
         </form>
       </Card>
       <p className="text-xs text-muted-foreground mt-6 max-w-md text-center">
-        Using Firebase Authentication for email/password. Google Sign-In is simulated.
+        Email/password authentication uses Firebase. Google Sign-In is simulated.
       </p>
     </div>
   );
 }
+
