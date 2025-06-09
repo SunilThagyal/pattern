@@ -80,10 +80,10 @@ export default function AuthForm({
   const [unverifiedUserEmail, setUnverifiedUserEmail] = useState<string | null>(null);
   const [newEmailForVerification, setNewEmailForVerification] = useState('');
 
-  const [isSigningUp, setIsSigningUp] = useState(() => 
+  const [isSigningUp, setIsSigningUp] = useState(() =>
     determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp)
   );
-  
+
   const [error, setError] = useState<string | null>(null); // General form error
 
   // Field-specific errors
@@ -119,7 +119,7 @@ export default function AuthForm({
   const validateCountryCode = (val: string) => {
     if (!val.trim()) return 'Country Code is required.';
     if (!val.startsWith('+')) return "Country code must start with '+'.";
-    if (val.trim().length < 2 || val.trim().length > 4) return "Invalid country code length (e.g. +1, +91).";
+    if (val.trim().length < 2 || val.trim().length > 4) return "Invalid country code length (e.g. +91, +1).";
     return '';
   };
   const validatePhoneNumber = (val: string) => {
@@ -127,7 +127,7 @@ export default function AuthForm({
     if (!/^\d{7,15}$/.test(val)) return 'Phone number must be 7-15 digits.';
     return '';
   };
-  
+
   const handleDisplayNameBlur = () => setDisplayNameError(validateDisplayName(displayName));
   const handleEmailBlur = () => setEmailError(validateEmail(email));
   const handlePasswordBlur = () => setPasswordError(validatePassword(password));
@@ -164,35 +164,44 @@ export default function AuthForm({
       codeToSet = passedReferralCodeProp.trim().toUpperCase();
     }
     setReferralCodeInput(codeToSet);
-    
-    if (authActionState !== 'awaitingVerification') { 
+
+    if (authActionState !== 'awaitingVerification') {
         setAuthActionState('default');
     }
     setError(null);
     setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
 
-  }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
+  }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath, isSigningUp, authActionState]);
 
 
   const handleFirebaseEmailAuth = async () => {
-    setError(null); 
+    setError(null);
+    setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
     setIsLoadingEmail(true);
 
-    // Trigger all field validations explicitly on submit attempt for safety, though button should be disabled
-    const currentEmailError = validateEmail(email); setEmailError(currentEmailError);
-    const currentPasswordError = validatePassword(password); setPasswordError(currentPasswordError);
+    const currentEmailError = validateEmail(email);
+    const currentPasswordError = validatePassword(password);
 
     if (isSigningUp) {
-      const currentDisplayNameError = validateDisplayName(displayName); setDisplayNameError(currentDisplayNameError);
-      const currentCountryCodeError = validateCountryCode(countryCode); setCountryCodeError(currentCountryCodeError);
-      const currentPhoneNumberError = validatePhoneNumber(phoneNumber); setPhoneNumberError(currentPhoneNumberError);
+      const currentDisplayNameError = validateDisplayName(displayName);
+      const currentCountryCodeError = validateCountryCode(countryCode);
+      const currentPhoneNumberError = validatePhoneNumber(phoneNumber);
+
+      setDisplayNameError(currentDisplayNameError);
+      setEmailError(currentEmailError);
+      setPasswordError(currentPasswordError);
+      setCountryCodeError(currentCountryCodeError);
+      setPhoneNumberError(currentPhoneNumberError);
+
 
       if (currentDisplayNameError || currentEmailError || currentPasswordError || currentCountryCodeError || currentPhoneNumberError || !country || !gender) {
-         setError("Please correct the errors above and fill all required fields.");
+         setError("Please fill all required fields and correct any errors.");
          setIsLoadingEmail(false);
          return;
       }
     } else { // Login
+       setEmailError(currentEmailError);
+       setPasswordError(currentPasswordError);
        if (currentEmailError || currentPasswordError) {
           setError("Please correct the errors above.");
           setIsLoadingEmail(false);
@@ -208,7 +217,7 @@ export default function AuthForm({
 
         if (user) {
           await sendEmailVerification(user);
-          
+
           let newShortReferralCode = '';
           if (referralProgramEnabled) {
               let codeExists = true;
@@ -221,14 +230,14 @@ export default function AuthForm({
                   codeExists = shortCodeSnap.exists();
                   attempts++;
               }
-              if (codeExists) console.warn("Could not generate unique referral code after attempts."); // Non-fatal
+              if (codeExists) console.warn("Could not generate unique referral code after attempts.");
           }
 
           const newUserProfile: UserProfile = {
             userId: user.uid,
             displayName: displayName.trim(),
             email: user.email || email,
-            referralCode: user.uid, 
+            referralCode: user.uid,
             shortReferralCode: referralProgramEnabled && newShortReferralCode ? newShortReferralCode : undefined,
             totalEarnings: 0,
             createdAt: serverTimestamp() as number,
@@ -283,7 +292,7 @@ export default function AuthForm({
           if (referralProgramEnabled && newShortReferralCode) {
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
           }
-          
+
           setUnverifiedUserEmail(user.email);
           setAuthActionState('awaitingVerification');
            toast({ title: "Sign Up Almost Complete!", description: `Welcome, ${displayName}! A verification email has been sent to ${email}. Please verify your email.` });
@@ -293,7 +302,7 @@ export default function AuthForm({
         if (fbError.code === 'auth/email-already-in-use') {
             setError("This email is already in use. Please login or use a different email.");
         } else if (fbError.code === 'auth/weak-password') {
-            setPasswordError("Password should be at least 6 characters."); // Set specific error
+            setPasswordError("Password should be at least 6 characters.");
         } else {
             setError(fbError.message || "Signup failed. Please try again.");
         }
@@ -307,7 +316,7 @@ export default function AuthForm({
             setUnverifiedUserEmail(user.email);
             setAuthActionState('awaitingVerification');
             setIsLoadingEmail(false);
-            return; 
+            return;
           }
 
           const userProfileRef = ref(database, `users/${user.uid}`);
@@ -351,16 +360,16 @@ export default function AuthForm({
       toast({
         title: "Password Reset Email Sent",
         description: `If an account for ${email.trim()} exists, a password reset link has been sent. Please check your inbox and spam/junk folder.`,
-        duration: 7000 
+        duration: 7000
       });
-      setAuthActionState('default'); 
+      setAuthActionState('default');
     } catch (fbError: any) {
       console.error("Forgot Password Error:", fbError);
        if (fbError.code === 'auth/invalid-email') {
-            setEmailError("The email address format is not valid."); // Set specific error
+            setEmailError("The email address format is not valid.");
             setError("Please check the email address format.");
-      } else if (fbError.code === 'auth/missing-email') { 
-            setEmailError("Please enter your email address."); // Set specific error
+      } else if (fbError.code === 'auth/missing-email') {
+            setEmailError("Please enter your email address.");
             setError("Please enter your email address.");
       } else {
             setError("Could not send password reset email at this time. Please try again later.");
@@ -373,7 +382,7 @@ export default function AuthForm({
   const handleResendVerificationEmail = async () => {
     if (!auth.currentUser) {
       toast({ title: "Error", description: "No user session found. Please log in again.", variant: "destructive" });
-      setAuthActionState('default'); 
+      setAuthActionState('default');
       return;
     }
     setIsResendingVerification(true);
@@ -395,7 +404,7 @@ export default function AuthForm({
       setIsResendingVerification(false);
     }
   };
-  
+
   const handleUpdateEmail = async () => {
     if (!auth.currentUser) {
       toast({ title: "Error", description: "No user session found. Please log in again.", variant: "destructive" });
@@ -411,13 +420,13 @@ export default function AuthForm({
     try {
         const currentFbUser = auth.currentUser;
         await firebaseUpdateEmail(currentFbUser, newEmailForVerification.trim());
-        
+
         await update(ref(database, `users/${currentFbUser.uid}`), { email: newEmailForVerification.trim() });
-        
-        await sendEmailVerification(currentFbUser); 
-        
-        setUnverifiedUserEmail(newEmailForVerification.trim()); 
-        setNewEmailForVerification(''); 
+
+        await sendEmailVerification(currentFbUser);
+
+        setUnverifiedUserEmail(newEmailForVerification.trim());
+        setNewEmailForVerification('');
         toast({ title: "Email Updated", description: `Your email has been updated to ${newEmailForVerification.trim()}. A new verification email has been sent. Please check your inbox.` });
     } catch (error: any)
       {
@@ -441,7 +450,7 @@ export default function AuthForm({
     localStorage.removeItem('drawlyUserUid');
     setAuthActionState('default');
     setUnverifiedUserEmail(null);
-    setEmail(''); 
+    setEmail('');
     setPassword('');
     setError(null);
     setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
@@ -457,7 +466,7 @@ export default function AuthForm({
       handleFirebaseEmailAuth();
     }
   };
-  
+
   const handleGoogleAuthSimulated = () => {
     setIsLoadingGoogle(true);
     const randomNum = Math.floor(Math.random() * 10000);
@@ -466,13 +475,13 @@ export default function AuthForm({
     const simulatedUid = `uid_google_${randomNum}`;
 
     toast({ title: "Google Sign-In (Simulated)", description: `Simulating login for ${simulatedDisplayName}. This is not real Google Sign-In.` });
-    
+
     if (typeof window !== 'undefined') {
       localStorage.setItem('drawlyAuthStatus', 'loggedIn');
       localStorage.setItem('drawlyUserDisplayName', simulatedDisplayName);
       localStorage.setItem('drawlyUserUid', simulatedUid);
     }
-    
+
     const userProfileRef = ref(database, `users/${simulatedUid}`);
     get(userProfileRef).then((snapshot) => {
         if(!snapshot.exists()){
@@ -483,7 +492,7 @@ export default function AuthForm({
                 referralCode: simulatedUid,
                 totalEarnings: 0,
                 createdAt: serverTimestamp() as number,
-                country: 'India', 
+                country: 'India',
                 currency: 'INR',
                 gender: 'prefer_not_to_say',
                 countryCode: '+91',
@@ -523,7 +532,7 @@ export default function AuthForm({
             <CardTitle className="text-2xl text-center">Verify Your Email</CardTitle>
             <CardDescription className="text-center">
               Your email address <strong className="text-primary">{unverifiedUserEmail}</strong> is not verified.
-              Please check your inbox (and spam folder) for the verification link.
+              A verification email has been sent. Please check your inbox (and spam folder).
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -536,12 +545,12 @@ export default function AuthForm({
               {isResendingVerification ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <RefreshCw className="mr-2 h-5 w-5" />}
               {isResendingVerification ? 'Sending...' : 'Resend Verification Email'}
             </Button>
-            
+
             <div className="space-y-2 pt-4 border-t">
                 <Label htmlFor="newEmailForVerification" className="text-md">Incorrect email? Update it here:</Label>
-                <Input 
-                    id="newEmailForVerification" 
-                    type="email" 
+                <Input
+                    id="newEmailForVerification"
+                    type="email"
                     placeholder="Enter new email address"
                     value={newEmailForVerification}
                     onChange={(e) => setNewEmailForVerification(e.target.value)}
@@ -583,7 +592,7 @@ export default function AuthForm({
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-4"> {/* Reduced space-y-6 to space-y-4 */}
+          <CardContent className="space-y-4">
             {error && (
                 <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-center text-sm text-destructive">
                     <AlertCircle className="inline-block mr-1 h-4 w-4" /> {error}
@@ -591,7 +600,7 @@ export default function AuthForm({
             )}
             {authActionState === 'default' && isSigningUp && (
               <>
-                <div className="space-y-1"> {/* Reduced space-y-2 to space-y-1 */}
+                <div className="space-y-1">
                   <Label htmlFor="displayName_auth_form">Display Name <span className="text-destructive">*</span></Label>
                   <Input
                     id="displayName_auth_form"
@@ -649,7 +658,7 @@ export default function AuthForm({
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-1 space-y-1">
-                        <Label htmlFor="country_code_auth_form">Code <span className="text-destructive">*</span></Label>
+                        <Label htmlFor="country_code_auth_form" className="flex items-center">Code <span className="text-destructive ml-1">*</span></Label>
                         <Input
                             id="country_code_auth_form"
                             name="countryCode"
@@ -666,7 +675,7 @@ export default function AuthForm({
                     </div>
                     <div className="col-span-2 space-y-1">
                         <Label htmlFor="phone_number_auth_form" className="flex items-center">
-                           Phone <span className="text-destructive">*</span>
+                           Phone <span className="text-destructive ml-1">*</span>
                         </Label>
                         <Input
                             id="phone_number_auth_form"
@@ -757,19 +766,19 @@ export default function AuthForm({
               </div>
             )}
           </CardContent>
-          <CardFooter className="flex flex-col gap-3"> {/* Reduced gap-4 to gap-3 */}
-            <Button type="submit" className="w-full text-base py-5" disabled={isSubmitDisabled}> {/* Adjusted size */}
-              {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : 
+          <CardFooter className="flex flex-col gap-3">
+            <Button type="submit" className="w-full text-base py-5" disabled={isSubmitDisabled}>
+              {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> :
                 (authActionState === 'resetPassword' ? <Mail className="mr-2 h-5 w-5" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />))
               }
-              {isLoadingEmail ? 'Processing...' : 
+              {isLoadingEmail ? 'Processing...' :
                 (authActionState === 'resetPassword' ? "Send Reset Email" : (isSigningUp ? 'Sign Up with Email' : 'Login with Email'))
               }
             </Button>
 
             {authActionState !== 'resetPassword' && (
                 <>
-                <div className="relative w-full my-1"> {/* Reduced my-2 to my-1 */}
+                <div className="relative w-full my-1">
                   <div className="absolute inset-0 flex items-center">
                     <span className="w-full border-t" />
                   </div>
@@ -782,7 +791,7 @@ export default function AuthForm({
 
                 <Button
                   variant="outline"
-                  className="w-full text-base py-5" /* Adjusted size */
+                  className="w-full text-base py-5"
                   onClick={handleGoogleAuthSimulated}
                   disabled={isLoadingGoogle || isLoadingEmail}
                   type="button"
@@ -798,14 +807,14 @@ export default function AuthForm({
                 onClick={() => {
                     if (authActionState === 'resetPassword') {
                         setAuthActionState('default');
-                        setIsSigningUp(false); 
+                        setIsSigningUp(false);
                     } else if (!disableToggle) {
                         setIsSigningUp(!isSigningUp);
                     }
                     setError(null);
                     setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
                 }}
-                className="mt-1" /* Reduced mt-2 to mt-1 */
+                className="mt-1"
                 disabled={disableToggle && authActionState !== 'resetPassword'}
                 type="button"
             >
@@ -822,9 +831,10 @@ export default function AuthForm({
           </CardFooter>
         </form>
       </Card>
-      <p className="text-xs text-muted-foreground mt-4 max-w-md text-center"> {/* Reduced mt-6 to mt-4 */}
+      <p className="text-xs text-muted-foreground mt-4 max-w-md text-center">
         Email/password authentication uses Firebase. Google Sign-In is simulated.
       </p>
     </div>
   );
 }
+
