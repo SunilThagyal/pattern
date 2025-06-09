@@ -458,7 +458,7 @@ const PlayerList = React.memo(({
                         <div className="w-6 sm:w-8 font-bold text-xs sm:text-sm text-gray-700">#{index + 1}</div>
                         <div className="flex-1 text-center text-xs">
                         <span className={cn("font-bold", player.id === playerId ? "text-blue-600" : "text-gray-800", !player.isOnline ? "line-through text-gray-400" : "")}>
-                            {player.name} {player.id === playerId ? "(You)" : ""} {player.id === hostId ? <span className="text-xs">(Host)</span> : ""} {!player.isOnline && <span className="text-red-500 text-xs">(Offline)</span>}
+                            {player.name || 'Player'} {player.id === playerId ? "(You)" : ""} {player.id === hostId ? <span className="text-xs">(Host)</span> : ""} {!player.isOnline && <span className="text-red-500 text-xs">(Offline)</span>}
                         </span>
                         <br />
                         <span className="font-normal text-gray-600">{player.score || 0} points</span>
@@ -473,8 +473,8 @@ const PlayerList = React.memo(({
                                 <Brush className="text-blue-500 animate-pulse h-5 w-5" title="Drawing" />
                             ) : (
                                 <Avatar className="h-6 w-6 sm:h-8 sm:w-8">
-                                    <AvatarImage src={`https://placehold.co/32x32.png?text=${player.name.substring(0,1)}`} data-ai-hint="profile avatar"/>
-                                    <AvatarFallback>{player.name.substring(0, 2).toUpperCase()}</AvatarFallback>
+                                    <AvatarImage src={`https://placehold.co/32x32.png?text=${(player.name || 'P').substring(0,1)}`} data-ai-hint="profile avatar"/>
+                                    <AvatarFallback>{(player.name || 'Pl').substring(0, 2).toUpperCase()}</AvatarFallback>
                                 </Avatar>
                             )}
                         </div>
@@ -1008,9 +1008,9 @@ export default function GameRoomPage() {
      if (currentRoomData.gameState === 'word_selection' && 
         currentRoomData.selectableWords && currentRoomData.selectableWords.length > 0 &&
         currentRoomData.currentPattern === null &&
-        currentRoomData.currentDrawerId && // Make sure there's a drawer assigned
+        currentRoomData.currentDrawerId && 
         (currentRoomData.currentDrawerId === playerId || // This specific host instance is the one choosing
-         Object.keys(currentRoomData.players).includes(currentRoomData.currentDrawerId)) // Or any drawer is actively choosing
+         Object.keys(currentRoomData.players).includes(currentRoomData.currentDrawerId)) 
         ) {
         console.warn(`[selectWordForNewRound] Aborting for host ${playerId}: gameState is 'word_selection' by drawer ${currentRoomData.currentDrawerId}, selectableWords are present, and no pattern chosen yet. Room: ${roomId}.`);
         return;
@@ -1516,27 +1516,25 @@ export default function GameRoomPage() {
       finalPlayerName = storedDisplayName;
       finalIsAuthenticated = true;
       setAuthPlayerId(storedUid);
-    } else if (localPlayerId) { // Anonymous user has an ID
+    } else if (localPlayerId) {
       finalPlayerId = localPlayerId;
       if (localPlayerName) {
         finalPlayerName = localPlayerName;
       } else {
-        // Has ID, but no name in localStorage. Should be sent to RoomForm to re-enter name,
-        // but *using the existing ID*. RoomForm will pick up existing ID.
         toast({ title: "Name Required", description: "Please re-enter your name to rejoin.", variant: "default" });
         routerHook.push(`/join/${roomId}`); 
         return; 
       }
     }
 
-    if (!finalPlayerId) { // No auth, no anonymous ID found (e.g. first visit, or localStorage cleared)
+    if (!finalPlayerId) {
       toast({ title: "Player Identity Needed", description: "Please enter your details to join.", variant: "default" });
-      routerHook.push(`/join/${roomId}`); // Go to RoomForm to establish identity
+      routerHook.push(`/join/${roomId}`); 
       return;
     }
-    if (!finalPlayerName && finalPlayerId && !finalIsAuthenticated) { // Has anon ID but somehow name is missing.
+    if (!finalPlayerName && finalPlayerId && !finalIsAuthenticated) {
         toast({ title: "Name Missing", description: "Please re-enter your name.", variant: "default" });
-        routerHook.push(`/join/${roomId}`); // Go to RoomForm to re-enter name, will reuse ID.
+        routerHook.push(`/join/${roomId}`);
         return;
     }
 
@@ -1545,17 +1543,13 @@ export default function GameRoomPage() {
        if (!finalIsAuthenticated) { 
            localStorage.removeItem('patternPartyPlayerId');
            localStorage.removeItem('patternPartyPlayerName');
-           // This means the user is anonymous AND trying to join a new room.
-           // They will be redirected to RoomForm by the !finalPlayerId check above if ID was cleared.
-           // If they reached here, it implies they still had an ID, but are now switching rooms.
-           // It's better to force them to RoomForm to get a new ID for the new room implicitly.
             toast({ title: "New Room Session", description: "Please confirm your name for this new room.", variant: "default" });
             routerHook.push(`/join/${roomId}`);
             return;
        }
     }
     
-    if (finalPlayerId) { // Regardless of auth, if we have a player ID, mark this as the current room.
+    if (finalPlayerId) { 
         localStorage.setItem('patternPartyCurrentRoomId', roomId);
     }
 
@@ -1624,14 +1618,12 @@ export default function GameRoomPage() {
           get(playerRef).then(playerSnap => {
             const updatesForPlayer: Partial<Player> = { 
                 isOnline: true, 
-                name: playerName, // Always update name from current session on connect
+                name: playerName, 
                 isAnonymous: !isAuthenticated 
             };
 
             if (playerSnap.exists()) {
               const existingPlayerData = playerSnap.val() as Player;
-              // If local playerName is empty but player exists in DB, use DB name.
-              // This handles cases where localStorage for name might have been cleared but ID persists.
               updatesForPlayer.name = playerName || existingPlayerData.name || "Player";
 
               update(playerRef, updatesForPlayer ).then(() => { 
@@ -1640,9 +1632,9 @@ export default function GameRoomPage() {
             } else {
               const newPlayerEntry: Player = {
                 id: playerId,
-                name: playerName, // Use the name from current session
-                score: 0,
-                isOnline: true,
+                name: playerName, 
+                score: 0, 
+                isOnline: true, 
                 isHost: false, 
                 isAnonymous: !isAuthenticated,
                 referralRewardsThisSession: 0,
@@ -1663,10 +1655,8 @@ export default function GameRoomPage() {
       if (connectedListener && playerConnectionsRef) {
         off(playerConnectionsRef, 'value', connectedListener);
       }
-      // To prevent onDisconnect from firing when intentionally leaving:
-      // onDisconnect(playerOnlineStatusRef).cancel(); // This would be called in handleLeaveRoom ideally
     };
-  }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage]); // Added playerId, playerName to dependencies
+  }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage]); 
 
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt && room?.roundStartedAt) {
@@ -2208,4 +2198,5 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
 
 
     
+
 
