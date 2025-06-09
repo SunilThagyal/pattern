@@ -11,8 +11,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2, Mail, ArrowLeft, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
-import { database, auth } from '@/lib/firebase'; // Import auth
-import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut, type User, GoogleAuthProvider, signInWithPopup, updateEmail as firebaseUpdateEmail } from "firebase/auth"; // Firebase auth functions
+import { database, auth } from '@/lib/firebase';
+import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut, type User, GoogleAuthProvider, signInWithPopup, updateEmail as firebaseUpdateEmail } from "firebase/auth";
 import type { UserProfile, PlatformSettings } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ref, set, get, serverTimestamp, onValue, off, update } from 'firebase/database';
@@ -84,9 +84,8 @@ export default function AuthForm({
     determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp)
   );
 
-  const [error, setError] = useState<string | null>(null); // General form error
+  const [error, setError] = useState<string | null>(null);
 
-  // Field-specific errors
   const [displayNameError, setDisplayNameError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -104,7 +103,6 @@ export default function AuthForm({
   const [referralProgramEnabled, setReferralProgramEnabled] = useState(true);
   const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
 
-  // Validation functions
   const validateDisplayName = (name: string) => !name.trim() ? 'Display Name is required.' : '';
   const validateEmail = (val: string) => {
     if (!val.trim()) return 'Email is required.';
@@ -160,15 +158,13 @@ export default function AuthForm({
     if (isSigningUp !== propDrivenIsSigningUp) {
       setIsSigningUp(propDrivenIsSigningUp);
     }
-
-    // Only change authActionState if it's not 'awaitingVerification', or if the prop explicitly demands 'resetPassword'
+    
     if (authActionState !== 'awaitingVerification' || propDrivenAuthAction === 'resetPassword') {
         if(authActionState !== propDrivenAuthAction) {
             setAuthActionState(propDrivenAuthAction);
         }
     }
     
-    // Clear all errors when these controlling props change, unless we are in verification
     if (authActionState !== 'awaitingVerification') {
         setError(null);
         setDisplayNameError('');
@@ -177,8 +173,7 @@ export default function AuthForm({
         setCountryCodeError('');
         setPhoneNumberError('');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
+  }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath, isSigningUp, authActionState]);
 
 
   useEffect(() => {
@@ -192,7 +187,6 @@ export default function AuthForm({
 
   const handleFirebaseEmailAuth = async () => {
     setError(null);
-    // Re-validate on submit attempt as well, in case onBlur didn't catch something or was bypassed.
     const currentEmailError = validateEmail(email);
     const currentPasswordError = validatePassword(password);
     setEmailError(currentEmailError);
@@ -212,13 +206,13 @@ export default function AuthForm({
 
       if (currentDisplayNameError || currentEmailError || currentPasswordError || currentCountryCodeError || currentPhoneNumberError || !country || !gender) {
          setError("Please fill all required fields and correct any errors.");
-         // setIsLoadingEmail(false); // This was removed, as it's set at the start and end of the function
+         setIsLoadingEmail(false);
          return;
       }
     } else { // Login
        if (currentEmailError || currentPasswordError) {
           setError("Please correct the errors above.");
-          // setIsLoadingEmail(false); // Removed
+          setIsLoadingEmail(false);
           return;
        }
     }
@@ -365,7 +359,7 @@ export default function AuthForm({
 
   const handleGoogleAuth = async () => {
     setIsLoadingGoogle(true);
-    setError(null); // Clear previous errors
+    setError(null);
   
     const provider = new GoogleAuthProvider();
     try {
@@ -386,7 +380,6 @@ export default function AuthForm({
         }
   
         if (snapshot.exists()) {
-          // User already exists
           const existingProfile = snapshot.val() as UserProfile;
           userDisplayNameFromAuth = existingProfile.displayName || userDisplayNameFromAuth; 
   
@@ -398,7 +391,6 @@ export default function AuthForm({
           toast({ title: "Login Successful!", description: `Welcome back, ${userDisplayNameFromAuth}!` });
           router.push(redirectAfterAuth || '/');
         } else {
-          // New user via Google Sign-In
           let newShortReferralCode = '';
           if (referralProgramEnabled) {
             let codeExists = true;
@@ -439,7 +431,7 @@ export default function AuthForm({
                 const shortCodeSnap = await get(shortCodeMapRef);
                 if (shortCodeSnap.exists()) {
                     const foundUid = shortCodeSnap.val() as string;
-                    if (foundUid !== user.uid) { // Cannot refer self
+                    if (foundUid !== user.uid) { 
                         actualReferrerUid = foundUid;
                         if (typeof window !== 'undefined' && (!deviceOriginalReferrerUid || deviceOriginalReferrerUid !== foundUid)) {
                            localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundUid);
@@ -912,7 +904,7 @@ export default function AuthForm({
                 onClick={() => {
                     if (authActionState === 'resetPassword') {
                         setAuthActionState('default');
-                        setIsSigningUp(false);
+                        setIsSigningUp(false); // Ensure we go back to login view
                     } else {
                         setIsSigningUp(prev => !prev);
                     }
@@ -940,9 +932,6 @@ export default function AuthForm({
           </CardFooter>
         </form>
       </Card>
-      <p className="text-xs text-muted-foreground mt-4 max-w-md text-center">
-        Email/password authentication uses Firebase.
-      </p>
     </div>
   );
 }
