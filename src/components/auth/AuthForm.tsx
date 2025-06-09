@@ -12,7 +12,7 @@ import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2, Mail,
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database, auth } from '@/lib/firebase'; // Import auth
-import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut, updateEmail as firebaseUpdateEmail, type User } from "firebase/auth"; // Firebase auth functions
+import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut, type User, GoogleAuthProvider, signInWithPopup, updateEmail as firebaseUpdateEmail } from "firebase/auth"; // Firebase auth functions
 import type { UserProfile, PlatformSettings } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ref, set, get, serverTimestamp, onValue, off, update } from 'firebase/database';
@@ -154,25 +154,29 @@ export default function AuthForm({
 
 
   useEffect(() => {
-    // This effect runs when props determining the initial mode change.
     const propDrivenIsSigningUp = determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp);
-    setIsSigningUp(propDrivenIsSigningUp);
-
-    // Handle authActionState based on initialActionProp, but preserve 'awaitingVerification'
-    if (initialActionProp === 'resetPassword') {
-      setAuthActionState('resetPassword');
-    } else if (authActionState !== 'awaitingVerification') { // Don't override if user is in verification flow
-      setAuthActionState('default');
+    const propDrivenAuthAction = initialActionProp === 'resetPassword' ? 'resetPassword' : 'default';
+    
+    if (isSigningUp !== propDrivenIsSigningUp) {
+      setIsSigningUp(propDrivenIsSigningUp);
     }
 
-    // Clear all errors when these controlling props change
-    setError(null);
-    setDisplayNameError('');
-    setEmailError('');
-    setPasswordError('');
-    setCountryCodeError('');
-    setPhoneNumberError('');
-
+    // Only change authActionState if it's not 'awaitingVerification', or if the prop explicitly demands 'resetPassword'
+    if (authActionState !== 'awaitingVerification' || propDrivenAuthAction === 'resetPassword') {
+        if(authActionState !== propDrivenAuthAction) {
+            setAuthActionState(propDrivenAuthAction);
+        }
+    }
+    
+    // Clear all errors when these controlling props change, unless we are in verification
+    if (authActionState !== 'awaitingVerification') {
+        setError(null);
+        setDisplayNameError('');
+        setEmailError('');
+        setPasswordError('');
+        setCountryCodeError('');
+        setPhoneNumberError('');
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
 
@@ -208,13 +212,13 @@ export default function AuthForm({
 
       if (currentDisplayNameError || currentEmailError || currentPasswordError || currentCountryCodeError || currentPhoneNumberError || !country || !gender) {
          setError("Please fill all required fields and correct any errors.");
-         setIsLoadingEmail(false); // Ensure loading state is reset if client-side validation fails
+         // setIsLoadingEmail(false); // This was removed, as it's set at the start and end of the function
          return;
       }
     } else { // Login
        if (currentEmailError || currentPasswordError) {
           setError("Please correct the errors above.");
-          setIsLoadingEmail(false); // Ensure loading state is reset
+          // setIsLoadingEmail(false); // Removed
           return;
        }
     }
@@ -315,6 +319,7 @@ export default function AuthForm({
             setEmailError("This email is already in use.");
         } else if (fbError.code === 'auth/weak-password') {
             setPasswordError("Password should be at least 6 characters.");
+            setError("Password should be at least 6 characters.");
         } else {
             setError(fbError.message || "Signup failed. Please try again.");
         }
@@ -327,7 +332,7 @@ export default function AuthForm({
           if (!user.emailVerified) {
             setUnverifiedUserEmail(user.email);
             setAuthActionState('awaitingVerification');
-            setIsLoadingEmail(false); // Stop loading here as user is in verification state
+            setIsLoadingEmail(false); 
             return;
           }
 
@@ -356,6 +361,139 @@ export default function AuthForm({
       }
     }
     setIsLoadingEmail(false);
+  };
+
+  const handleGoogleAuth = async () => {
+    setIsLoadingGoogle(true);
+    setError(null); // Clear previous errors
+  
+    const provider = new GoogleAuthProvider();
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+  
+      if (user) {
+        const userProfileRef = ref(database, `users/${user.uid}`);
+        const snapshot = await get(userProfileRef);
+  
+        let userDisplayNameFromAuth = user.displayName || "Google User";
+        let userEmailFromAuth = user.email; 
+        
+        if (!userEmailFromAuth) {
+            toast({ title: "Email Missing", description: "Google did not provide an email address. Cannot proceed.", variant: "destructive" });
+            setIsLoadingGoogle(false);
+            return;
+        }
+  
+        if (snapshot.exists()) {
+          // User already exists
+          const existingProfile = snapshot.val() as UserProfile;
+          userDisplayNameFromAuth = existingProfile.displayName || userDisplayNameFromAuth; 
+  
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+            localStorage.setItem('drawlyUserDisplayName', userDisplayNameFromAuth);
+            localStorage.setItem('drawlyUserUid', user.uid);
+          }
+          toast({ title: "Login Successful!", description: `Welcome back, ${userDisplayNameFromAuth}!` });
+          router.push(redirectAfterAuth || '/');
+        } else {
+          // New user via Google Sign-In
+          let newShortReferralCode = '';
+          if (referralProgramEnabled) {
+            let codeExists = true;
+            let attempts = 0;
+            const MAX_CODE_GEN_ATTEMPTS = 10;
+            while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
+                newShortReferralCode = generateShortAlphaNumericCode(5);
+                const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
+                const shortCodeSnap = await get(shortCodeMapRef);
+                codeExists = shortCodeSnap.exists();
+                attempts++;
+            }
+            if (codeExists) console.warn("Could not generate unique referral code after attempts for Google user.");
+          }
+  
+          const newUserProfile: UserProfile = {
+            userId: user.uid,
+            displayName: userDisplayNameFromAuth,
+            email: userEmailFromAuth,
+            referralCode: user.uid, 
+            shortReferralCode: referralProgramEnabled && newShortReferralCode ? newShortReferralCode : undefined,
+            totalEarnings: 0,
+            createdAt: serverTimestamp() as number,
+            country: 'India', 
+            currency: 'INR',  
+            gender: 'prefer_not_to_say',
+            countryCode: '', 
+            phoneNumber: '', 
+            canWithdraw: true,
+          };
+  
+          if (referralProgramEnabled) {
+            let actualReferrerUid: string | null = null;
+            const deviceOriginalReferrerUid = typeof window !== 'undefined' ? localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY) : null;
+            
+            if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
+                const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${passedReferralCodeProp.trim().toUpperCase()}`);
+                const shortCodeSnap = await get(shortCodeMapRef);
+                if (shortCodeSnap.exists()) {
+                    const foundUid = shortCodeSnap.val() as string;
+                    if (foundUid !== user.uid) { // Cannot refer self
+                        actualReferrerUid = foundUid;
+                        if (typeof window !== 'undefined' && (!deviceOriginalReferrerUid || deviceOriginalReferrerUid !== foundUid)) {
+                           localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundUid);
+                        }
+                    }
+                }
+            }
+            
+            if (!actualReferrerUid && deviceOriginalReferrerUid && deviceOriginalReferrerUid !== user.uid) {
+                actualReferrerUid = deviceOriginalReferrerUid;
+            }
+  
+            if (actualReferrerUid) {
+              newUserProfile.referredBy = actualReferrerUid;
+              await set(ref(database, `referrals/${actualReferrerUid}/${user.uid}`), {
+                referredUserName: newUserProfile.displayName,
+                timestamp: serverTimestamp() as number,
+              });
+              toast({title: "Referral Applied!", description: `You were successfully referred.`});
+            } else if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
+              toast({title: "Referral Code Invalid", description: "The referral code from the link was not found. Proceeding without referral.", variant: "default"});
+            }
+          }
+  
+          await set(userProfileRef, newUserProfile);
+          if (referralProgramEnabled && newShortReferralCode) {
+            await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
+          }
+  
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+            localStorage.setItem('drawlyUserDisplayName', newUserProfile.displayName);
+            localStorage.setItem('drawlyUserUid', user.uid);
+          }
+          toast({ title: "Account Created!", description: `Welcome to ${APP_NAME}, ${newUserProfile.displayName}!` });
+          router.push(redirectAfterAuth || '/');
+        }
+      } else {
+        setError("Google Sign-In failed: No user data received.");
+      }
+    } catch (fbError: any) {
+      console.error("Firebase Google Sign-In Error:", fbError);
+      if (fbError.code === 'auth/popup-closed-by-user') {
+        setError("Google Sign-In cancelled.");
+        toast({ title: "Sign-In Cancelled", description: "You closed the Google Sign-In window.", variant: "default" });
+      } else if (fbError.code === 'auth/account-exists-with-different-credential') {
+        setError("An account already exists with this email address using a different sign-in method (e.g., Email/Password). Please sign in with that method.");
+        toast({ title: "Account Conflict", description: "This email is linked to an account with a different sign-in method.", variant: "destructive", duration: 7000 });
+      } else {
+        setError(fbError.message || "Google Sign-In failed. Please try again.");
+      }
+    } finally {
+      setIsLoadingGoogle(false);
+    }
   };
 
   const handleForgotPassword = async () => {
@@ -479,47 +617,6 @@ export default function AuthForm({
     }
   };
 
-  const handleGoogleAuthSimulated = () => {
-    setIsLoadingGoogle(true);
-    const randomNum = Math.floor(Math.random() * 10000);
-    const simulatedEmail = `user${randomNum}.google@example.com`;
-    const simulatedDisplayName = `GoogleUser${randomNum}`;
-    const simulatedUid = `uid_google_${randomNum}`;
-
-    toast({ title: "Google Sign-In (Simulated)", description: `Simulating login for ${simulatedDisplayName}. This is not real Google Sign-In.` });
-
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-      localStorage.setItem('drawlyUserDisplayName', simulatedDisplayName);
-      localStorage.setItem('drawlyUserUid', simulatedUid);
-    }
-
-    const userProfileRef = ref(database, `users/${simulatedUid}`);
-    get(userProfileRef).then((snapshot) => {
-        if(!snapshot.exists()){
-            const newUserProfile: UserProfile = {
-                userId: simulatedUid,
-                displayName: simulatedDisplayName,
-                email: simulatedEmail,
-                referralCode: simulatedUid,
-                totalEarnings: 0,
-                createdAt: serverTimestamp() as number,
-                country: 'India',
-                currency: 'INR',
-                gender: 'prefer_not_to_say',
-                countryCode: '+91',
-                phoneNumber: '0000000000',
-                canWithdraw: true,
-            };
-            set(userProfileRef, newUserProfile);
-        }
-    });
-
-    setTimeout(() => {
-        setIsLoadingGoogle(false);
-        router.push(redirectAfterAuth || '/');
-    }, 1500);
-  };
 
   const signupFieldsValid = displayName.trim() && country && gender && countryCode.trim() && phoneNumber.trim() && email.trim() && password.trim();
   const signupErrorsClear = !displayNameError && !emailError && !passwordError && !countryCodeError && !phoneNumberError;
@@ -800,12 +897,12 @@ export default function AuthForm({
                 <Button
                   variant="outline"
                   className="w-full text-base py-5"
-                  onClick={handleGoogleAuthSimulated}
+                  onClick={handleGoogleAuth}
                   disabled={isLoadingGoogle || isLoadingEmail}
                   type="button"
                 >
                   {isLoadingGoogle ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <GoogleIcon />}
-                  {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google (Simulated)' : 'Login with Google (Simulated)')}
+                  {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google' : 'Login with Google')}
                 </Button>
                 </>
             )}
@@ -844,8 +941,9 @@ export default function AuthForm({
         </form>
       </Card>
       <p className="text-xs text-muted-foreground mt-4 max-w-md text-center">
-        Email/password authentication uses Firebase. Google Sign-In is simulated.
+        Email/password authentication uses Firebase.
       </p>
     </div>
   );
 }
+
