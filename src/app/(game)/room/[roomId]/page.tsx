@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter as useNextRouter } from 'next/navigation'; // Renamed useRouter to useNextRouter
 import { ref, onValue, off, update, serverTimestamp, set, child, get, runTransaction, push, onDisconnect } from 'firebase/database';
 import { database } from '@/lib/firebase';
 import type { Room, Player, DrawingPoint, Guess, RoomConfig, UserProfile, Transaction, PlatformSettings } from '@/lib/types';
@@ -861,7 +861,9 @@ const TOAST_MAX_COUNT = 3;
 export default function GameRoomPage() {
   const params = useParams();
   const { toast } = useShadToast();
-  const roomId = params.roomId as string;
+  const routerHook = useNextRouter(); 
+  const rawRoomIdFromParams = params.roomId as string;
+  const roomId = useMemo(() => rawRoomIdFromParams ? rawRoomIdFromParams.toUpperCase() : '', [rawRoomIdFromParams]);
   const isMobile = useIsMobile();
 
   const [room, setRoom] = useState<Room | null>(null);
@@ -902,13 +904,12 @@ export default function GameRoomPage() {
       if (snapshot.exists()) {
         setPlatformSettings(snapshot.val());
       } else {
-        // Default if not set in DB, consider this the "true" default
         setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true });
       }
       setIsLoadingPlatformSettings(false);
     }, (error) => {
       console.error("Error fetching platform settings for GameRoom:", error);
-      setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true }); // Fallback
+      setPlatformSettings({ referralProgramEnabled: true, platformWithdrawalsEnabled: true }); 
       setIsLoadingPlatformSettings(false);
     });
     return () => off(settingsRef, 'value', listener);
@@ -1004,15 +1005,17 @@ export default function GameRoomPage() {
         return;
     }
     
-    // Guard against re-initializing word selection if already in progress for THIS round's start
      if (currentRoomData.gameState === 'word_selection' && 
         currentRoomData.selectableWords && currentRoomData.selectableWords.length > 0 &&
-        currentRoomData.currentPattern === null && // currentPattern is null when words are actively being chosen
-        currentRoomData.currentDrawerId === playerId) { // Only abort if this host instance is the one currently selecting
-        console.warn(`[selectWordForNewRound] Aborting for player ${playerId}: gameState is 'word_selection', selectableWords are present, and no pattern chosen yet. Room: ${roomId}. Likely another host instance handled this or already in progress here.`);
+        currentRoomData.currentPattern === null &&
+        currentRoomData.currentDrawerId && // Make sure there's a drawer assigned
+        (currentRoomData.currentDrawerId === playerId || // This specific host instance is the one choosing
+         Object.keys(currentRoomData.players).includes(currentRoomData.currentDrawerId)) // Or any drawer is actively choosing
+        ) {
+        console.warn(`[selectWordForNewRound] Aborting for host ${playerId}: gameState is 'word_selection' by drawer ${currentRoomData.currentDrawerId}, selectableWords are present, and no pattern chosen yet. Room: ${roomId}.`);
         return;
     }
-    if (currentRoomData.gameState === 'drawing') { // Don't start new selection if drawing is active
+    if (currentRoomData.gameState === 'drawing') { 
         console.warn(`[selectWordForNewRound] Aborting: gameState is 'drawing'. Room: ${roomId}`);
         return;
     }
@@ -1432,7 +1435,7 @@ export default function GameRoomPage() {
     const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
     try {
         addSystemMessage(`[[SYSTEM_LEFT]]`, playerName);
-        await update(playerRef, { isOnline: false }); // Mark as offline first
+        await update(playerRef, { isOnline: false }); 
         setIsSettingsDialogOpenLocal(false);
         localStorage.removeItem('patternPartyCurrentRoomId');
         toast({ title: "Left Room", description: "You have left the room." });
@@ -1501,9 +1504,8 @@ export default function GameRoomPage() {
     const storedUid = localStorage.getItem('drawlyUserUid');
     const storedDisplayName = localStorage.getItem('drawlyUserDisplayName');
     const localPlayerId = localStorage.getItem('patternPartyPlayerId');
-    const localPlayerName = localStorage.getItem('patternPartyPlayerName');
+    let localPlayerName = localStorage.getItem('patternPartyPlayerName');
     const currentRoomIdInStorage = localStorage.getItem('patternPartyCurrentRoomId');
-
 
     let finalPlayerId: string | null = null;
     let finalPlayerName: string | null = null;
@@ -1514,33 +1516,53 @@ export default function GameRoomPage() {
       finalPlayerName = storedDisplayName;
       finalIsAuthenticated = true;
       setAuthPlayerId(storedUid);
-    } else if (localPlayerId && localPlayerName) {
+    } else if (localPlayerId) { // Anonymous user has an ID
       finalPlayerId = localPlayerId;
-      finalPlayerName = localPlayerName;
+      if (localPlayerName) {
+        finalPlayerName = localPlayerName;
+      } else {
+        // Has ID, but no name in localStorage. Should be sent to RoomForm to re-enter name,
+        // but *using the existing ID*. RoomForm will pick up existing ID.
+        toast({ title: "Name Required", description: "Please re-enter your name to rejoin.", variant: "default" });
+        routerHook.push(`/join/${roomId}`); 
+        return; 
+      }
     }
 
-    if (!finalPlayerId || !finalPlayerName) {
-      toast({ title: "Error", description: "Player identity not found. Please rejoin or log in.", variant: "destructive" });
-      if(currentRoomIdInStorage === roomId) {
-        window.location.href = `/join/${roomId}`;
-      } else {
-        window.location.href = `/`;
-      }
+    if (!finalPlayerId) { // No auth, no anonymous ID found (e.g. first visit, or localStorage cleared)
+      toast({ title: "Player Identity Needed", description: "Please enter your details to join.", variant: "default" });
+      routerHook.push(`/join/${roomId}`); // Go to RoomForm to establish identity
       return;
     }
-    if (currentRoomIdInStorage !== roomId) {
-       if (!finalIsAuthenticated) {
-           localStorage.removeItem('patternPartyPlayerId');
-           localStorage.removeItem('patternPartyPlayerName');
-       }
-       localStorage.setItem('patternPartyCurrentRoomId', roomId);
+    if (!finalPlayerName && finalPlayerId && !finalIsAuthenticated) { // Has anon ID but somehow name is missing.
+        toast({ title: "Name Missing", description: "Please re-enter your name.", variant: "default" });
+        routerHook.push(`/join/${roomId}`); // Go to RoomForm to re-enter name, will reuse ID.
+        return;
     }
 
+
+    if (currentRoomIdInStorage && currentRoomIdInStorage !== roomId) {
+       if (!finalIsAuthenticated) { 
+           localStorage.removeItem('patternPartyPlayerId');
+           localStorage.removeItem('patternPartyPlayerName');
+           // This means the user is anonymous AND trying to join a new room.
+           // They will be redirected to RoomForm by the !finalPlayerId check above if ID was cleared.
+           // If they reached here, it implies they still had an ID, but are now switching rooms.
+           // It's better to force them to RoomForm to get a new ID for the new room implicitly.
+            toast({ title: "New Room Session", description: "Please confirm your name for this new room.", variant: "default" });
+            routerHook.push(`/join/${roomId}`);
+            return;
+       }
+    }
+    
+    if (finalPlayerId) { // Regardless of auth, if we have a player ID, mark this as the current room.
+        localStorage.setItem('patternPartyCurrentRoomId', roomId);
+    }
 
     setPlayerId(finalPlayerId);
     setPlayerName(finalPlayerName);
     setIsAuthenticated(finalIsAuthenticated);
-  }, [roomId, toast]);
+  }, [roomId, toast, routerHook]);
 
   useEffect(() => {
     if (!roomId || !playerId) return;
@@ -1554,10 +1576,8 @@ export default function GameRoomPage() {
     const onRoomValueChange = onValue(roomRefVal, (snapshot) => {
       if (snapshot.exists()) {
         const roomDataFromSnapshot = snapshot.val() as Room;
-
-        // Create a new object for the room state to ensure referential integrity for hooks
         const processedRoomData: Room = {
-          id: roomDataFromSnapshot.id,
+          id: roomDataFromSnapshot.id || roomId,
           hostId: roomDataFromSnapshot.hostId,
           players: roomDataFromSnapshot.players || {},
           gameState: roomDataFromSnapshot.gameState || 'waiting',
@@ -1578,7 +1598,6 @@ export default function GameRoomPage() {
           lastRoundScoreChanges: roomDataFromSnapshot.lastRoundScoreChanges === undefined ? null : roomDataFromSnapshot.lastRoundScoreChanges,
           aiSketchDataUri: roomDataFromSnapshot.aiSketchDataUri === undefined ? null : roomDataFromSnapshot.aiSketchDataUri,
         };
-        
         setRoom(processedRoomData);
         setError(null);
       } else {
@@ -1599,19 +1618,29 @@ export default function GameRoomPage() {
     });
 
     let connectedListener: any;
-    if (playerName) { 
+    if (playerName && playerId) { 
       connectedListener = onValue(playerConnectionsRef, (snap) => {
         if (snap.val() === true) {
           get(playerRef).then(playerSnap => {
+            const updatesForPlayer: Partial<Player> = { 
+                isOnline: true, 
+                name: playerName, // Always update name from current session on connect
+                isAnonymous: !isAuthenticated 
+            };
+
             if (playerSnap.exists()) {
-              const currentPlayerData = playerSnap.val();
-              update(playerRef, { isOnline: true, name: playerName, isAnonymous: !isAuthenticated } ).then(() => { // Update details on reconnect
+              const existingPlayerData = playerSnap.val() as Player;
+              // If local playerName is empty but player exists in DB, use DB name.
+              // This handles cases where localStorage for name might have been cleared but ID persists.
+              updatesForPlayer.name = playerName || existingPlayerData.name || "Player";
+
+              update(playerRef, updatesForPlayer ).then(() => { 
                 onDisconnect(playerOnlineStatusRef).set(false);
               });
             } else {
               const newPlayerEntry: Player = {
                 id: playerId,
-                name: playerName,
+                name: playerName, // Use the name from current session
                 score: 0,
                 isOnline: true,
                 isHost: false, 
@@ -1631,13 +1660,13 @@ export default function GameRoomPage() {
 
     return () => {
       off(roomRefVal, 'value', onRoomValueChange);
-      if (connectedListener) {
+      if (connectedListener && playerConnectionsRef) {
         off(playerConnectionsRef, 'value', connectedListener);
       }
-      // Explicitly remove onDisconnect handler if player is leaving intentionally
-      // Handled in handleLeaveRoom. For tab close, Firebase handles it.
+      // To prevent onDisconnect from firing when intentionally leaving:
+      // onDisconnect(playerOnlineStatusRef).cancel(); // This would be called in handleLeaveRoom ideally
     };
-  }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage]);
+  }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage]); // Added playerId, playerName to dependencies
 
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt && room?.roundStartedAt) {
@@ -1867,8 +1896,8 @@ export default function GameRoomPage() {
         playerId === room?.hostId && 
         room.players && 
         room.config && 
-        platformSettings.referralProgramEnabled && // Check if referral program is enabled
-        !isLoadingPlatformSettings) { // And settings have been loaded
+        platformSettings.referralProgramEnabled && 
+        !isLoadingPlatformSettings) { 
       if (!gameOverProcessedRef.current) {
         gameOverProcessedRef.current = true;
 
@@ -2179,3 +2208,4 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
 
 
     
+
