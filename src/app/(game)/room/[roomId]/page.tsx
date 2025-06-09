@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'next/navigation';
-import { ref, onValue, off, update, serverTimestamp, set, child, get, runTransaction, push } from 'firebase/database';
+import { ref, onValue, off, update, serverTimestamp, set, child, get, runTransaction, push, onDisconnect } from 'firebase/database';
 import { database } from '@/lib/firebase';
 import type { Room, Player, DrawingPoint, Guess, RoomConfig, UserProfile, Transaction, PlatformSettings } from '@/lib/types';
 import { useToast as useShadToast } from '@/hooks/use-toast';
@@ -458,7 +458,7 @@ const PlayerList = React.memo(({
                         <div className="w-6 sm:w-8 font-bold text-xs sm:text-sm text-gray-700">#{index + 1}</div>
                         <div className="flex-1 text-center text-xs">
                         <span className={cn("font-bold", player.id === playerId ? "text-blue-600" : "text-gray-800", !player.isOnline ? "line-through text-gray-400" : "")}>
-                            {player.name} {player.id === playerId ? "(You)" : ""} {player.id === hostId ? <span className="text-xs">(Host)</span> : ""}
+                            {player.name} {player.id === playerId ? "(You)" : ""} {player.id === hostId ? <span className="text-xs">(Host)</span> : ""} {!player.isOnline && <span className="text-red-500 text-xs">(Offline)</span>}
                         </span>
                         <br />
                         <span className="font-normal text-gray-600">{player.score || 0} points</span>
@@ -1003,6 +1003,19 @@ export default function GameRoomPage() {
         console.warn("selectWordForNewRound called by non-host or missing data. PlayerId:", playerId, "HostId:", currentRoomData?.hostId);
         return;
     }
+    
+    // Guard against re-initializing word selection if already in progress for THIS round's start
+    if (currentRoomData.gameState === 'word_selection' && 
+        currentRoomData.selectableWords && currentRoomData.selectableWords.length > 0 &&
+        currentRoomData.currentPattern === null) { // currentPattern is null when words are actively being chosen
+        console.warn(`[selectWordForNewRound] Aborting: gameState is 'word_selection', selectableWords are present, and no pattern chosen yet. Room: ${roomId}. Likely another host instance handled this.`);
+        return;
+    }
+    if (currentRoomData.gameState === 'drawing') { // Don't start new selection if drawing is active
+        console.warn(`[selectWordForNewRound] Aborting: gameState is 'drawing'. Room: ${roomId}`);
+        return;
+    }
+
 
     const onlinePlayers = Object.values(currentRoomData.players || {}).filter(p => p.isOnline && p.id);
     if (onlinePlayers.length < MIN_PLAYERS_TO_START_GAME && (currentRoomData.gameState === 'waiting' || currentRoomData.gameState === 'game_over' || currentRoomData.gameState === 'round_end')) {
@@ -1418,7 +1431,7 @@ export default function GameRoomPage() {
     const playerRef = ref(database, `rooms/${room.id}/players/${playerId}`);
     try {
         addSystemMessage(`[[SYSTEM_LEFT]]`, playerName);
-        await update(playerRef, { isOnline: false });
+        await update(playerRef, { isOnline: false }); // Mark as offline first
         setIsSettingsDialogOpenLocal(false);
         localStorage.removeItem('patternPartyCurrentRoomId');
         toast({ title: "Left Room", description: "You have left the room." });
@@ -1532,8 +1545,10 @@ export default function GameRoomPage() {
     if (!roomId || !playerId) return;
 
     const roomRefVal = ref(database, `rooms/${roomId}`);
-    const playerStatusRef = ref(database, `rooms/${roomId}/players/${playerId}/isOnline`);
+    const playerRef = ref(database, `rooms/${roomId}/players/${playerId}`);
+    const playerOnlineStatusRef = child(playerRef, 'isOnline');
     const playerConnectionsRef = ref(database, '.info/connected');
+
 
     const onRoomValueChange = onValue(roomRefVal, (snapshot) => {
       if (snapshot.exists()) {
@@ -1581,27 +1596,20 @@ export default function GameRoomPage() {
       toast({ title: "Connection Error", description: "Could not connect to the room.", variant: "destructive" });
     });
 
-    const onConnectedChange = onValue(playerConnectionsRef, (snap) => {
-      if (snap.val() === true && playerId && roomId && playerName) {
-        const playerRefForOnline = ref(database, `rooms/${roomId}/players/${playerId}`);
-        get(playerRefForOnline).then(playerSnap => {
+    let connectedListener: any;
+    if (playerName) { // Only set up presence if playerName is available
+      connectedListener = onValue(playerConnectionsRef, (snap) => {
+        if (snap.val() === true) {
+          get(playerRef).then(playerSnap => {
             if (playerSnap.exists()) {
-                 set(playerStatusRef, true);
-                 const currentPlayerData = playerSnap.val();
-                 if (!currentPlayerData.isOnline) {
-                     addSystemMessage(`[[SYSTEM_JOINED]]`, playerName);
-                 }
-            }
-        });
-      }
-    });
-
-    if (playerId && roomId) {
-        get(child(ref(database, `rooms/${roomId}`), `players/${playerId}`)).then(playerSnap => {
-          if (playerSnap.exists()) {
-            update(child(ref(database, `rooms/${roomId}`), `players/${playerId}`), { isOnline: true, isAnonymous: !isAuthenticated });
-          } else if (playerName) {
-            const newPlayerEntry: Player = {
+              const currentPlayerData = playerSnap.val();
+              set(playerOnlineStatusRef, true).then(() => {
+                onDisconnect(playerOnlineStatusRef).set(false);
+              });
+              // System message for rejoining if they were previously offline can be tricky
+              // to avoid duplicates. Current logic for adding player on room load covers new joins.
+            } else {
+              const newPlayerEntry: Player = {
                 id: playerId,
                 name: playerName,
                 score: 0,
@@ -1609,19 +1617,30 @@ export default function GameRoomPage() {
                 isHost: false,
                 isAnonymous: !isAuthenticated,
                 referralRewardsThisSession: 0,
-            };
-            set(child(ref(database, `rooms/${roomId}`), `players/${playerId}`), newPlayerEntry).then(() => {
-                addSystemMessage(`[[SYSTEM_JOINED]]`, playerName);
-            });
-          }
-        });
+              };
+              set(playerRef, newPlayerEntry).then(() => {
+                 // isOnline is true by default here, ensure onDisconnect is set after creation
+                 onDisconnect(playerOnlineStatusRef).set(false);
+                 addSystemMessage(`[[SYSTEM_JOINED]]`, playerName);
+              });
+            }
+          });
+        }
+        // If snap.val() is false, Firebase's onDisconnect mechanism will handle setting isOnline to false.
+      });
     }
+
 
     return () => {
       off(roomRefVal, 'value', onRoomValueChange);
-      off(playerConnectionsRef, 'value', onConnectedChange);
+      if (connectedListener) {
+        off(playerConnectionsRef, 'value', connectedListener);
+      }
+      // If playerOnlineStatusRef was set for onDisconnect, clear it only if an action is taken
+      // For tab close/crash, Firebase handles the onDisconnect.
+      // For explicit leave, the leave function sets it.
     };
-  }, [roomId, playerId, toast, isLoading, addSystemMessage, playerName, isAuthenticated]);
+  }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage]);
 
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt && room?.roundStartedAt) {
@@ -2160,3 +2179,6 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     return finalWords.slice(0, count);
 };
 
+
+
+    
