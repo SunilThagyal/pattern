@@ -458,7 +458,7 @@ const PlayerList = React.memo(({
                         <div className="w-6 sm:w-8 font-bold text-xs sm:text-sm text-gray-700">#{index + 1}</div>
                         <div className="flex-1 text-center text-xs">
                         <span className={cn("font-bold", player.id === playerId ? "text-blue-600" : "text-gray-800", !player.isOnline ? "line-through text-gray-400" : "")}>
-                            {player.name || 'Player'} {player.id === playerId ? "(You)" : ""} {player.id === hostId ? <span className="text-xs">(Host)</span> : ""} {!player.isOnline && <span className="text-red-500 text-xs">(Offline)</span>}
+                            {(player.name || 'Player')} {player.id === playerId ? "(You)" : ""} {player.id === hostId ? <span className="text-xs">(Host)</span> : ""} {!player.isOnline && <span className="text-red-500 text-xs">(Offline)</span>}
                         </span>
                         <br />
                         <span className="font-normal text-gray-600">{player.score || 0} points</span>
@@ -917,7 +917,9 @@ export default function GameRoomPage() {
 
 
   const playersArray = useMemo(() => {
-    return room ? Object.values(room.players || {}) : [];
+    if (!room || !room.players) return [];
+    // Ensure we only include players that have an id and a non-empty, string name.
+    return Object.values(room.players).filter(p => p && p.id && typeof p.name === 'string' && p.name.trim() !== '');
   }, [room?.players]);
 
   const memoizedDrawingData = useMemo(() => {
@@ -1503,7 +1505,7 @@ export default function GameRoomPage() {
     const authStatus = localStorage.getItem('drawlyAuthStatus');
     const storedUid = localStorage.getItem('drawlyUserUid');
     const storedDisplayName = localStorage.getItem('drawlyUserDisplayName');
-    const localPlayerId = localStorage.getItem('patternPartyPlayerId');
+    let localPlayerId = localStorage.getItem('patternPartyPlayerId');
     let localPlayerName = localStorage.getItem('patternPartyPlayerName');
     const currentRoomIdInStorage = localStorage.getItem('patternPartyCurrentRoomId');
 
@@ -1516,40 +1518,40 @@ export default function GameRoomPage() {
       finalPlayerName = storedDisplayName;
       finalIsAuthenticated = true;
       setAuthPlayerId(storedUid);
-    } else if (localPlayerId) {
-      finalPlayerId = localPlayerId;
-      if (localPlayerName) {
-        finalPlayerName = localPlayerName;
-      } else {
-        toast({ title: "Name Required", description: "Please re-enter your name to rejoin.", variant: "default" });
-        routerHook.push(`/join/${roomId}`); 
-        return; 
+    } else { // Anonymous user
+      if (!localPlayerId) { // First time anonymous user for this browser
+        localPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('patternPartyPlayerId', localPlayerId);
+         // Name will be set from form, or if they land here directly, they'll be redirected.
       }
-    }
+      finalPlayerId = localPlayerId;
 
-    if (!finalPlayerId) {
+      if (!localPlayerName) {
+        toast({ title: "Name Required", description: "Please enter your name to join.", variant: "default" });
+        routerHook.push(`/join/${roomId}`);
+        return;
+      }
+      finalPlayerName = localPlayerName;
+    }
+    
+    if (!finalPlayerId) { // Should not happen if logic above is correct
       toast({ title: "Player Identity Needed", description: "Please enter your details to join.", variant: "default" });
-      routerHook.push(`/join/${roomId}`); 
+      routerHook.push(`/join/${roomId}`);
       return;
     }
-    if (!finalPlayerName && finalPlayerId && !finalIsAuthenticated) {
-        toast({ title: "Name Missing", description: "Please re-enter your name.", variant: "default" });
+
+    if (currentRoomIdInStorage && currentRoomIdInStorage !== roomId && !finalIsAuthenticated) {
+        localStorage.removeItem('patternPartyPlayerId');
+        localStorage.removeItem('patternPartyPlayerName');
+        // Regenerate ID and prompt for name for new room
+        finalPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('patternPartyPlayerId', finalPlayerId);
+        toast({ title: "New Room Session", description: "Please confirm your name for this new room.", variant: "default" });
         routerHook.push(`/join/${roomId}`);
         return;
     }
-
-
-    if (currentRoomIdInStorage && currentRoomIdInStorage !== roomId) {
-       if (!finalIsAuthenticated) { 
-           localStorage.removeItem('patternPartyPlayerId');
-           localStorage.removeItem('patternPartyPlayerName');
-            toast({ title: "New Room Session", description: "Please confirm your name for this new room.", variant: "default" });
-            routerHook.push(`/join/${roomId}`);
-            return;
-       }
-    }
     
-    if (finalPlayerId) { 
+    if (finalPlayerId) {
         localStorage.setItem('patternPartyCurrentRoomId', roomId);
     }
 
@@ -1559,7 +1561,7 @@ export default function GameRoomPage() {
   }, [roomId, toast, routerHook]);
 
   useEffect(() => {
-    if (!roomId || !playerId) return;
+    if (!roomId || !playerId || !playerName) return; // Ensure all critical IDs/names are set
 
     const roomRefVal = ref(database, `rooms/${roomId}`);
     const playerRef = ref(database, `rooms/${roomId}/players/${playerId}`);
@@ -1570,6 +1572,7 @@ export default function GameRoomPage() {
     const onRoomValueChange = onValue(roomRefVal, (snapshot) => {
       if (snapshot.exists()) {
         const roomDataFromSnapshot = snapshot.val() as Room;
+        // Construct a new object to ensure React detects changes, especially for nested properties like players
         const processedRoomData: Room = {
           id: roomDataFromSnapshot.id || roomId,
           hostId: roomDataFromSnapshot.hostId,
@@ -1618,13 +1621,17 @@ export default function GameRoomPage() {
           get(playerRef).then(playerSnap => {
             const updatesForPlayer: Partial<Player> = { 
                 isOnline: true, 
-                name: playerName, 
                 isAnonymous: !isAuthenticated 
             };
 
             if (playerSnap.exists()) {
               const existingPlayerData = playerSnap.val() as Player;
-              updatesForPlayer.name = playerName || existingPlayerData.name || "Player";
+              // Prefer existing name if current session name is problematic or if it's an authenticated user (name comes from DB)
+              updatesForPlayer.name = (playerName && playerName.trim() !== '') ? playerName : (existingPlayerData.name || "Player");
+              
+              if (isAuthenticated && authPlayerId === playerId && existingPlayerData.name !== playerName) {
+                  updatesForPlayer.name = existingPlayerData.name || playerName; // Authenticated user's name from DB should take precedence or current if DB is empty
+              }
 
               update(playerRef, updatesForPlayer ).then(() => { 
                 onDisconnect(playerOnlineStatusRef).set(false);
@@ -1632,16 +1639,16 @@ export default function GameRoomPage() {
             } else {
               const newPlayerEntry: Player = {
                 id: playerId,
-                name: playerName, 
+                name: (playerName && playerName.trim() !== '') ? playerName : "Player", 
                 score: 0, 
                 isOnline: true, 
-                isHost: false, 
+                isHost: false, // Will be updated if they are the host
                 isAnonymous: !isAuthenticated,
                 referralRewardsThisSession: 0,
               };
               set(playerRef, newPlayerEntry).then(() => {
                  onDisconnect(playerOnlineStatusRef).set(false);
-                 addSystemMessage(`[[SYSTEM_JOINED]]`, playerName);
+                 addSystemMessage(`[[SYSTEM_JOINED]]`, newPlayerEntry.name);
               });
             }
           });
@@ -1655,8 +1662,10 @@ export default function GameRoomPage() {
       if (connectedListener && playerConnectionsRef) {
         off(playerConnectionsRef, 'value', connectedListener);
       }
+      // Consider setting player to offline here if appropriate, but onDisconnect should handle most cases.
+      // update(playerOnlineStatusRef, { isOnline: false }); // Example, might be too aggressive
     };
-  }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage]); 
+  }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage, authPlayerId]); 
 
   useEffect(() => {
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt && room?.roundStartedAt) {
@@ -2198,5 +2207,6 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
 
 
     
+
 
 
