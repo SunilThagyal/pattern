@@ -67,7 +67,32 @@ export default function AuthForm({
   const [unverifiedUserEmail, setUnverifiedUserEmail] = useState<string | null>(null);
   const [newEmailForVerification, setNewEmailForVerification] = useState('');
 
-  const [isSigningUp, setIsSigningUp] = useState(true);
+  const determineInitialIsSigningUp = (
+    currentForceSignup: boolean,
+    currentInitialAction?: string | null,
+    currentReferralCode?: string | null
+  ): boolean => {
+    if (currentForceSignup) {
+      return true;
+    }
+    // If a referral code is passed and it's not explicitly a login action, lean towards signup.
+    if (currentReferralCode && currentReferralCode.trim() !== "" && currentInitialAction !== 'login') {
+      return true;
+    }
+    if (currentInitialAction === 'signup') {
+      return true;
+    }
+    if (currentInitialAction === 'login') {
+      return false;
+    }
+    // Default for /auth with no params, or other unrecognized action params
+    return false; // Default to Login
+  };
+
+  const [isSigningUp, setIsSigningUp] = useState(() => 
+    determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp)
+  );
+  
   const [error, setError] = useState<string | null>(null); 
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
@@ -101,26 +126,21 @@ export default function AuthForm({
 
 
   useEffect(() => {
-    let codeToSet = '';
-    let forceSignupModeForEffect = forceSignupFromPath;
+    const newDeterminedSigningUpState = determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp);
+    if (newDeterminedSigningUpState !== isSigningUp) {
+        setIsSigningUp(newDeterminedSigningUpState);
+    }
 
+    let codeToSet = '';
     if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
       codeToSet = passedReferralCodeProp.trim().toUpperCase();
-      if (initialActionProp !== 'login') {
-        forceSignupModeForEffect = true;
-      }
     }
-
     setReferralCodeInput(codeToSet);
-
-    if (forceSignupModeForEffect) {
-      setIsSigningUp(true);
-    } else if (initialActionProp === 'login') {
-      setIsSigningUp(false);
-    } else {
-      setIsSigningUp(true);
+    
+    if (authActionState !== 'awaitingVerification') { // Don't reset if user is in verification flow
+        setAuthActionState('default');
     }
-    setAuthActionState('default'); // Reset to default view on prop changes
+    setError(null);
 
   }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
 
@@ -158,7 +178,7 @@ export default function AuthForm({
 
         if (user) {
           await sendEmailVerification(user);
-          toast({ title: "Sign Up Successful!", description: `Welcome, ${displayName}! A verification email has been sent to ${email}. Please verify your email to continue.` });
+          toast({ title: "Sign Up Processing...", description: `Welcome, ${displayName}! A verification email has been sent to ${email}. Please verify your email to complete registration.` });
 
           let newShortReferralCode = '';
           if (referralProgramEnabled) {
@@ -235,8 +255,6 @@ export default function AuthForm({
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
           }
           
-          // Don't set localStorage or redirect yet. User needs to verify.
-          // Transition to 'awaitingVerification' state
           setUnverifiedUserEmail(user.email);
           setAuthActionState('awaitingVerification');
         }
@@ -259,7 +277,7 @@ export default function AuthForm({
             setUnverifiedUserEmail(user.email);
             setAuthActionState('awaitingVerification');
             setIsLoadingEmail(false);
-            return; // Stop here, user needs to verify
+            return; 
           }
 
           const userProfileRef = ref(database, `users/${user.uid}`);
@@ -303,7 +321,7 @@ export default function AuthForm({
         description: `If an account for ${email.trim()} exists, a password reset link has been sent. Please check your inbox and spam/junk folder.`,
         duration: 7000 
       });
-      setAuthActionState('default'); // Go back to default login/signup view
+      setAuthActionState('default'); 
     } catch (fbError: any) {
       console.error("Forgot Password Error:", fbError);
        if (fbError.code === 'auth/invalid-email') {
@@ -311,9 +329,6 @@ export default function AuthForm({
       } else if (fbError.code === 'auth/missing-email') { 
             setError("Please enter your email address.");
       } else {
-            // Firebase doesn't usually confirm "user not found" for this to prevent email enumeration.
-            // So, the success message implies "if an account exists."
-            // This generic error is for other unexpected issues.
             setError("Could not send password reset email at this time. Please try again later.");
       }
     } finally {
@@ -324,7 +339,7 @@ export default function AuthForm({
   const handleResendVerificationEmail = async () => {
     if (!auth.currentUser) {
       toast({ title: "Error", description: "No user session found. Please log in again.", variant: "destructive" });
-      setAuthActionState('default'); // Send back to login
+      setAuthActionState('default'); 
       return;
     }
     setIsResendingVerification(true);
@@ -361,15 +376,16 @@ export default function AuthForm({
     try {
         const currentFbUser = auth.currentUser;
         await firebaseUpdateEmail(currentFbUser, newEmailForVerification.trim());
-        // Update email in RTDB profile
+        
         await update(ref(database, `users/${currentFbUser.uid}`), { email: newEmailForVerification.trim() });
         
-        await sendEmailVerification(currentFbUser); // Firebase user object (currentFbUser) updates automatically
+        await sendEmailVerification(currentFbUser); 
         
-        setUnverifiedUserEmail(newEmailForVerification.trim()); // Update displayed email
-        setNewEmailForVerification(''); // Clear input
+        setUnverifiedUserEmail(newEmailForVerification.trim()); 
+        setNewEmailForVerification(''); 
         toast({ title: "Email Updated", description: `Your email has been updated to ${newEmailForVerification.trim()}. A new verification email has been sent. Please check your inbox.` });
-    } catch (error: any) {
+    } catch (error: any)
+      {
         console.error("Error updating email:", error);
         if (error.code === 'auth/requires-recent-login') {
             toast({ title: "Action Requires Re-authentication", description: "For security, please log out and log back in before changing your email.", variant: "destructive", duration: 7000 });
@@ -390,7 +406,7 @@ export default function AuthForm({
     localStorage.removeItem('drawlyUserUid');
     setAuthActionState('default');
     setUnverifiedUserEmail(null);
-    setEmail(''); // Clear form fields
+    setEmail(''); 
     setPassword('');
     setError(null);
     toast({ title: "Logged Out" });
@@ -404,7 +420,6 @@ export default function AuthForm({
     } else if (authActionState === 'default') {
       handleFirebaseEmailAuth();
     }
-    // No default submit action for 'awaitingVerification' state; buttons handle actions.
   };
   
   const handleGoogleAuthSimulated = () => {
