@@ -13,6 +13,7 @@ import { DollarSign, AlertTriangle, Banknote, Landmark, CreditCard, Loader2, Ban
 import { database } from '@/lib/firebase';
 import { ref, push, serverTimestamp, runTransaction, get, onValue, off, type DataSnapshot, update } from 'firebase/database';
 import type { Transaction, WithdrawalRequest, UserProfile, PlatformSettings } from '@/lib/types';
+import { cn } from '@/lib/utils'; // Added cn
 
 interface WithdrawalManagementTabProps {
   authUserUid: string | null;
@@ -90,8 +91,6 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
             const profile = snapshot.val() as UserProfile;
             setUserProfile(profile);
             setCurrentBalance(profile.totalEarnings || 0);
-            // Pre-fill default payment method when user profile loads
-            // This logic is now handled in the dialog open effect to avoid race conditions
         } else {
             setUserProfile(null);
             setCurrentBalance(initialBalance);
@@ -112,11 +111,8 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
     };
   }, [authUserUid, initialBalance]);
 
-  // Effect to handle opening the dialog and potentially pre-filling from defaults
   useEffect(() => {
     if (isDialogOpen && userProfile && userProfile.defaultPaymentMethod && userProfile.defaultPaymentDetails) {
-        // Only pre-fill if the current method is empty or different from default
-        // Or if the form is being opened for the first time with defaults set
         if(withdrawalMethod === '' || withdrawalMethod !== userProfile.defaultPaymentMethod) {
             setWithdrawalMethod(userProfile.defaultPaymentMethod);
             const details = userProfile.defaultPaymentDetails;
@@ -127,9 +123,6 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                 setIfscCode(details.ifscCode || '');
             } else if (userProfile.defaultPaymentMethod === 'paypal') setPaypalEmail(details.paypalEmail || '');
         }
-    } else if (!isDialogOpen) {
-        // Optionally reset form when dialog closes if not pre-filled from defaults
-        // Or reset specific fields if they were manually entered
     }
   }, [isDialogOpen, userProfile, withdrawalMethod]);
 
@@ -182,7 +175,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       userId: authUserUid,
       amount,
       currency: userProfile.currency,
-      method: withdrawalMethod as 'upi' | 'paytm' | 'bank' | 'paypal', // type assertion
+      method: withdrawalMethod as 'upi' | 'paytm' | 'bank' | 'paypal', 
       details,
       status: 'Pending',
       requestDate: serverTimestamp() as number,
@@ -225,16 +218,13 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
       await runTransaction(userBalanceRef, (currentEarnings) => {
         const earningsVal = currentEarnings || 0;
         if (earningsVal < amount) {
-          return; // Abort transaction
+          return; 
         }
         return earningsVal - amount;
       });
 
       toast({ title: "Withdrawal Requested", description: `Your request to withdraw ${currencySymbol}${amount.toFixed(2)} via ${withdrawalMethod.toUpperCase()} is pending. Your balance has been updated.`, variant: "default" });
       setWithdrawalAmount('');
-      // Keep withdrawalMethod and details pre-filled if they came from defaults
-      // Only clear them if they were not from defaults or if desired
-      // For now, let's clear them only if not matching the default
       if (userProfile?.defaultPaymentMethod !== withdrawalMethod) {
         setWithdrawalMethod('');
         setUpiId('');
@@ -275,12 +265,13 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
           </CardTitle>
            <CardDescription>This balance reflects your total confirmed earnings. It updates immediately when a withdrawal is requested.</CardDescription>
         </CardHeader>
-        <CardContent className="flex items-baseline justify-between">
-          <p className="text-4xl font-bold text-foreground">{currencySymbol}{currentBalance.toFixed(2)}</p>
+        <CardContent className="flex flex-col sm:flex-row items-start sm:items-baseline justify-between gap-2 sm:gap-4">
+          <p className="text-3xl sm:text-4xl font-bold text-foreground whitespace-nowrap">{currencySymbol}{currentBalance.toFixed(2)}</p>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button
-                size="lg"
+                size="default"
+                className="w-full sm:w-auto"
                 disabled={isWithdrawalDisabled || currentBalance < MIN_WITHDRAWAL_AMOUNT || isWithdrawing}
                 title={disabledReason || "Request a withdrawal"}
               >
@@ -318,7 +309,6 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                     value={withdrawalMethod}
                     onValueChange={(value: PaymentMethod) => {
                         setWithdrawalMethod(value);
-                        // Clear details if method is changed manually, to avoid sending stale data
                         setUpiId(''); setAccountNumber(''); setIfscCode(''); setPaytmNumber(''); setPaypalEmail('');
                     }}
                     disabled={isWithdrawing}
@@ -337,7 +327,7 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
                       {userCountry === 'Other' && (
                         <SelectItem value="paypal"><Mail className="mr-2 h-4 w-4 inline-block"/> PayPal</SelectItem>
                       )}
-                      {!userCountry && ( // Fallback if country not loaded
+                      {!userCountry && ( 
                         <>
                           <SelectItem value="upi">UPI</SelectItem>
                           <SelectItem value="paytm">Paytm Wallet</SelectItem>
@@ -426,3 +416,4 @@ export default function WithdrawalManagementTab({ authUserUid, initialBalance }:
     </div>
   );
 }
+
