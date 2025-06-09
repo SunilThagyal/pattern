@@ -53,6 +53,9 @@ export interface UserProfile {
   currency: 'INR' | 'USD';
   defaultPaymentMethod?: 'upi' | 'paytm' | 'bank' | 'paypal';
   defaultPaymentDetails?: Record<string, string>;
+  gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say';
+  countryCode?: string;
+  phoneNumber?: string;
 }
 
 export interface DisplayUser extends UserProfile {

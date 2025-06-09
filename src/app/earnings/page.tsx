@@ -127,15 +127,15 @@ export default function EarningsDashboardPage() {
                 Welcome, {userProfile.displayName || 'Player'}! Your current balance is <span className="font-semibold text-primary">{currencySymbol}{userProfile.totalEarnings.toFixed(2)}</span>.
                 </p>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2 self-start sm:self-center">
+            <div className="flex items-center gap-2 self-start sm:self-center">
                  <Link href="/profile/edit" passHref>
-                    <Button variant="outline">
+                    <Button variant="outline" size="sm">
                         <Settings2 className="mr-2 h-4 w-4" /> Edit Profile
                     </Button>
                 </Link>
-                <Button variant="outline" onClick={() => router.push('/')}>
+                <Button variant="outline" size="sm" onClick={() => router.push('/')}>
                     <Home className="mr-2 h-4 w-4" />
-                    Back to Game Lobby
+                    Back to Lobby
                 </Button>
             </div>
         </div>
@@ -167,3 +167,4 @@ export default function EarningsDashboardPage() {
     </div>
   );
 }
+

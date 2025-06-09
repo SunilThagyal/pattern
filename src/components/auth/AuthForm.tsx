@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus, AlertCircle, Globe } from 'lucide-react';
+import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, MaleFemale } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database } from '@/lib/firebase';
@@ -55,7 +55,11 @@ export default function AuthForm({
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [referralCodeInput, setReferralCodeInput] = useState('');
-  const [country, setCountry] = useState<'India' | 'Other'>('India'); // Added country state
+  const [country, setCountry] = useState<'India' | 'Other'>('India');
+  const [gender, setGender] = useState<'male' | 'female' | 'other' | 'prefer_not_to_say' | ''>('');
+  const [countryCode, setCountryCode] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+
 
   const [isSigningUp, setIsSigningUp] = useState(true);
 
@@ -78,7 +82,7 @@ export default function AuthForm({
       setIsLoadingPlatformSettings(false);
     }, (error) => {
       console.error("Error fetching platform settings for AuthForm:", error);
-      setReferralProgramEnabled(true); // Fallback on error
+      setReferralProgramEnabled(true); 
       setIsLoadingPlatformSettings(false);
     });
 
@@ -117,25 +121,48 @@ export default function AuthForm({
     let finalEmail = email;
     let finalDisplayName = displayName;
     let finalPassword = password;
-    let finalCountry = country; // Use state for country
+    let finalCountry = country;
+    let finalGender = gender;
+    let finalCountryCode = countryCode;
+    let finalPhoneNumber = phoneNumber;
+
 
     if (isGoogleAuth) {
       const randomNum = Math.floor(Math.random() * 10000);
       finalEmail = `user${randomNum}.google@example.com`;
       finalDisplayName = `GoogleUser${randomNum}`;
       finalPassword = "google_simulated_password";
-      // For Google auth, country could be asked in a subsequent step or defaulted.
-      // For this simulation, we'll use the currently selected country.
+      // For Google auth, additional details might be defaulted or skipped in simulation
       if (isSigningUp && !displayName.trim()) {
         setDisplayName(finalDisplayName);
       }
+      if (isSigningUp && !gender) setGender('prefer_not_to_say'); // Default gender for simulated Google
+      finalGender = gender || 'prefer_not_to_say';
+      if (isSigningUp && !countryCode.trim()) setCountryCode('+1'); // Default country code
+      finalCountryCode = countryCode.trim() || '+1';
+      if (isSigningUp && !phoneNumber.trim()) setPhoneNumber('0000000000'); // Default phone
+      finalPhoneNumber = phoneNumber.trim() || '0000000000';
+
     }
 
-    if (!finalEmail.trim() || (isSigningUp && !finalDisplayName.trim()) || !finalPassword.trim() || (isSigningUp && !finalCountry)) {
-      toast({ title: "Error", description: "Please fill all required fields, including country for signup.", variant: "destructive" });
+    if (!finalEmail.trim() || !finalPassword.trim() ||
+        (isSigningUp && (!finalDisplayName.trim() || !finalCountry || !finalGender || !finalCountryCode.trim() || !finalPhoneNumber.trim()))) {
+      toast({ title: "Error", description: "Please fill all required fields: Display Name, Country, Gender, Country Code, Phone Number, Email, and Password.", variant: "destructive" });
       if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
       return;
     }
+    
+    if (isSigningUp && finalCountryCode.trim() && !finalCountryCode.startsWith('+')) {
+        toast({ title: "Invalid Country Code", description: "Country code must start with a '+' sign (e.g., +1, +91).", variant: "destructive" });
+        if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+        return;
+    }
+    if (isSigningUp && finalPhoneNumber.trim() && !/^\d{7,15}$/.test(finalPhoneNumber.trim())) {
+        toast({ title: "Invalid Phone Number", description: "Phone number must be between 7 to 15 digits.", variant: "destructive" });
+        if (isGoogleAuth) setIsLoadingGoogle(false); else setIsLoadingEmail(false);
+        return;
+    }
+
 
     const simulatedUid = `uid_${finalDisplayName.replace(/\s+/g, '_').toLowerCase()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -170,9 +197,12 @@ export default function AuthForm({
           shortReferralCode: referralProgramEnabled ? newShortReferralCode : undefined,
           totalEarnings: 0,
           createdAt: serverTimestamp() as number,
-          country: finalCountry, // Save country
-          currency: finalCountry === 'India' ? 'INR' : 'USD', // Set currency based on country
-          canWithdraw: true, // Default for new users
+          country: finalCountry,
+          currency: finalCountry === 'India' ? 'INR' : 'USD',
+          gender: finalGender as UserProfile['gender'], // Ensure type safety
+          countryCode: finalCountryCode.trim(),
+          phoneNumber: finalPhoneNumber.trim(),
+          canWithdraw: true, 
         };
 
         if (referralProgramEnabled) {
@@ -227,7 +257,7 @@ export default function AuthForm({
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), simulatedUid);
         }
 
-        toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}!` });
+        toast({ title: "Sign Up Successful!", description: `Welcome, ${finalDisplayName}! Please note: Email verification is not implemented in this prototype.` });
 
       } else { // Login
         let foundUser: UserProfile | null = null;
@@ -290,6 +320,7 @@ export default function AuthForm({
           <CardTitle className="text-3xl text-center">{isSigningUp ? "Sign Up" : "Login"} to {APP_NAME}</CardTitle>
           <CardDescription className="text-center">
             {isSigningUp ? "Create an account to play, refer friends, and earn rewards!" : "Welcome back! Log in to continue."}
+            {isSigningUp && <p className="text-xs mt-1 text-blue-600">Note: Email verification is conceptual in this prototype.</p>}
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -297,7 +328,7 @@ export default function AuthForm({
             {isSigningUp && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="displayName_auth_form" className="text-lg">Display Name</Label>
+                  <Label htmlFor="displayName_auth_form" className="text-lg">Display Name <span className="text-destructive">*</span></Label>
                   <Input
                     id="displayName_auth_form"
                     name="displayName"
@@ -312,7 +343,7 @@ export default function AuthForm({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="country_auth_form" className="text-lg flex items-center">
-                    <Globe size={18} className="mr-2 text-muted-foreground"/> Country
+                    <Globe size={18} className="mr-2 text-muted-foreground"/> Country <span className="text-destructive">*</span>
                   </Label>
                   <Select
                     value={country}
@@ -329,10 +360,64 @@ export default function AuthForm({
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="gender_auth_form" className="text-lg flex items-center">
+                    <MaleFemale size={18} className="mr-2 text-muted-foreground"/> Gender <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={gender}
+                    onValueChange={(value: 'male' | 'female' | 'other' | 'prefer_not_to_say' | '') => setGender(value)}
+                    required
+                    disabled={isLoadingEmail || isLoadingGoogle}
+                  >
+                    <SelectTrigger id="gender_auth_form" className="text-base py-6">
+                      <SelectValue placeholder="Select your gender" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                      <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-1 space-y-2">
+                        <Label htmlFor="country_code_auth_form" className="text-lg">Code <span className="text-destructive">*</span></Label>
+                        <Input
+                            id="country_code_auth_form"
+                            name="countryCode"
+                            type="text"
+                            value={countryCode}
+                            onChange={(e) => setCountryCode(e.target.value)}
+                            placeholder="+91"
+                            required={isSigningUp}
+                            className="text-base py-6"
+                            disabled={isLoadingEmail || isLoadingGoogle}
+                        />
+                    </div>
+                    <div className="col-span-2 space-y-2">
+                        <Label htmlFor="phone_number_auth_form" className="text-lg flex items-center">
+                           Phone Number <span className="text-destructive">*</span>
+                        </Label>
+                        <Input
+                            id="phone_number_auth_form"
+                            name="phoneNumber"
+                            type="tel"
+                            value={phoneNumber}
+                            onChange={(e) => setPhoneNumber(e.target.value)}
+                            placeholder="Your phone number"
+                            required={isSigningUp}
+                            className="text-base py-6"
+                            disabled={isLoadingEmail || isLoadingGoogle}
+                        />
+                    </div>
+                </div>
+                 <p className="text-xs text-muted-foreground">Your phone number is used for account purposes only.</p>
               </>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email_auth_form" className="text-lg">Email</Label>
+              <Label htmlFor="email_auth_form" className="text-lg">Email <span className="text-destructive">*</span></Label>
               <Input
                 id="email_auth_form"
                 name="email"
@@ -346,7 +431,7 @@ export default function AuthForm({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password_auth_form" className="text-lg">Password</Label>
+              <Label htmlFor="password_auth_form" className="text-lg">Password <span className="text-destructive">*</span></Label>
               <Input
                 id="password_auth_form"
                 name="password"
@@ -359,6 +444,17 @@ export default function AuthForm({
                 disabled={isLoadingEmail || isLoadingGoogle}
               />
             </div>
+            {!isSigningUp && (
+                <Button
+                    type="button"
+                    variant="link"
+                    className="px-0 text-sm text-primary hover:underline"
+                    onClick={() => toast({ title: "Prototype Feature", description: "Forgot Password functionality is not implemented in this prototype."})}
+                    disabled={isLoadingEmail || isLoadingGoogle}
+                >
+                    Forgot Password?
+                </Button>
+            )}
             {isSigningUp && (
               <div className="space-y-2">
                 <Label htmlFor="referral_code" className="text-lg flex items-center">
@@ -439,8 +535,9 @@ export default function AuthForm({
       <p className="text-xs text-muted-foreground mt-6 max-w-md text-center">
         Note: Account creation and login are simulated for this prototype.
         The 'one device → one original referrer' check is a client-side simulation using localStorage and can be bypassed.
-        Real-world applications require robust backend security for referral systems.
+        Real-world applications require robust backend security for referral systems, email verification, and password recovery.
       </p>
     </div>
   );
 }
+

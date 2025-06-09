@@ -9,16 +9,16 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, User, Globe, Banknote, Save, Home, Settings2, AlertCircle } from 'lucide-react';
+import { Loader2, User, Globe, Banknote, Save, Home, Settings2, AlertCircle, Phone, MaleFemale } from 'lucide-react';
 import Link from 'next/link';
 import { APP_NAME } from '@/lib/config';
 import { database } from '@/lib/firebase';
 import { ref, get, update, serverTimestamp } from 'firebase/database';
 import type { UserProfile } from '@/lib/types';
 
-type PaymentMethod = 'upi' | 'paytm' | 'bank' | 'paypal';
+type PaymentMethod = 'upi' | 'paytm' | 'bank' | 'paypal' | '';
 
-const SPECIAL_VALUE_NONE = "_NONE_"; // Define a constant for clarity
+const SPECIAL_VALUE_NONE = "_NONE_"; 
 
 export default function EditProfilePage() {
   const router = useRouter();
@@ -32,7 +32,10 @@ export default function EditProfilePage() {
   // Form state
   const [displayName, setDisplayName] = useState('');
   const [country, setCountry] = useState<'India' | 'Other'>('India');
-  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState<PaymentMethod | ''>('');
+  const [gender, setGender] = useState<UserProfile['gender'] | ''>('');
+  const [countryCode, setCountryCode] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState<PaymentMethod>('');
   
   // Payment details state
   const [upiId, setUpiId] = useState('');
@@ -54,6 +57,9 @@ export default function EditProfilePage() {
           setUserProfile(profileData);
           setDisplayName(profileData.displayName);
           setCountry(profileData.country || 'India');
+          setGender(profileData.gender || '');
+          setCountryCode(profileData.countryCode || '');
+          setPhoneNumber(profileData.phoneNumber || '');
           setDefaultPaymentMethod(profileData.defaultPaymentMethod || '');
           
           const details = profileData.defaultPaymentDetails || {};
@@ -87,6 +93,19 @@ export default function EditProfilePage() {
       toast({ title: "Display Name Required", description: "Please enter a display name.", variant: "destructive"});
       return;
     }
+    if (!gender) {
+      toast({ title: "Gender Required", description: "Please select your gender.", variant: "destructive"});
+      return;
+    }
+    if (!countryCode.trim() || !countryCode.startsWith('+')) {
+        toast({ title: "Invalid Country Code", description: "Country code must start with '+' (e.g., +1, +91).", variant: "destructive" });
+        return;
+    }
+    if (!phoneNumber.trim() || !/^\d{7,15}$/.test(phoneNumber.trim())) {
+        toast({ title: "Invalid Phone Number", description: "Phone number must be 7-15 digits.", variant: "destructive" });
+        return;
+    }
+
 
     setIsSaving(true);
 
@@ -94,7 +113,10 @@ export default function EditProfilePage() {
       displayName: displayName.trim(),
       country: country,
       currency: country === 'India' ? 'INR' : 'USD',
-      defaultPaymentMethod: defaultPaymentMethod || undefined, // Store as undefined if empty string
+      gender: gender as UserProfile['gender'],
+      countryCode: countryCode.trim(),
+      phoneNumber: phoneNumber.trim(),
+      defaultPaymentMethod: defaultPaymentMethod || undefined, 
     };
 
     const paymentDetailsToSave: Record<string, string> = {};
@@ -112,7 +134,7 @@ export default function EditProfilePage() {
         setIsSaving(false);
         return;
     } else { 
-        updates.defaultPaymentDetails = {}; // Clear details if no method is selected by setting to empty object or undefined
+        updates.defaultPaymentDetails = {}; 
     }
 
 
@@ -131,13 +153,12 @@ export default function EditProfilePage() {
     }
   };
   
-  const handlePaymentMethodChange = (value: string) => { // Value from Select onValueChange is always string
+  const handlePaymentMethodChange = (value: string) => { 
     if (value === SPECIAL_VALUE_NONE) {
         setDefaultPaymentMethod('');
     } else {
         setDefaultPaymentMethod(value as PaymentMethod);
     }
-    // Clear previous details when method changes to avoid saving stale data if user doesn't update
     setUpiId('');
     setAccountNumber('');
     setIfscCode('');
@@ -182,7 +203,7 @@ export default function EditProfilePage() {
           <CardContent className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="displayName" className="text-lg flex items-center">
-                <User className="mr-2 text-muted-foreground" /> Display Name
+                <User className="mr-2 text-muted-foreground" /> Display Name <span className="text-destructive ml-1">*</span>
               </Label>
               <Input
                 id="displayName"
@@ -197,8 +218,62 @@ export default function EditProfilePage() {
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="gender" className="text-lg flex items-center">
+                <MaleFemale className="mr-2 text-muted-foreground" /> Gender <span className="text-destructive ml-1">*</span>
+              </Label>
+              <Select
+                value={gender}
+                onValueChange={(value: UserProfile['gender'] | '') => setGender(value)}
+                required
+                disabled={isSaving}
+              >
+                <SelectTrigger id="gender" className="text-base py-3">
+                  <SelectValue placeholder="Select your gender" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="male">Male</SelectItem>
+                  <SelectItem value="female">Female</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                  <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-1 space-y-2">
+                    <Label htmlFor="countryCode" className="text-lg">Code <span className="text-destructive ml-1">*</span></Label>
+                    <Input
+                        id="countryCode"
+                        type="text"
+                        value={countryCode}
+                        onChange={(e) => setCountryCode(e.target.value)}
+                        placeholder="+91"
+                        required
+                        className="text-base py-3"
+                        disabled={isSaving}
+                    />
+                </div>
+                <div className="col-span-2 space-y-2">
+                    <Label htmlFor="phoneNumber" className="text-lg flex items-center">
+                        <Phone className="mr-2 text-muted-foreground" /> Phone <span className="text-destructive ml-1">*</span>
+                    </Label>
+                    <Input
+                        id="phoneNumber"
+                        type="tel"
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
+                        placeholder="Your phone number"
+                        required
+                        className="text-base py-3"
+                        disabled={isSaving}
+                    />
+                </div>
+            </div>
+
+
+            <div className="space-y-2">
               <Label htmlFor="country" className="text-lg flex items-center">
-                <Globe className="mr-2 text-muted-foreground" /> Country
+                <Globe className="mr-2 text-muted-foreground" /> Country <span className="text-destructive ml-1">*</span>
               </Label>
               <Select
                 value={country}
