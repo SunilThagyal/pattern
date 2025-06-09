@@ -48,6 +48,19 @@ interface AuthFormProps {
   redirectAfterAuth?: string | null;
 }
 
+const determineInitialIsSigningUp = (
+    currentForceSignup: boolean,
+    currentInitialAction?: string | null,
+    currentReferralCode?: string | null
+  ): boolean => {
+    if (currentForceSignup) return true;
+    if (currentReferralCode && currentReferralCode.trim() !== "" && currentInitialAction !== 'login') return true;
+    if (currentInitialAction === 'signup') return true;
+    if (currentInitialAction === 'login') return false;
+    return false; // Default to Login
+};
+
+
 export default function AuthForm({
   passedReferralCodeProp,
   initialActionProp,
@@ -67,33 +80,18 @@ export default function AuthForm({
   const [unverifiedUserEmail, setUnverifiedUserEmail] = useState<string | null>(null);
   const [newEmailForVerification, setNewEmailForVerification] = useState('');
 
-  const determineInitialIsSigningUp = (
-    currentForceSignup: boolean,
-    currentInitialAction?: string | null,
-    currentReferralCode?: string | null
-  ): boolean => {
-    if (currentForceSignup) {
-      return true;
-    }
-    // If a referral code is passed and it's not explicitly a login action, lean towards signup.
-    if (currentReferralCode && currentReferralCode.trim() !== "" && currentInitialAction !== 'login') {
-      return true;
-    }
-    if (currentInitialAction === 'signup') {
-      return true;
-    }
-    if (currentInitialAction === 'login') {
-      return false;
-    }
-    // Default for /auth with no params, or other unrecognized action params
-    return false; // Default to Login
-  };
-
   const [isSigningUp, setIsSigningUp] = useState(() => 
     determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp)
   );
   
-  const [error, setError] = useState<string | null>(null); 
+  const [error, setError] = useState<string | null>(null); // General form error
+
+  // Field-specific errors
+  const [displayNameError, setDisplayNameError] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [countryCodeError, setCountryCodeError] = useState('');
+  const [phoneNumberError, setPhoneNumberError] = useState('');
 
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
@@ -105,6 +103,36 @@ export default function AuthForm({
 
   const [referralProgramEnabled, setReferralProgramEnabled] = useState(true);
   const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
+
+  // Validation functions
+  const validateDisplayName = (name: string) => !name.trim() ? 'Display Name is required.' : '';
+  const validateEmail = (val: string) => {
+    if (!val.trim()) return 'Email is required.';
+    if (!/\S+@\S+\.\S+/.test(val)) return 'Invalid email format.';
+    return '';
+  };
+  const validatePassword = (val: string) => {
+    if (!val) return 'Password is required.';
+    if (val.length < 6) return 'Password must be at least 6 characters.';
+    return '';
+  };
+  const validateCountryCode = (val: string) => {
+    if (!val.trim()) return 'Country Code is required.';
+    if (!val.startsWith('+')) return "Country code must start with '+'.";
+    if (val.trim().length < 2 || val.trim().length > 4) return "Invalid country code length (e.g. +1, +91).";
+    return '';
+  };
+  const validatePhoneNumber = (val: string) => {
+    if (!val.trim()) return 'Phone Number is required.';
+    if (!/^\d{7,15}$/.test(val)) return 'Phone number must be 7-15 digits.';
+    return '';
+  };
+  
+  const handleDisplayNameBlur = () => setDisplayNameError(validateDisplayName(displayName));
+  const handleEmailBlur = () => setEmailError(validateEmail(email));
+  const handlePasswordBlur = () => setPasswordError(validatePassword(password));
+  const handleCountryCodeBlur = () => setCountryCodeError(validateCountryCode(countryCode));
+  const handlePhoneNumberBlur = () => setPhoneNumberError(validatePhoneNumber(phoneNumber));
 
   useEffect(() => {
     const settingsRef = ref(database, 'platformSettings');
@@ -137,10 +165,11 @@ export default function AuthForm({
     }
     setReferralCodeInput(codeToSet);
     
-    if (authActionState !== 'awaitingVerification') { // Don't reset if user is in verification flow
+    if (authActionState !== 'awaitingVerification') { 
         setAuthActionState('default');
     }
     setError(null);
+    setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
 
   }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
 
@@ -149,37 +178,37 @@ export default function AuthForm({
     setError(null); 
     setIsLoadingEmail(true);
 
-    if (!email.trim() || !password.trim()) {
-      setError("Email and password are required.");
-      setIsLoadingEmail(false);
-      return;
-    }
+    // Trigger all field validations explicitly on submit attempt for safety, though button should be disabled
+    const currentEmailError = validateEmail(email); setEmailError(currentEmailError);
+    const currentPasswordError = validatePassword(password); setPasswordError(currentPasswordError);
 
     if (isSigningUp) {
-        if (!displayName.trim() || !country || !gender || !countryCode.trim() || !phoneNumber.trim()) {
-            setError("Please fill all required fields: Display Name, Country, Gender, Country Code, and Phone Number.");
-            setIsLoadingEmail(false);
-            return;
-        }
-        if (countryCode.trim() && !countryCode.startsWith('+')) {
-            setError("Country code must start with a '+' sign (e.g., +91).");
-            setIsLoadingEmail(false);
-            return;
-        }
-        if (phoneNumber.trim() && !/^\d{7,15}$/.test(phoneNumber.trim())) {
-            setError("Phone number must be between 7 to 15 digits.");
-            setIsLoadingEmail(false);
-            return;
-        }
+      const currentDisplayNameError = validateDisplayName(displayName); setDisplayNameError(currentDisplayNameError);
+      const currentCountryCodeError = validateCountryCode(countryCode); setCountryCodeError(currentCountryCodeError);
+      const currentPhoneNumberError = validatePhoneNumber(phoneNumber); setPhoneNumberError(currentPhoneNumberError);
 
+      if (currentDisplayNameError || currentEmailError || currentPasswordError || currentCountryCodeError || currentPhoneNumberError || !country || !gender) {
+         setError("Please correct the errors above and fill all required fields.");
+         setIsLoadingEmail(false);
+         return;
+      }
+    } else { // Login
+       if (currentEmailError || currentPasswordError) {
+          setError("Please correct the errors above.");
+          setIsLoadingEmail(false);
+          return;
+       }
+    }
+
+
+    if (isSigningUp) {
       try {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
 
         if (user) {
           await sendEmailVerification(user);
-          toast({ title: "Sign Up Processing...", description: `Welcome, ${displayName}! A verification email has been sent to ${email}. Please verify your email to complete registration.` });
-
+          
           let newShortReferralCode = '';
           if (referralProgramEnabled) {
               let codeExists = true;
@@ -192,7 +221,7 @@ export default function AuthForm({
                   codeExists = shortCodeSnap.exists();
                   attempts++;
               }
-              if (codeExists) throw new Error("Could not generate unique referral code.");
+              if (codeExists) console.warn("Could not generate unique referral code after attempts."); // Non-fatal
           }
 
           const newUserProfile: UserProfile = {
@@ -200,7 +229,7 @@ export default function AuthForm({
             displayName: displayName.trim(),
             email: user.email || email,
             referralCode: user.uid, 
-            shortReferralCode: referralProgramEnabled ? newShortReferralCode : undefined,
+            shortReferralCode: referralProgramEnabled && newShortReferralCode ? newShortReferralCode : undefined,
             totalEarnings: 0,
             createdAt: serverTimestamp() as number,
             country: country,
@@ -257,13 +286,14 @@ export default function AuthForm({
           
           setUnverifiedUserEmail(user.email);
           setAuthActionState('awaitingVerification');
+           toast({ title: "Sign Up Almost Complete!", description: `Welcome, ${displayName}! A verification email has been sent to ${email}. Please verify your email.` });
         }
       } catch (fbError: any) {
         console.error("Firebase Signup Error:", fbError);
         if (fbError.code === 'auth/email-already-in-use') {
             setError("This email is already in use. Please login or use a different email.");
         } else if (fbError.code === 'auth/weak-password') {
-            setError("Password should be at least 6 characters.");
+            setPasswordError("Password should be at least 6 characters."); // Set specific error
         } else {
             setError(fbError.message || "Signup failed. Please try again.");
         }
@@ -309,8 +339,10 @@ export default function AuthForm({
 
   const handleForgotPassword = async () => {
     setError(null);
-    if (!email.trim()) {
-      setError("Please enter your email address to reset password.");
+    const currentEmailError = validateEmail(email);
+    setEmailError(currentEmailError);
+    if (currentEmailError) {
+      setError("Please enter a valid email address to reset password.");
       return;
     }
     setIsLoadingEmail(true);
@@ -325,8 +357,10 @@ export default function AuthForm({
     } catch (fbError: any) {
       console.error("Forgot Password Error:", fbError);
        if (fbError.code === 'auth/invalid-email') {
-            setError("The email address format is not valid. Please check and try again.");
+            setEmailError("The email address format is not valid."); // Set specific error
+            setError("Please check the email address format.");
       } else if (fbError.code === 'auth/missing-email') { 
+            setEmailError("Please enter your email address."); // Set specific error
             setError("Please enter your email address.");
       } else {
             setError("Could not send password reset email at this time. Please try again later.");
@@ -368,8 +402,9 @@ export default function AuthForm({
       setAuthActionState('default');
       return;
     }
-    if (!newEmailForVerification.trim() || !/\S+@\S+\.\S+/.test(newEmailForVerification.trim())) {
-        toast({ title: "Invalid Email", description: "Please enter a valid new email address.", variant: "destructive" });
+    const newEmailValidationError = validateEmail(newEmailForVerification.trim());
+    if (newEmailValidationError) {
+        toast({ title: "Invalid Email", description: newEmailValidationError, variant: "destructive" });
         return;
     }
     setIsUpdatingEmail(true);
@@ -409,6 +444,7 @@ export default function AuthForm({
     setEmail(''); 
     setPassword('');
     setError(null);
+    setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
     toast({ title: "Logged Out" });
   };
 
@@ -467,6 +503,16 @@ export default function AuthForm({
   const disableToggle = isLoadingEmail || isLoadingGoogle ||
                        (forceSignupFromPath && !!(passedReferralCodeProp && passedReferralCodeProp.trim() !== "")) ||
                        (!forceSignupFromPath && !!(passedReferralCodeProp && passedReferralCodeProp.trim() !== ""));
+
+  const signupFieldsValid = displayName.trim() && country && gender && countryCode.trim() && phoneNumber.trim() && email.trim() && password.trim();
+  const signupErrorsClear = !displayNameError && !emailError && !passwordError && !countryCodeError && !phoneNumberError;
+  const canSubmitSignup = signupFieldsValid && signupErrorsClear;
+
+  const loginFieldsValid = email.trim() && password.trim();
+  const loginErrorsClear = !emailError && !passwordError;
+  const canSubmitLogin = loginFieldsValid && loginErrorsClear;
+
+  const isSubmitDisabled = isLoadingEmail || isLoadingGoogle || (authActionState === 'default' && (isSigningUp ? !canSubmitSignup : !canSubmitLogin));
 
 
   if (authActionState === 'awaitingVerification') {
@@ -537,7 +583,7 @@ export default function AuthForm({
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-4"> {/* Reduced space-y-6 to space-y-4 */}
             {error && (
                 <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-center text-sm text-destructive">
                     <AlertCircle className="inline-block mr-1 h-4 w-4" /> {error}
@@ -545,23 +591,25 @@ export default function AuthForm({
             )}
             {authActionState === 'default' && isSigningUp && (
               <>
-                <div className="space-y-2">
-                  <Label htmlFor="displayName_auth_form" className="text-lg">Display Name <span className="text-destructive">*</span></Label>
+                <div className="space-y-1"> {/* Reduced space-y-2 to space-y-1 */}
+                  <Label htmlFor="displayName_auth_form">Display Name <span className="text-destructive">*</span></Label>
                   <Input
                     id="displayName_auth_form"
                     name="displayName"
                     type="text"
                     value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
+                    onChange={(e) => { setDisplayName(e.target.value); if (displayNameError) setDisplayNameError(''); }}
+                    onBlur={handleDisplayNameBlur}
                     placeholder="Your game name"
                     required={isSigningUp}
-                    className="text-base py-6"
+                    className="text-base"
                     disabled={isLoadingEmail || isLoadingGoogle}
                   />
+                  {displayNameError && <p className="text-xs text-destructive mt-1">{displayNameError}</p>}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="country_auth_form" className="text-lg flex items-center">
-                    <Globe size={18} className="mr-2 text-muted-foreground"/> Country <span className="text-destructive">*</span>
+                <div className="space-y-1">
+                  <Label htmlFor="country_auth_form" className="flex items-center">
+                    <Globe size={16} className="mr-1 text-muted-foreground"/> Country <span className="text-destructive">*</span>
                   </Label>
                   <Select
                     value={country}
@@ -569,7 +617,7 @@ export default function AuthForm({
                     required
                     disabled={isLoadingEmail || isLoadingGoogle}
                   >
-                    <SelectTrigger id="country_auth_form" className="text-base py-6">
+                    <SelectTrigger id="country_auth_form" className="text-base">
                       <SelectValue placeholder="Select your country" />
                     </SelectTrigger>
                     <SelectContent>
@@ -578,9 +626,9 @@ export default function AuthForm({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="gender_auth_form" className="text-lg flex items-center">
-                    <UserCircle2 size={18} className="mr-2 text-muted-foreground"/> Gender <span className="text-destructive">*</span>
+                <div className="space-y-1">
+                  <Label htmlFor="gender_auth_form" className="flex items-center">
+                    <UserCircle2 size={16} className="mr-1 text-muted-foreground"/> Gender <span className="text-destructive">*</span>
                   </Label>
                   <Select
                     value={gender}
@@ -588,7 +636,7 @@ export default function AuthForm({
                     required
                     disabled={isLoadingEmail || isLoadingGoogle}
                   >
-                    <SelectTrigger id="gender_auth_form" className="text-base py-6">
+                    <SelectTrigger id="gender_auth_form" className="text-base">
                       <SelectValue placeholder="Select your gender" />
                     </SelectTrigger>
                     <SelectContent>
@@ -600,22 +648,24 @@ export default function AuthForm({
                   </Select>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-1 space-y-2">
-                        <Label htmlFor="country_code_auth_form" className="text-lg">Code <span className="text-destructive">*</span></Label>
+                    <div className="col-span-1 space-y-1">
+                        <Label htmlFor="country_code_auth_form">Code <span className="text-destructive">*</span></Label>
                         <Input
                             id="country_code_auth_form"
                             name="countryCode"
                             type="text"
                             value={countryCode}
-                            onChange={(e) => setCountryCode(e.target.value)}
+                            onChange={(e) => { setCountryCode(e.target.value); if (countryCodeError) setCountryCodeError(''); }}
+                            onBlur={handleCountryCodeBlur}
                             placeholder="+91"
                             required={isSigningUp}
-                            className="text-base py-6"
+                            className="text-base"
                             disabled={isLoadingEmail || isLoadingGoogle}
                         />
+                        {countryCodeError && <p className="text-xs text-destructive mt-1">{countryCodeError}</p>}
                     </div>
-                    <div className="col-span-2 space-y-2">
-                        <Label htmlFor="phone_number_auth_form" className="text-lg flex items-center">
+                    <div className="col-span-2 space-y-1">
+                        <Label htmlFor="phone_number_auth_form" className="flex items-center">
                            Phone <span className="text-destructive">*</span>
                         </Label>
                         <Input
@@ -623,45 +673,51 @@ export default function AuthForm({
                             name="phoneNumber"
                             type="tel"
                             value={phoneNumber}
-                            onChange={(e) => setPhoneNumber(e.target.value)}
+                            onChange={(e) => { setPhoneNumber(e.target.value); if (phoneNumberError) setPhoneNumberError(''); }}
+                            onBlur={handlePhoneNumberBlur}
                             placeholder="Your phone number"
                             required={isSigningUp}
-                            className="text-base py-6"
+                            className="text-base"
                             disabled={isLoadingEmail || isLoadingGoogle}
                         />
+                        {phoneNumberError && <p className="text-xs text-destructive mt-1">{phoneNumberError}</p>}
                     </div>
                 </div>
                  <p className="text-xs text-muted-foreground">Your phone number is used for account purposes only.</p>
               </>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="email_auth_form" className="text-lg">Email <span className="text-destructive">*</span></Label>
+            <div className="space-y-1">
+              <Label htmlFor="email_auth_form">Email <span className="text-destructive">*</span></Label>
               <Input
                 id="email_auth_form"
                 name="email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); if (emailError) setEmailError(''); }}
+                onBlur={handleEmailBlur}
                 placeholder="you@example.com"
                 required
-                className="text-base py-6"
+                className="text-base"
                 disabled={isLoadingEmail || isLoadingGoogle}
               />
+              {emailError && <p className="text-xs text-destructive mt-1">{emailError}</p>}
             </div>
             {authActionState !== 'resetPassword' && (
-                 <div className="space-y-2">
-                    <Label htmlFor="password_auth_form" className="text-lg">Password <span className="text-destructive">*</span></Label>
+                 <div className="space-y-1">
+                    <Label htmlFor="password_auth_form">Password <span className="text-destructive">*</span></Label>
                     <Input
                         id="password_auth_form"
                         name="password"
                         type="password"
                         value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        onChange={(e) => { setPassword(e.target.value); if (passwordError) setPasswordError(''); }}
+                        onBlur={handlePasswordBlur}
                         placeholder="••••••••"
                         required
-                        className="text-base py-6"
+                        className="text-base"
                         disabled={isLoadingEmail || isLoadingGoogle}
                     />
+                    {passwordError && <p className="text-xs text-destructive mt-1">{passwordError}</p>}
                 </div>
             )}
 
@@ -669,17 +725,17 @@ export default function AuthForm({
                 <Button
                     type="button"
                     variant="link"
-                    className="px-0 text-sm text-primary hover:underline"
-                    onClick={() => {setAuthActionState('resetPassword'); setError(null);}}
+                    className="px-0 text-sm text-primary hover:underline h-auto py-0"
+                    onClick={() => {setAuthActionState('resetPassword'); setError(null); setEmailError(''); setPasswordError('');}}
                     disabled={isLoadingEmail || isLoadingGoogle}
                 >
                     Forgot Password?
                 </Button>
             )}
             {authActionState === 'default' && isSigningUp && (
-              <div className="space-y-2">
-                <Label htmlFor="referral_code" className="text-lg flex items-center">
-                   <UserPlus size={18} className="mr-2 text-muted-foreground"/> Referral Code (Optional)
+              <div className="space-y-1">
+                <Label htmlFor="referral_code" className="flex items-center">
+                   <UserPlus size={16} className="mr-1 text-muted-foreground"/> Referral Code (Optional)
                 </Label>
                 <Input
                   id="referral_code"
@@ -688,7 +744,7 @@ export default function AuthForm({
                   value={referralCodeInput}
                   onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
                   placeholder="Enter 5-character code"
-                  className="text-base py-3"
+                  className="text-base"
                   maxLength={5}
                   disabled={isLoadingEmail || isLoadingGoogle || isLoadingPlatformSettings || !referralProgramEnabled}
                 />
@@ -701,8 +757,8 @@ export default function AuthForm({
               </div>
             )}
           </CardContent>
-          <CardFooter className="flex flex-col gap-4">
-            <Button type="submit" className="w-full text-lg py-6" disabled={isLoadingEmail || isLoadingGoogle}>
+          <CardFooter className="flex flex-col gap-3"> {/* Reduced gap-4 to gap-3 */}
+            <Button type="submit" className="w-full text-base py-5" disabled={isSubmitDisabled}> {/* Adjusted size */}
               {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : 
                 (authActionState === 'resetPassword' ? <Mail className="mr-2 h-5 w-5" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />))
               }
@@ -713,7 +769,7 @@ export default function AuthForm({
 
             {authActionState !== 'resetPassword' && (
                 <>
-                <div className="relative w-full my-2">
+                <div className="relative w-full my-1"> {/* Reduced my-2 to my-1 */}
                   <div className="absolute inset-0 flex items-center">
                     <span className="w-full border-t" />
                   </div>
@@ -726,7 +782,7 @@ export default function AuthForm({
 
                 <Button
                   variant="outline"
-                  className="w-full text-lg py-6"
+                  className="w-full text-base py-5" /* Adjusted size */
                   onClick={handleGoogleAuthSimulated}
                   disabled={isLoadingGoogle || isLoadingEmail}
                   type="button"
@@ -747,8 +803,9 @@ export default function AuthForm({
                         setIsSigningUp(!isSigningUp);
                     }
                     setError(null);
+                    setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
                 }}
-                className="mt-2"
+                className="mt-1" /* Reduced mt-2 to mt-1 */
                 disabled={disableToggle && authActionState !== 'resetPassword'}
                 type="button"
             >
@@ -759,16 +816,15 @@ export default function AuthForm({
                     : "Don't have an account? Sign Up"}
             </Button>
 
-            <Link href="/" className="text-sm text-muted-foreground hover:text-primary mt-2">
+            <Link href="/" className="text-sm text-muted-foreground hover:text-primary mt-1">
                 Maybe later? Back to Home
             </Link>
           </CardFooter>
         </form>
       </Card>
-      <p className="text-xs text-muted-foreground mt-6 max-w-md text-center">
+      <p className="text-xs text-muted-foreground mt-4 max-w-md text-center"> {/* Reduced mt-6 to mt-4 */}
         Email/password authentication uses Firebase. Google Sign-In is simulated.
       </p>
     </div>
   );
 }
-
