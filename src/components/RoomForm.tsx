@@ -29,7 +29,7 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
 
   // Room config states
   const [roundTimeoutSeconds, setRoundTimeoutSeconds] = useState(90);
-  const [totalRounds, setTotalRounds] = useState(5);
+  const [totalRounds, setTotalRounds] = useState(3); // Default to 3 rounds
   const [maxWordLength, setMaxWordLength] = useState(20);
 
   // Simulated Auth State
@@ -83,10 +83,10 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
     if (mode === 'create') {
         if (
             Number.isNaN(roundTimeoutSeconds) || roundTimeoutSeconds < 30 ||
-            Number.isNaN(totalRounds) || totalRounds < 1 ||
-            Number.isNaN(maxWordLength) || maxWordLength < 3
+            Number.isNaN(totalRounds) || totalRounds < 1 || totalRounds > 10 || // Max 10 rounds
+            Number.isNaN(maxWordLength) || maxWordLength < 3 || maxWordLength > 30 // Max 30 chars
         ) {
-            toast({ title: "Invalid Config", description: "Please check room settings. Timeout >= 30s, Rounds >= 1, Max Word Length >= 3.", variant: "destructive" });
+            toast({ title: "Invalid Config", description: "Timeout (30-300s), Rounds (1-10), Max Word Length (3-30).", variant: "destructive" });
             setIsLoading(false);
             return;
         }
@@ -122,14 +122,10 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
         players: { [finalPlayerId]: player },
         gameState: 'waiting',
         createdAt: serverTimestamp() as unknown as number,
-        drawingData: [],
         config: roomConfig,
-        currentRoundNumber: 0, 
-        usedWords: [],
-        revealedPattern: [],
-        selectableWords: [],
-        wordSelectionEndsAt: null,
-        aiSketchDataUri: null,
+        currentRoundNumber: 0, // Will be set to 1 when game starts
+        currentDrawerId: null,
+        // currentTurnInRound and playerOrderForCurrentRound will be set by advanceGameToNextStep
       };
 
       try {
@@ -284,24 +280,24 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   type="number" 
                   value={Number.isNaN(roundTimeoutSeconds) ? '' : roundTimeoutSeconds} 
                   onChange={e => setRoundTimeoutSeconds(parseInt(e.target.value))} 
-                  min="30" 
+                  min="30" max="300"
                   className="text-base py-3"
                   disabled={isLoading}
                 />
-                <p className="text-xs text-muted-foreground">Time limit for each player to draw (min 30s).</p>
+                <p className="text-xs text-muted-foreground">Time limit for each player to draw (30-300s).</p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="totalRounds" className="flex items-center"><ListChecks size={16} className="mr-2 text-muted-foreground"/> Total Rounds</Label>
+                <Label htmlFor="totalRounds" className="flex items-center"><ListChecks size={16} className="mr-2 text-muted-foreground"/> Total Rounds (per player)</Label>
                 <Input 
                   id="totalRounds" 
                   type="number" 
                   value={Number.isNaN(totalRounds) ? '' : totalRounds} 
                   onChange={e => setTotalRounds(parseInt(e.target.value))} 
-                  min="1" 
+                  min="1" max="10"
                   className="text-base py-3"
                   disabled={isLoading}
                 />
-                <p className="text-xs text-muted-foreground">Number of rounds before the game ends (min 1).</p>
+                <p className="text-xs text-muted-foreground">Number of times each player gets to draw (1-10).</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="maxWordLength" className="flex items-center"><TextCursorInput size={16} className="mr-2 text-muted-foreground"/> Max Word Length</Label>
@@ -310,11 +306,11 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
                   type="number" 
                   value={Number.isNaN(maxWordLength) ? '' : maxWordLength} 
                   onChange={e => setMaxWordLength(parseInt(e.target.value))} 
-                  min="3" 
+                  min="3" max="30"
                   className="text-base py-3"
                   disabled={isLoading}
                 />
-                <p className="text-xs text-muted-foreground">Maximum character length for words to be drawn (min 3 chars).</p>
+                <p className="text-xs text-muted-foreground">Maximum character length for words (3-30 chars).</p>
               </div>
             </>
           )}
@@ -338,3 +334,4 @@ export default function RoomForm({ mode, initialRoomId }: RoomFormProps) {
     </Card>
   );
 }
+

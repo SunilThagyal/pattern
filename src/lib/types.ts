@@ -32,6 +32,36 @@ export interface RoomConfig {
   maxWordLength: number;
 }
 
+export interface Room {
+  id: string;
+  hostId: string;
+  players: { [playerId: string]: Player };
+  gameState: 'waiting' | 'word_selection' | 'drawing' | 'round_end' | 'game_over';
+  createdAt: number;
+  config: RoomConfig;
+  drawingData?: DrawingPoint[];
+  guesses?: Guess[];
+  currentRoundNumber: number; // "Super-round" number
+  currentTurnInRound?: number; // Index in playerOrderForCurrentRound for the current turn
+  playerOrderForCurrentRound?: string[]; // Player IDs in order for the current super-round
+  currentDrawerId: string | null;
+  currentPattern: string | null;
+  roundStartedAt: number | null; // Timestamp for when drawing phase starts
+  roundEndsAt: number | null; // Timestamp for when drawing phase ends
+  wordSelectionEndsAt: number | null; // Timestamp for when word selection phase ends
+  selectableWords?: string[];
+  revealedPattern?: string[];
+  usedWords?: string[];
+  correctGuessersThisRound?: string[];
+  lastRoundScoreChanges?: { [playerId: string]: number } | null;
+  aiSketchDataUri?: string | null;
+}
+
+export interface RoomCreationData extends Omit<Room, 'players' | 'drawingData' | 'guesses' | 'currentPattern' | 'roundStartedAt' | 'roundEndsAt' | 'selectableWords' | 'revealedPattern' | 'usedWords' | 'correctGuessersThisRound' | 'lastRoundScoreChanges' | 'aiSketchDataUri'> {
+  players: { [playerId: string]: Player };
+}
+
+
 export interface PlatformSettings {
   referralProgramEnabled: boolean;
   platformWithdrawalsEnabled: boolean;
