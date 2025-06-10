@@ -20,7 +20,7 @@ interface GameStateModalsProps {
 
 export function GameStateModals({
   room,
-  players, // This 'players' prop is the full sorted list from GameRoomPage
+  players,
   isHost,
   onPlayAgain,
   canPlayAgain,
@@ -44,11 +44,24 @@ export function GameStateModals({
   const currentTurnDisplay = (room.currentTurnInRound || 0) + 1;
   const totalTurnsInRoundDisplay = room.playerOrderForCurrentRound?.length || Object.keys(room.players || {}).filter(pid => room.players[pid]?.isOnline).length || 0;
 
-  let turnScoreEntries: [string, number][] = [];
+  let turnScoreEntries: {playerId: string, name: string, score: number, isDrawer: boolean}[] = [];
+
   if (room.gameState === 'round_end' && room.lastRoundScoreChanges) {
     turnScoreEntries = Object.entries(room.lastRoundScoreChanges)
-      .sort(([, scoreA], [, scoreB]) => scoreB - scoreA);
+      .map(([playerId, score]) => {
+        const playerDetails = room.players?.[playerId];
+        // Ensure playerDetails and playerDetails.name exist, otherwise provide a fallback.
+        const playerName = (playerDetails && playerDetails.name) ? playerDetails.name : `Player ${playerId.substring(0, 4)}`;
+        return {
+          playerId,
+          name: playerName,
+          score,
+          isDrawer: playerId === room.currentDrawerId,
+        };
+      })
+      .sort((a, b) => b.score - a.score); // Sort by score
   }
+
 
   const handleNavigation = (path: string) => {
     router.push(path);
@@ -63,10 +76,10 @@ export function GameStateModals({
               <div className="text-xs sm:text-sm text-muted-foreground mb-1 text-center">
                 Round {room.currentRoundNumber} / {room.config.totalRounds} | Turn {currentTurnDisplay} of {totalTurnsInRoundDisplay}
               </div>
-              <h2 className="text-xl sm:text-2xl mb-2 text-green-700 font-bold text-center">Turn Over!</h2>
+              <h2 className="text-xl sm:text-2xl mb-2 text-primary font-bold text-center">Turn Over!</h2>
               <div className="text-center mb-3 text-sm sm:text-base">
                 <p className="text-foreground">Drawer: <strong className="font-semibold">{currentDrawerName}</strong></p>
-                <p className="text-foreground">The word was: <strong className="font-mono text-primary">{room.currentPattern || "N/A"}</strong></p>
+                <p className="text-foreground">The word was: <strong className="font-mono text-accent">{room.currentPattern || "N/A"}</strong></p>
               </div>
             </div>
 
@@ -74,19 +87,14 @@ export function GameStateModals({
               <h3 className="text-md sm:text-lg font-semibold text-foreground mb-1.5 text-center sticky top-0 bg-muted/30 py-1 z-10">Turn Scores</h3>
               {turnScoreEntries.length > 0 ? (
                 <ul className="space-y-1">
-                  {turnScoreEntries.map(([playerId, score]) => {
-                     const playerDetails = room.players?.[playerId];
-                     const playerName = playerDetails?.name || `Player ${playerId.substring(0,4)}`;
-                     const isCurrentDrawer = playerId === room.currentDrawerId;
-                    return (
+                  {turnScoreEntries.map(({ playerId, name, score, isDrawer }) => (
                         <li key={playerId} className="flex justify-between items-center text-xs sm:text-sm p-1.5 bg-card rounded-sm shadow-sm">
-                        <span className="truncate">{playerName} {isCurrentDrawer ? <span className="text-primary text-[10px]">(Drawer)</span> : ''}</span>
+                        <span className="truncate">{name} {isDrawer ? <span className="text-primary text-[10px]">(Drawer)</span> : ''}</span>
                         <span className={cn("font-bold", score > 0 ? 'text-green-600' : score < 0 ? 'text-red-600' : 'text-muted-foreground')}>
                             {score >= 0 ? '+' : ''}{score}
                         </span>
                         </li>
-                    );
-                  })}
+                    ))}
                 </ul>
               ) : (
                 <p className="text-xs text-muted-foreground text-center py-2">Score changes for this turn will appear here.</p>
@@ -96,7 +104,7 @@ export function GameStateModals({
             <div className="flex-shrink-0">
                 <div className="text-xs sm:text-sm text-muted-foreground text-center mb-2">
                     {room.correctGuessersThisRound && room.activeGuesserCountAtTurnStart > 0
-                    ? `${room.correctGuessersThisRound.length} of ${room.activeGuesserCountAtTurnStart} guesser(s) got it right!`
+                    ? `${room.correctGuessersThisRound.length} of ${room.activeGuesserCountAtTurnStart} guesser(s) guessed correctly!`
                     : room.activeGuesserCountAtTurnStart > 0 ? "No one guessed the word!" : "No active guessers this turn."}
                 </div>
 
@@ -166,4 +174,3 @@ export function GameStateModals({
     </div>
   );
 }
-
