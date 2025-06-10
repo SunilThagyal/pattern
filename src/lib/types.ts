@@ -41,23 +41,29 @@ export interface Room {
   config: RoomConfig;
   drawingData?: DrawingPoint[];
   guesses?: Guess[];
-  currentRoundNumber: number; // "Super-round" number
-  currentTurnInRound?: number; // Index in playerOrderForCurrentRound for the current turn
-  playerOrderForCurrentRound?: string[]; // Player IDs in order for the current super-round
+  currentRoundNumber: number;
+  currentTurnInRound: number;
+  playerOrderForCurrentRound: string[];
   currentDrawerId: string | null;
   currentPattern: string | null;
-  roundStartedAt: number | null; // Timestamp for when drawing phase starts
-  roundEndsAt: number | null; // Timestamp for when drawing phase ends
-  wordSelectionEndsAt: number | null; // Timestamp for when word selection phase ends
+  roundStartedAt: number | null;
+  roundEndsAt: number | null;
+  wordSelectionEndsAt: number | null;
   selectableWords?: string[];
   revealedPattern?: string[];
   usedWords?: string[];
-  correctGuessersThisRound?: string[];
+  correctGuessersThisRound?: string[]; // Stores IDs of players who guessed correctly this turn
   lastRoundScoreChanges?: { [playerId: string]: number } | null;
   aiSketchDataUri?: string | null;
+  fastestGuesserIdThisTurn: string | null; // Player ID of the first correct guesser
+  lastCorrectGuessTimestampThisTurn: number | null; // Timestamp of the last correct guess
+  activeGuesserCountAtTurnStart: number; // Number of active guessers when the turn began
+  // For Flagging System (Phase 2)
+  // likesThisTurn?: { [playerId: string]: boolean };
+  // dislikesThisTurn?: { [playerId: string]: boolean };
 }
 
-export interface RoomCreationData extends Omit<Room, 'players' | 'drawingData' | 'guesses' | 'currentPattern' | 'roundStartedAt' | 'roundEndsAt' | 'selectableWords' | 'revealedPattern' | 'usedWords' | 'correctGuessersThisRound' | 'lastRoundScoreChanges' | 'aiSketchDataUri'> {
+export interface RoomCreationData extends Omit<Room, 'players' | 'drawingData' | 'guesses' | 'currentPattern' | 'roundStartedAt' | 'roundEndsAt' | 'selectableWords' | 'revealedPattern' | 'usedWords' | 'correctGuessersThisRound' | 'lastRoundScoreChanges' | 'aiSketchDataUri' | 'fastestGuesserIdThisTurn' | 'lastCorrectGuessTimestampThisTurn' | 'activeGuesserCountAtTurnStart'> {
   players: { [playerId: string]: Player };
 }
 
@@ -152,4 +158,3 @@ export type WithdrawalFilterCriteria = {
     searchTerm: string;
     currency: 'all' | 'INR' | 'USD';
 };
-
