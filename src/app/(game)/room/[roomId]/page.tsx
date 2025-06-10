@@ -1003,7 +1003,7 @@ export default function GameRoomPage() {
 
         newRoundNumber = 1;
         newTurnInRound = 0;
-        newPlayerOrderForCurrentRound = onlinePlayers.map(p => p.id); 
+        newPlayerOrderForCurrentRound = onlinePlayers.map(p => p.id).sort(() => Math.random() - 0.5); // Shuffle for fairness
         if (newPlayerOrderForCurrentRound.length === 0) {
              toast({ title: "No Online Players", description: "Cannot start game.", variant: "destructive"});
              return;
@@ -1015,7 +1015,7 @@ export default function GameRoomPage() {
         if (newPlayerOrderForCurrentRound.length === 0 || newTurnInRound >= newPlayerOrderForCurrentRound.length) {
             newRoundNumber++;
             newTurnInRound = 0;
-            newPlayerOrderForCurrentRound = onlinePlayers.map(p => p.id); 
+            newPlayerOrderForCurrentRound = onlinePlayers.map(p => p.id).sort(() => Math.random() - 0.5); // Reshuffle for new round
         }
 
         if (newRoundNumber > (currentRoomData.config?.totalRounds || 1)) {
@@ -1073,6 +1073,8 @@ export default function GameRoomPage() {
 
     const drawerPlayer = currentRoomData.players?.[newDrawerId];
     const drawerNameForMessage = drawerPlayer?.name || "Next player";
+    const newWordSelectionEndsAt = Date.now() + Math.max(10000, (currentRoomData.config?.roundTimeoutSeconds || 90) / 6 * 1000);
+
 
     const updates: Partial<Room> = {
         gameState: 'word_selection',
@@ -1080,7 +1082,7 @@ export default function GameRoomPage() {
         currentPattern: null,
         roundStartedAt: null,
         roundEndsAt: null,
-        wordSelectionEndsAt: Date.now() + (currentRoomData.config.roundTimeoutSeconds / 6 * 1000), // e.g. 15s for 90s round, min 10s
+        wordSelectionEndsAt: newWordSelectionEndsAt,
         currentRoundNumber: newRoundNumber,
         currentTurnInRound: newTurnInRound,
         playerOrderForCurrentRound: newPlayerOrderForCurrentRound,
@@ -1499,31 +1501,10 @@ export default function GameRoomPage() {
       finalIsAuthenticated = true;
       setAuthPlayerId(storedUid);
     } else { 
-      if (!localPlayerId) { 
-        localPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`;
-        localStorage.setItem('patternPartyPlayerId', localPlayerId);
-      }
-      finalPlayerId = localPlayerId;
-      
-      if (!localPlayerName && localPlayerId) { 
-         if(currentRoomIdInStorage === roomId) { // Only push to form if name is missing for THIS room
-            toast({ title: "Name Required", description: "Please enter your name to join/rejoin the room.", variant: "default" });
-            routerHook.push(`/join/${roomId}`); 
-            return;
-         } else { // If it's for a different room, they'll be prompted anyway or ID reset below
-            localPlayerName = "Guest"; // Temporary fallback if flow continues
-         }
-      }
+      finalPlayerId = localPlayerId || `anon_${Math.random().toString(36).substr(2, 9)}`;
       finalPlayerName = localPlayerName;
-    }
-    
-    if (!finalPlayerId) { 
-      toast({ title: "Player Identity Needed", description: "Please enter your details to join.", variant: "default" });
-      routerHook.push(`/join/${roomId}`);
-      return;
-    }
 
-    if (currentRoomIdInStorage && currentRoomIdInStorage !== roomId && !finalIsAuthenticated) {
+      if (!localPlayerId || (currentRoomIdInStorage && currentRoomIdInStorage !== roomId)) {
         localStorage.removeItem('patternPartyPlayerId'); 
         localStorage.removeItem('patternPartyPlayerName'); 
         finalPlayerId = `anon_${Math.random().toString(36).substr(2, 9)}`; 
@@ -1531,10 +1512,11 @@ export default function GameRoomPage() {
         toast({ title: "New Room Session", description: "Please confirm your name for this new room.", variant: "default" });
         routerHook.push(`/join/${roomId}`); 
         return;
-    } else if (!finalPlayerName && !finalIsAuthenticated) { 
-        toast({ title: "Name Required", description: "Please enter your name to join the room.", variant: "default" });
+      } else if (!finalPlayerName) { 
+        toast({ title: "Name Required", description: "Please enter your name to join/rejoin the room.", variant: "default" });
         routerHook.push(`/join/${roomId}`); 
         return;
+      }
     }
     
     if (finalPlayerId) {
@@ -1564,9 +1546,9 @@ export default function GameRoomPage() {
           players: roomDataFromSnapshot.players || {},
           gameState: roomDataFromSnapshot.gameState || 'waiting',
           createdAt: roomDataFromSnapshot.createdAt,
+          config: roomDataFromSnapshot.config || { roundTimeoutSeconds: 90, totalRounds: 3, maxWordLength: 20 },
           drawingData: roomDataFromSnapshot.drawingData || [],
           guesses: roomDataFromSnapshot.guesses || [],
-          config: roomDataFromSnapshot.config || { roundTimeoutSeconds: 90, totalRounds: 3, maxWordLength: 20 },
           currentRoundNumber: roomDataFromSnapshot.currentRoundNumber || 0,
           currentTurnInRound: roomDataFromSnapshot.currentTurnInRound === undefined ? 0 : roomDataFromSnapshot.currentTurnInRound,
           playerOrderForCurrentRound: roomDataFromSnapshot.playerOrderForCurrentRound || [],
@@ -1584,16 +1566,15 @@ export default function GameRoomPage() {
         };
         setRoom(processedRoomData);
         setError(null);
+        setIsLoading(false);
       } else {
         setError("Room not found or has been deleted.");
         setRoom(null);
-        if (!isLoading) {
-            toast({ title: "Room Error", description: "This room no longer exists.", variant: "destructive" });
-            localStorage.removeItem('patternPartyCurrentRoomId');
-            window.location.href = '/';
-        }
+        toast({ title: "Room Error", description: "This room no longer exists.", variant: "destructive" });
+        localStorage.removeItem('patternPartyCurrentRoomId');
+        routerHook.push('/');
+        setIsLoading(false);
       }
-      setIsLoading(false);
     }, (err) => {
       console.error("Firebase onValue error:", err);
       setError("Failed to load room data.");
@@ -1606,42 +1587,33 @@ export default function GameRoomPage() {
       connectedListener = onValue(playerConnectionsRef, (snap) => {
         if (snap.val() === true) {
           get(playerRefForSetup).then(playerSnap => {
+            let nameForFirebase = playerName.trim(); 
+            if (playerSnap.exists()) {
+              const existingPlayerData = playerSnap.val() as Player;
+              if (!nameForFirebase && existingPlayerData.name) {
+                 nameForFirebase = existingPlayerData.name;
+              } else if (isAuthenticated && authPlayerId === playerId && existingPlayerData.name && existingPlayerData.name !== nameForFirebase && nameForFirebase) {
+                  // If authenticated and name changed in profile, use new name from session for this room.
+              } else if (isAuthenticated && authPlayerId === playerId && existingPlayerData.name && !nameForFirebase) {
+                  nameForFirebase = existingPlayerData.name; // Fallback to DB name if session name is somehow empty for auth user
+              }
+            }
+            nameForFirebase = nameForFirebase || "Player"; 
+
             const updatesForPlayer: Partial<Player> = { 
+                name: nameForFirebase,
                 isOnline: true, 
                 isAnonymous: !isAuthenticated 
             };
             
-            let nameForSystemMessage = playerName;
-            if (playerSnap.exists()) {
-              const existingPlayerData = playerSnap.val() as Player;
-               if ((!playerName || playerName.trim() === '') && existingPlayerData.name) {
-                 updatesForPlayer.name = existingPlayerData.name; // Prefer existing name if current is empty
-               } else if (isAuthenticated && authPlayerId === playerId && existingPlayerData.name && existingPlayerData.name !== playerName) {
-                  updatesForPlayer.name = existingPlayerData.name; // Authenticated user rejoining, keep DB name
-               } else {
-                  updatesForPlayer.name = playerName.trim() || "Player"; // Use new name or fallback
-               }
-               nameForSystemMessage = updatesForPlayer.name || "Player";
-
-              update(playerRefForSetup, updatesForPlayer ).then(() => { 
+            const wasPlayerNodeExisting = playerSnap.exists();
+            
+            update(playerRefForSetup, updatesForPlayer ).then(() => { 
                 onDisconnect(playerOnlineStatusRef).set(false);
-              });
-            } else { // Player doesn't exist in this room yet
-              const newPlayerEntry: Player = {
-                id: playerId,
-                name: (playerName && playerName.trim() !== '') ? playerName.trim() : "Player", 
-                score: 0, 
-                isOnline: true, 
-                isHost: false, 
-                isAnonymous: !isAuthenticated,
-                referralRewardsThisSession: 0,
-              };
-              nameForSystemMessage = newPlayerEntry.name;
-              set(playerRefForSetup, newPlayerEntry).then(() => {
-                 onDisconnect(playerOnlineStatusRef).set(false);
-                 addSystemMessage(`[[SYSTEM_JOINED]]`, nameForSystemMessage);
-              });
-            }
+                if (!wasPlayerNodeExisting) {
+                    addSystemMessage(`[[SYSTEM_JOINED]]`, nameForFirebase);
+                }
+            });
           });
         }
       });
@@ -1656,11 +1628,11 @@ export default function GameRoomPage() {
         onDisconnect(playerOnlineStatusRef).cancel();
       }
     };
-  }, [roomId, playerId, playerName, isAuthenticated, toast, isLoading, addSystemMessage, authPlayerId]); 
+  }, [roomId, playerId, playerName, isAuthenticated, toast, addSystemMessage, authPlayerId, routerHook]); 
 
   useEffect(() => {
-    if (!room || !room.players || !playerId) {
-        prevPlayersRef.current = undefined;
+    if (!room || !room.players || !playerId || !prevPlayersRef.current) {
+        prevPlayersRef.current = room?.players ? JSON.parse(JSON.stringify(room.players)) : undefined;
         return;
     }
 
@@ -1671,22 +1643,21 @@ export default function GameRoomPage() {
         const currentPlayerInfo = currentPlayers[pId];
         const prevPlayerInfo = previousPlayers[pId];
 
-        if (!currentPlayerInfo || !currentPlayerInfo.name) return; // Skip if info is incomplete
+        if (!currentPlayerInfo || !currentPlayerInfo.name) return;
 
-        if (pId === playerId) { // Don't toast for self
-          prevPlayersRef.current = JSON.parse(JSON.stringify(currentPlayers)); // Update self status immediately for next diff
+        if (pId === playerId) {
+          prevPlayersRef.current = JSON.parse(JSON.stringify(currentPlayers));
           return;
         }
 
-
-        if (!prevPlayerInfo && currentPlayerInfo.isOnline) { // New player joined and is online
+        if (!prevPlayerInfo && currentPlayerInfo.isOnline) {
             toast({
                 title: `${currentPlayerInfo.name} Joined!`,
                 description: `Welcome to the room, ${currentPlayerInfo.name}!`,
                 variant: "default",
                 duration: 3000,
             });
-        } else if (prevPlayerInfo && currentPlayerInfo.isOnline !== prevPlayerInfo.isOnline) { // Existing player's online status changed
+        } else if (prevPlayerInfo && currentPlayerInfo.isOnline !== prevPlayerInfo.isOnline) {
             toast({
                 title: `${currentPlayerInfo.name} is now ${currentPlayerInfo.isOnline ? "Online" : "Offline"}`,
                 variant: currentPlayerInfo.isOnline ? "default" : "destructive",
@@ -1694,11 +1665,11 @@ export default function GameRoomPage() {
             });
         }
     });
-    prevPlayersRef.current = JSON.parse(JSON.stringify(currentPlayers)); // Update ref for next comparison
+    prevPlayersRef.current = JSON.parse(JSON.stringify(currentPlayers));
   }, [room?.players, playerId, toast]);
 
 
-  useEffect(() => { // For current drawing turn timeout (timer run out)
+  useEffect(() => { 
     if (room?.gameState === 'drawing' && room?.hostId === playerId && room?.roundEndsAt && room?.roundStartedAt) {
       let roundTimer: NodeJS.Timeout | null = null;
 
@@ -1750,7 +1721,7 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentDrawingTurn, room?.players, room?.currentDrawerId, room?.correctGuessersThisRound, roomId, room?.roundStartedAt]);
 
 
-  useEffect(() => { // For advancing after round_end state
+  useEffect(() => { 
     if (room?.gameState === 'round_end' && playerId === room?.hostId) {
         const NEXT_TURN_DELAY_SECONDS = 5;
         setRoundEndCountdown(NEXT_TURN_DELAY_SECONDS);
@@ -1766,7 +1737,7 @@ export default function GameRoomPage() {
             const currentRoomSnap = await get(ref(database, `rooms/${roomId}`));
             if (currentRoomSnap.exists()) {
                 const currentRoomState = currentRoomSnap.val() as Room;
-                 if (currentRoomState.gameState === 'round_end') { // Double check state before advancing
+                 if (currentRoomState.gameState === 'round_end') { 
                     await advanceGameToNextStep('round_ended');
                 }
             }
@@ -1783,65 +1754,54 @@ export default function GameRoomPage() {
   }, [room?.gameState, room?.hostId, playerId, advanceGameToNextStep, roomId]);
 
 
-  useEffect(() => { // For word selection timeout
+  useEffect(() => { 
     if (room?.gameState === 'word_selection' && room?.hostId === playerId && room?.wordSelectionEndsAt && !room?.currentPattern) {
       const now = Date.now();
       const timeLeftMs = room.wordSelectionEndsAt - now;
       let timer: NodeJS.Timeout | null = null;
 
-      if (timeLeftMs <= 0) {
-        get(ref(database, `rooms/${roomId}`)).then(snap => {
-             if (snap.exists()) {
-                 const latestRoomData = snap.val() as Room;
-                 const timeoutIdentifier = `${latestRoomData.currentDrawerId}_${latestRoomData.wordSelectionEndsAt}`;
+      const timeoutIdentifier = `${room.currentDrawerId}_${room.wordSelectionEndsAt}`;
 
-                 if (latestRoomData.gameState === 'word_selection' &&
-                     latestRoomData.hostId === playerId &&
-                     !latestRoomData.currentPattern &&
-                     latestRoomData.wordSelectionEndsAt && Date.now() >= latestRoomData.wordSelectionEndsAt &&
-                     lastProcessedTimeoutRef.current !== timeoutIdentifier 
-                     ) {
-                    
-                    lastProcessedTimeoutRef.current = timeoutIdentifier;
-                    const drawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
-                    toast({
-                        title: "Word Selection Timed Out",
-                        description: `${drawerName} didn't choose a word. Next turn...`,
-                        variant: "default"
-                    });
-                    addSystemMessage(`${drawerName} didn't choose. Next turn!`);
-                    advanceGameToNextStep('drawer_timed_out_selection');
-                 }
-             }
-          });
+      if (timeLeftMs <= 0) {
+        if (lastProcessedTimeoutRef.current !== timeoutIdentifier) {
+            get(ref(database, `rooms/${roomId}`)).then(snap => {
+                if (snap.exists()) {
+                    const latestRoomData = snap.val() as Room;
+                    if (latestRoomData.gameState === 'word_selection' &&
+                        latestRoomData.hostId === playerId &&
+                        !latestRoomData.currentPattern &&
+                        latestRoomData.wordSelectionEndsAt && Date.now() >= latestRoomData.wordSelectionEndsAt
+                        ) {
+                        lastProcessedTimeoutRef.current = timeoutIdentifier;
+                        const drawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
+                        toast({ title: "Word Selection Timed Out", description: `${drawerName} didn't choose a word. Next turn...`, variant: "default" });
+                        addSystemMessage(`${drawerName} didn't choose. Next turn!`);
+                        advanceGameToNextStep('drawer_timed_out_selection');
+                    }
+                }
+            });
+        }
       } else {
         timer = setTimeout(() => {
+          if (lastProcessedTimeoutRef.current !== timeoutIdentifier) {
            get(ref(database, `rooms/${roomId}`)).then(snap => {
              if (snap.exists()) {
                  const latestRoomData = snap.val() as Room;
-                 const timeoutIdentifier = `${latestRoomData.currentDrawerId}_${latestRoomData.wordSelectionEndsAt}`;
-
                  if (latestRoomData.gameState === 'word_selection' &&
                      latestRoomData.hostId === playerId &&
                      !latestRoomData.currentPattern &&
                      latestRoomData.wordSelectionEndsAt &&
-                     Date.now() >= latestRoomData.wordSelectionEndsAt &&
-                     lastProcessedTimeoutRef.current !== timeoutIdentifier
+                     Date.now() >= latestRoomData.wordSelectionEndsAt
                      ) {
-                    
                     lastProcessedTimeoutRef.current = timeoutIdentifier;
-
                     const currentDrawerName = latestRoomData.currentDrawerId && latestRoomData.players[latestRoomData.currentDrawerId] ? latestRoomData.players[latestRoomData.currentDrawerId].name : "The drawer";
-                    toast({
-                        title: "Word Selection Timed Out",
-                        description: `${currentDrawerName} didn't choose a word. Next turn...`,
-                        variant: "default"
-                    });
+                    toast({ title: "Word Selection Timed Out", description: `${currentDrawerName} didn't choose a word. Next turn...`, variant: "default" });
                     addSystemMessage(`${currentDrawerName} didn't choose. Next turn!`);
                     advanceGameToNextStep('drawer_timed_out_selection');
                  }
              }
-          });
+            });
+           }
         }, timeLeftMs);
       }
       return () => {
@@ -1930,9 +1890,8 @@ export default function GameRoomPage() {
         const totalPlayersInGame = Object.keys(room.players).length;
         const totalConfiguredRounds = room.config.totalRounds;
         
-        // Game is over when currentRoundNumber exceeds totalConfiguredRounds (after last turn of last round)
-        // Or if advanceGameToNextStep sets it to game_over due to player count.
-        // The actual number of drawing turns taken by each player is effectively `totalConfiguredRounds`.
+        const fullGameCompleted = (room.currentRoundNumber > totalConfiguredRounds) || (room.currentRoundNumber === totalConfiguredRounds && (room.currentTurnInRound || 0) >= (room.playerOrderForCurrentRound?.length || 0) -1);
+
 
         Object.values(room.players).forEach(async (p) => {
           if (p.id && !p.isAnonymous) { 
@@ -1949,13 +1908,7 @@ export default function GameRoomPage() {
                   const referrerName = referrerProfileSnap.val().displayName || "Referrer";
                   
                   let actualReward = 0;
-                  // Condition for reward: game must have run for totalConfiguredRounds *and* met player/round minimums.
-                  // The game reaches "game_over" only *after* the last turn of the last configured round,
-                  // or if player count drops too low. We only reward if all rounds were intended to be played.
-                  const fullGameCompleted = (room.currentRoundNumber > totalConfiguredRounds) || (room.currentRoundNumber === totalConfiguredRounds && (room.currentTurnInRound || 0) >= (room.playerOrderForCurrentRound?.length || 0) -1);
-
-
-                  if (!fullGameCompleted && !(room.currentRoundNumber > totalConfiguredRounds) ) { // If game ended prematurely due to lack of players but not because all rounds were done
+                  if (!fullGameCompleted && !(room.currentRoundNumber > totalConfiguredRounds) ) { 
                       console.log(`[ReferralReward] Game for ${p.name} (referred) did not complete all ${totalConfiguredRounds} rounds. Current round: ${room.currentRoundNumber}. No reward.`);
                   } else if (totalPlayersInGame < MIN_PLAYERS_FOR_REWARD) {
                       console.log(`[ReferralReward] Game for ${p.name} (referred) had ${totalPlayersInGame} players, less than min ${MIN_PLAYERS_FOR_REWARD}. No reward.`);
@@ -2008,7 +1961,7 @@ export default function GameRoomPage() {
 
 
   if (isLoading || isLoadingPlatformSettings) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl text-foreground">Loading Room...</span></div>;
-  if (error) return <div className="text-center text-destructive p-8 bg-destructive/10 border border-destructive/20 rounded-md h-screen flex flex-col justify-center items-center"><AlertCircle className="mx-auto h-12 w-12 mb-4" /> <h2 className="text-2xl font-semibold mb-2">Error Loading Room</h2><p>{error}</p><Button onClick={() => window.location.href = '/'} className="mt-4">Go Home</Button></div>;
+  if (error) return <div className="text-center text-destructive p-8 bg-destructive/10 border border-destructive/20 rounded-md h-screen flex flex-col justify-center items-center"><AlertCircle className="mx-auto h-12 w-12 mb-4" /> <h2 className="text-2xl font-semibold mb-2">Error Loading Room</h2><p>{error}</p><Button onClick={() => routerHook.push('/')} className="mt-4">Go Home</Button></div>;
   if (!room || !playerId || !playerName || !room.config) return <div className="text-center p-8 h-screen flex flex-col justify-center items-center">Room data is not available or incomplete. <Link href="/" className="text-primary hover:underline">Go Home</Link></div>;
 
   const isCurrentPlayerDrawing = room.currentDrawerId === playerId;
@@ -2238,5 +2191,8 @@ const generateFallbackWords = (count: number, maxWordLength?: number, previously
     }
     return finalWords.slice(0, count);
 };
+
+    
+
 
     
