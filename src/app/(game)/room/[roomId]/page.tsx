@@ -966,21 +966,35 @@ export default function GameRoomPage() {
   }, [roomId, playerId]);
 
   const advanceGameToNextStep = useCallback(async (reasonForAdvance: 'new_game_start' | 'round_ended' | 'drawer_timed_out_selection') => {
+    const callInstanceId = `advanceGame_${Math.random().toString(36).substring(2, 8)}`;
+    console.log(`[${callInstanceId}] Advancing game: Reason=${reasonForAdvance}`);
+
     const currentRoomSnapshot = await get(ref(database, `rooms/${roomId}`));
     if (!currentRoomSnapshot.exists()) {
+        console.error(`[${callInstanceId}] Room ${roomId} not found.`);
         toast({ title: "Error", description: "Room data not found.", variant: "destructive" });
         return;
     }
     const currentRoomData: Room = currentRoomSnapshot.val();
 
     if (!playerId || currentRoomData.hostId !== playerId) {
+        console.log(`[${callInstanceId}] Not host or no playerId. Exiting.`);
         return;
     }
 
-    const onlinePlayers = Object.values(currentRoomData.players || {}).filter(p => p.isOnline && p.id && p.name);
+    // Check if previous turn is still processing
+    if (currentRoomData.turnProcessingState && currentRoomData.turnProcessingState.status === 'pending') {
+        console.log(`[${callInstanceId}] Waiting for turn ${currentRoomData.turnProcessingState.turnId} to complete processing.`);
+        return;
+    }
+
+    const onlinePlayers = Object.values(currentRoomData.players || {})
+        .filter(p => p.isOnline && p.id && p.name)
+        .sort((a, b) => a.name.localeCompare(b.name)); // Consistent sorting for determinism
 
     if (onlinePlayers.length < MIN_PLAYERS_TO_START_GAME &&
         (reasonForAdvance === 'new_game_start' || (reasonForAdvance === 'round_ended' && currentRoomData.gameState !== 'game_over'))) {
+        console.log(`[${callInstanceId}] Not enough players (${onlinePlayers.length}/${MIN_PLAYERS_TO_START_GAME}). Ending game.`);
         toast({ title: "Not Enough Players", description: `Need at least ${MIN_PLAYERS_TO_START_GAME} online players.`, variant: "default" });
         if (currentRoomData.gameState !== 'waiting' && currentRoomData.gameState !== 'game_over') {
             await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over', turnProcessingState: null });
@@ -991,39 +1005,44 @@ export default function GameRoomPage() {
     }
 
     let newRoundNumber = currentRoomData.currentRoundNumber || 0;
-    let newTurnInRound = currentRoomData.currentTurnInRound !== undefined ? currentRoomData.currentTurnInRound : -1;
+    let newTurnInRound = (currentRoomData.currentTurnInRound || 0) + 1;
     let newPlayerOrderForCurrentRound = currentRoomData.playerOrderForCurrentRound || [];
     let newDrawerId: string | null = null;
 
     if (reasonForAdvance === 'new_game_start') {
+        console.log(`[${callInstanceId}] Starting new game. Resetting state.`);
         await update(ref(database, `rooms/${roomId}`), { usedWords: [], lastRoundScoreChanges: null, turnProcessingState: null });
         for (const pid of Object.keys(currentRoomData.players || {})) {
-           await update(ref(database, `rooms/${roomId}/players/${pid}`), { score: 0, referralRewardsThisSession: 0 });
+            await update(ref(database, `rooms/${roomId}/players/${pid}`), { score: 0, referralRewardsThisSession: 0 });
         }
         addSystemMessage("[[SYSTEM_GAME_RESET]]");
         newRoundNumber = 1;
         newTurnInRound = 0;
         newPlayerOrderForCurrentRound = onlinePlayers.map(p => p.id).sort(() => Math.random() - 0.5);
-    } else { // 'round_ended' or 'drawer_timed_out_selection'
-        newTurnInRound++;
+    } else {
+        // Check if we need to start a new super-round
         if (newPlayerOrderForCurrentRound.length === 0 || newTurnInRound >= newPlayerOrderForCurrentRound.length) {
+            console.log(`[${callInstanceId}] Starting new super-round. CurrentTurnInRound=${newTurnInRound}, PlayerOrderLength=${newPlayerOrderForCurrentRound.length}`);
             newRoundNumber++;
             newTurnInRound = 0;
+            // Ensure only online players are included
             newPlayerOrderForCurrentRound = onlinePlayers.map(p => p.id).sort(() => Math.random() - 0.5);
         }
     }
 
     if (newPlayerOrderForCurrentRound.length === 0) {
-         toast({ title: "No Online Players", description: "Cannot start/continue game.", variant: "destructive"});
-         if (currentRoomData.gameState !== 'waiting' && currentRoomData.gameState !== 'game_over') {
+        console.error(`[${callInstanceId}] No valid player order. Ending game.`);
+        toast({ title: "No Online Players", description: "Cannot start/continue game.", variant: "destructive" });
+        if (currentRoomData.gameState !== 'waiting' && currentRoomData.gameState !== 'game_over') {
             await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over', turnProcessingState: null });
             addSystemMessage("Game ended: No online players to continue.");
             gameOverProcessedRef.current = false;
-         }
-         return;
+        }
+        return;
     }
 
     if (newRoundNumber > (currentRoomData.config?.totalRounds || 3)) {
+        console.log(`[${callInstanceId}] All rounds completed. Ending game.`);
         await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over', turnProcessingState: null });
         addSystemMessage("Game Over! All rounds completed.");
         gameOverProcessedRef.current = false;
@@ -1032,12 +1051,18 @@ export default function GameRoomPage() {
     }
 
     newDrawerId = newPlayerOrderForCurrentRound[newTurnInRound];
-
-    if (!newDrawerId) {
-         toast({title: "Error Assigning Drawer", description: "Could not find a player for the next turn. Game may end.", variant: "destructive"});
-         await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over', turnProcessingState: null });
-         gameOverProcessedRef.current = false;
-         return;
+    if (!newDrawerId || !onlinePlayers.find(p => p.id === newDrawerId)) {
+        console.warn(`[${callInstanceId}] Invalid drawer ${newDrawerId}. Regenerating player order.`);
+        newPlayerOrderForCurrentRound = onlinePlayers.map(p => p.id).sort(() => Math.random() - 0.5);
+        newTurnInRound = 0;
+        newDrawerId = newPlayerOrderForCurrentRound[0];
+        if (!newDrawerId) {
+            console.error(`[${callInstanceId}] No valid drawer after regeneration. Ending game.`);
+            toast({ title: "Error Assigning Drawer", description: "Could not find a player for the next turn.", variant: "destructive" });
+            await update(ref(database, `rooms/${roomId}`), { gameState: 'game_over', turnProcessingState: null });
+            gameOverProcessedRef.current = false;
+            return;
+        }
     }
 
     let wordsForSelection: string[] = [];
@@ -1052,13 +1077,13 @@ export default function GameRoomPage() {
             if (aiSuggestions && Array.isArray(aiSuggestions) && aiSuggestions.length > 0 && aiSuggestions.every(w => typeof w === 'string' && w.trim().length > 0 && /^[a-zA-Z]+$/.test(w.trim()))) {
                 wordsForSelection = aiSuggestions.slice(0, 5);
             } else {
-                 wordsForSelection = generateFallbackWords(5, currentRoomData.config.maxWordLength, currentRoomData.usedWords);
+                wordsForSelection = generateFallbackWords(5, currentRoomData.config.maxWordLength, currentRoomData.usedWords);
             }
             if (wordsForSelection.length < 5) {
                 wordsForSelection = generateFallbackWords(5, currentRoomData.config.maxWordLength, [...(currentRoomData.usedWords || []), ...wordsForSelection]);
             }
         } catch (aiError) {
-            console.error("AI word suggestion error:", aiError);
+            console.error(`[${callInstanceId}] AI word suggestion error:`, aiError);
             toast({ title: "AI Error", description: "Failed to get words from AI. Using default words.", variant: "destructive" });
             wordsForSelection = generateFallbackWords(5, currentRoomData.config?.maxWordLength, currentRoomData.usedWords);
         }
@@ -1081,24 +1106,25 @@ export default function GameRoomPage() {
         currentRoundNumber: newRoundNumber,
         currentTurnInRound: newTurnInRound,
         playerOrderForCurrentRound: newPlayerOrderForCurrentRound,
-        drawingData: [{ type: 'clear', x:0, y:0, color:'#000', lineWidth:1 }],
+        drawingData: [{ type: 'clear', x: 0, y: 0, color: '#000', lineWidth: 1 }],
         aiSketchDataUri: null,
         guesses: [],
         correctGuessersThisRound: [],
-        selectableWords: wordsForSelection.slice(0,5),
+        selectableWords: wordsForSelection.slice(0, 5),
         revealedPattern: [],
         lastRoundScoreChanges: null,
         activeGuesserCountAtTurnStart: activeGuessersAtTurnStart,
-        turnProcessingState: { turnId: currentTurnIdentifierForProcessing, status: 'pending' }
+        turnProcessingState: { turnId: currentTurnIdentifierForProcessing, status: 'pending' },
     };
 
     try {
+        console.log(`[${callInstanceId}] Updating game state: Round=${newRoundNumber}, Turn=${newTurnInRound}, Drawer=${newDrawerId}, PlayerOrder=${JSON.stringify(newPlayerOrderForCurrentRound)}`);
         await update(ref(database, `rooms/${roomId}`), updates);
         addSystemMessage("[[SYSTEM_DRAWER_CHANGE]]", drawerNameForMessage);
-        toast({title: `Next Turn: ${drawerNameForMessage}`, description: `${drawerNameForMessage} is choosing a word.`});
+        toast({ title: `Next Turn: ${drawerNameForMessage}`, description: `${drawerNameForMessage} is choosing a word.` });
     } catch (err) {
-        console.error("Error advancing game step:", err);
-        toast({title:"Error", description: "Could not proceed to next turn/round.", variant: "destructive"});
+        console.error(`[${callInstanceId}] Error advancing game step:`, err);
+        toast({ title: "Error", description: "Could not proceed to next turn/round.", variant: "destructive" });
     }
   }, [playerId, roomId, toast, addSystemMessage]);
 
