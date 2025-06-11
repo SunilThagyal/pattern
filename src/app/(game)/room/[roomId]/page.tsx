@@ -2021,86 +2021,179 @@ export default function GameRoomPage() {
   }, []);
 
   useEffect(() => {
-    if (room?.gameState === 'game_over' &&
-        playerId === room?.hostId &&
-        room.players &&
-        room.config &&
-        platformSettings.referralProgramEnabled &&
-        !isLoadingPlatformSettings) {
-      if (!gameOverProcessedRef.current) {
-        gameOverProcessedRef.current = true;
-
-        const totalPlayersInGame = Object.keys(room.players).length;
-        const totalConfiguredRounds = room.config.totalRounds;
-
-        const fullGameCompleted = (room.currentRoundNumber > totalConfiguredRounds) || (room.currentRoundNumber === totalConfiguredRounds && (room.currentTurnInRound || 0) >= (room.playerOrderForCurrentRound?.length || 0) -1);
-
-
-        Object.values(room.players).forEach(async (p) => {
-          if (p.id && !p.isAnonymous) {
-            const userProfileRef = ref(database, `users/${p.id}`);
-            const userProfileSnap = await get(userProfileRef);
-
-            if (userProfileSnap.exists()) {
-              const userProfile = userProfileSnap.val() as UserProfile;
-              if (userProfile.referredBy && userProfile.referredBy !== p.id) {
-                const referrerId = userProfile.referredBy;
-                const referrerProfileSnap = await get(ref(database, `users/${referrerId}`));
-
-                if (referrerProfileSnap.exists()) {
-                  const referrerName = referrerProfileSnap.val().displayName || "Referrer";
-
-                  let actualReward = 0;
-                  if (!fullGameCompleted && !(room.currentRoundNumber > totalConfiguredRounds) ) {
-                      console.log(`[ReferralReward] Game for ${p.name} (referred) did not complete all ${totalConfiguredRounds} rounds. Current round: ${room.currentRoundNumber}. No reward.`);
-                  } else if (totalPlayersInGame < MIN_PLAYERS_FOR_REWARD) {
-                      console.log(`[ReferralReward] Game for ${p.name} (referred) had ${totalPlayersInGame} players, less than min ${MIN_PLAYERS_FOR_REWARD}. No reward.`);
-                  } else if (totalConfiguredRounds < MIN_ROUNDS_FOR_REWARD) {
-                      console.log(`[ReferralReward] Game for ${p.name} (referred) had ${totalConfiguredRounds} rounds configured, less than min ${MIN_ROUNDS_FOR_REWARD}. No reward.`);
-                  } else {
-                      const calculatedReward = REFERRAL_REWARD_BASE_RATE * totalPlayersInGame * totalConfiguredRounds * 1;
-                      actualReward = Math.min(calculatedReward, MAX_REWARD_PER_GAME);
-                  }
-
-                  if (actualReward > 0) {
-                    try {
-                      await runTransaction(ref(database, `users/${referrerId}/totalEarnings`), (currentEarnings) => {
-                        return (currentEarnings || 0) + actualReward;
-                      });
-
-                      const transactionsRef = ref(database, `transactions/${referrerId}`);
-                      const newTransaction: Transaction = {
-                        date: serverTimestamp() as number,
-                        description: `Reward from ${p.name} (Played ${totalConfiguredRounds} rounds with ${totalPlayersInGame} players)`,
-                        amount: actualReward,
-                        type: 'earning',
-                        status: 'Earned',
-                        currency: referrerProfileSnap.val().currency || 'INR',
-                      };
-                      await push(transactionsRef, newTransaction);
-
-                      const roomPlayerReferrerRef = ref(database, `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`);
-                      await runTransaction(roomPlayerReferrerRef, (currentRoomRewards) => (currentRoomRewards || 0) + actualReward);
-
-                      addSystemMessage(`[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${referrerProfileSnap.val().currency === 'USD' ? '$' : '₹'}${actualReward.toFixed(2)} because ${p.name} completed a full game!`);
-
-                    } catch (e) {
-                      console.error("Error awarding dynamic referral reward:", e);
-                      toast({title: "Referral Reward Error", description: `Failed to process reward for ${referrerName}.`, variant: "destructive"})
-                    }
-                  } else {
-                      console.log(`[ReferralReward] Referrer ${referrerName} for player ${p.name} earned no reward based on game engagement criteria.`);
-                  }
-                }
-              }
-            }
-          }
-        });
+    if (
+      !room ||
+      room.gameState !== 'game_over' ||
+      playerId !== room.hostId ||
+      !room.players ||
+      !room.config ||
+      !platformSettings.referralProgramEnabled ||
+      isLoadingPlatformSettings
+    ) {
+      if (room?.gameState !== 'game_over') {
+        gameOverProcessedRef.current = false;
       }
-    } else if (room?.gameState !== 'game_over') {
-      gameOverProcessedRef.current = false;
+      return;
     }
-  }, [room?.gameState, room?.players, playerId, room?.hostId, room?.config, room?.currentRoundNumber, room?.currentTurnInRound, room?.playerOrderForCurrentRound, roomId, addSystemMessage, toast, platformSettings.referralProgramEnabled, isLoadingPlatformSettings]);
+  
+    // Skip if this client has already attempted to process (client-side guard)
+    if (gameOverProcessedRef.current) {
+      console.log(`[ReferralReward] Skipping game-over processing for room ${roomId}. Already processed by this client.`);
+      return;
+    }
+    gameOverProcessedRef.current = true;
+  
+    const processReferralRewards = async () => {
+      const totalPlayersInGame = Object.keys(room.players).length;
+      const totalConfiguredRounds = room.config.totalRounds;
+      const fullGameCompleted =
+        room.currentRoundNumber >= totalConfiguredRounds &&
+        (room.currentTurnInRound || 0) >= (room.playerOrderForCurrentRound?.length || 0) - 1;
+  
+      for (const p of Object.values(room.players)) {
+        if (!p.id || p.isAnonymous) continue;
+  
+        const userProfileRef = ref(database, `users/${p.id}`);
+        const userProfileSnap = await get(userProfileRef);
+  
+        if (!userProfileSnap.exists()) continue;
+  
+        const userProfile = userProfileSnap.val() as UserProfile;
+        if (!userProfile.referredBy || userProfile.referredBy === p.id) continue;
+  
+        const referrerId = userProfile.referredBy;
+        const referrerProfileSnap = await get(ref(database, `users/${referrerId}`));
+        if (!referrerProfileSnap.exists()) continue;
+  
+        const referrerName = referrerProfileSnap.val().displayName || 'Referrer';
+        const rewardInstanceId = `${roomId}_${p.id}`;
+        const rewardFlagRef = ref(database, `processedReferralRewards/${referrerId}/${rewardInstanceId}`);
+  
+        let rewardAwarded = false;
+        try {
+          await runTransaction(rewardFlagRef, (currentFlag) => {
+            if (currentFlag === true) {
+              console.log(
+                `[ReferralReward] Reward for ${referrerName} (referrerId: ${referrerId}) from ${p.name} (game: ${roomId}) already processed.`
+              );
+              return undefined; // Abort transaction
+            }
+            return true; // Set flag to true
+          });
+  
+          // Re-check flag after transaction to confirm this client claimed it
+          const flagSnap = await get(rewardFlagRef);
+          if (flagSnap.exists() && flagSnap.val() === true) {
+            let actualReward = 0;
+            if (!fullGameCompleted) {
+              console.log(
+                `[ReferralReward] Game for ${p.name} (referred) did not complete all ${totalConfiguredRounds} rounds. Current round: ${room.currentRoundNumber}. No reward.`
+              );
+            } else if (totalPlayersInGame < MIN_PLAYERS_FOR_REWARD) {
+              console.log(
+                `[ReferralReward] Game for ${p.name} (referred) had ${totalPlayersInGame} players, less than min ${MIN_PLAYERS_FOR_REWARD}. No reward.`
+              );
+            } else if (totalConfiguredRounds < MIN_ROUNDS_FOR_REWARD) {
+              console.log(
+                `[ReferralReward] Game for ${p.name} (referred) had ${totalConfiguredRounds} rounds configured, less than min ${MIN_ROUNDS_FOR_REWARD}. No reward.`
+              );
+            } else {
+              const calculatedReward = REFERRAL_REWARD_BASE_RATE * totalPlayersInGame * totalConfiguredRounds;
+              actualReward = Math.min(calculatedReward, MAX_REWARD_PER_GAME);
+            }
+  
+            if (actualReward > 0) {
+              // Update referrer's total earnings
+              await runTransaction(ref(database, `users/${referrerId}/totalEarnings`), (currentEarnings) => {
+                return (currentEarnings || 0) + actualReward;
+              });
+  
+              // Create transaction record
+              const transactionsRef = ref(database, `transactions/${referrerId}`);
+              const newTransaction: Transaction = {
+                date: serverTimestamp() as number,
+                description: `Reward from ${p.name} (Played ${totalConfiguredRounds} rounds with ${totalPlayersInGame} players)`,
+                amount: actualReward,
+                type: 'earning',
+                status: 'Earned',
+                currency: referrerProfileSnap.val().currency || 'INR',
+              };
+              await push(transactionsRef, newTransaction);
+  
+              // Update in-room session rewards
+              const roomPlayerReferrerRef = ref(
+                database,
+                `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`
+              );
+              await runTransaction(roomPlayerReferrerRef, (currentRoomRewards) => {
+                return (currentRoomRewards || 0) + actualReward;
+              });
+  
+              // Notify players
+              addSystemMessage(
+                `[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${
+                  referrerProfileSnap.val().currency === 'USD' ? '$' : '₹'
+                }${actualReward.toFixed(2)} because ${p.name} completed a full game!`
+              );
+  
+              console.log(
+                `[ReferralReward] Awarded ${actualReward.toFixed(2)} to ${referrerName} (referrerId: ${referrerId}) for ${p.name}'s game (room: ${roomId}).`
+              );
+              rewardAwarded = true;
+            } else {
+              console.log(
+                `[ReferralReward] No reward awarded for ${referrerName} (referrerId: ${referrerId}) for ${p.name}'s game (room: ${roomId}) due to criteria not met.`
+              );
+            }
+          } else {
+            console.log(
+              `[ReferralReward] Transaction aborted for ${referrerName} (referrerId: ${referrerId}) from ${p.name} (game: ${roomId}). Likely already processed by another client.`
+            );
+          }
+        } catch (e) {
+          console.error(
+            `[ReferralReward] Error processing reward for ${referrerName} (referrerId: ${referrerId}) from ${p.name} (game: ${roomId}):`,
+            e
+          );
+          toast({
+            title: 'Referral Reward Error',
+            description: `Failed to process reward for ${referrerName}.`,
+            variant: 'destructive',
+          });
+        }
+  
+        // Log for debugging
+        if (rewardAwarded) {
+          console.log(
+            `[ReferralReward] Successfully processed reward for referrer ${referrerName} (ID: ${referrerId}) from player ${p.name} (ID: ${p.id}) in room ${roomId}.`
+          );
+        }
+      }
+    };
+  
+    processReferralRewards().catch((e) => {
+      console.error(`[ReferralReward] Error in processReferralRewards for room ${roomId}:`, e);
+      toast({
+        title: 'Referral Processing Error',
+        description: 'An error occurred while processing referral rewards.',
+        variant: 'destructive',
+      });
+    });
+  }, [
+    room?.gameState,
+    room?.players,
+    room?.hostId,
+    room?.config,
+    room?.currentRoundNumber,
+    room?.currentTurnInRound,
+    room?.playerOrderForCurrentRound,
+    playerId,
+    roomId,
+    addSystemMessage,
+    toast,
+    platformSettings.referralProgramEnabled,
+    isLoadingPlatformSettings,
+  ]);
 
 
   if (isLoading || isLoadingPlatformSettings || !playerId || !playerName) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl text-foreground">Loading Room...</span></div>;
