@@ -1706,66 +1706,137 @@ export default function GameRoomPage() {
   }, [room?.players, playerId, toast, playerName, isAuthenticated, authPlayerId]);
 
 
-  useEffect(() => {
-    if (!room || room.gameState !== 'drawing' || room.hostId !== playerId || !room.roundEndsAt || processingTurnEndRef.current) {
-        if (roundTimerRef.current) {
-            clearTimeout(roundTimerRef.current);
-            roundTimerRef.current = null;
-        }
-        return;
-    }
+  // useEffect(() => {
+  //   if (!room || room.gameState !== 'drawing' || room.hostId !== playerId || !room.roundEndsAt || processingTurnEndRef.current) {
+  //       if (roundTimerRef.current) {
+  //           clearTimeout(roundTimerRef.current);
+  //           roundTimerRef.current = null;
+  //       }
+  //       return;
+  //   }
 
-    const now = Date.now();
-    const timeLeftMs = room.roundEndsAt - now;
-    const callInstanceId = `timerEffect_${Math.random().toString(36).substring(2, 8)}`;
-    console.log(`[${callInstanceId}] Timer effect evaluating. Time left: ${timeLeftMs}ms. Client lock: ${processingTurnEndRef.current}`);
+  //   const now = Date.now();
+  //   const timeLeftMs = room.roundEndsAt - now;
+  //   const callInstanceId = `timerEffect_${Math.random().toString(36).substring(2, 8)}`;
+  //   console.log(`[${callInstanceId}] Timer effect evaluating. Time left: ${timeLeftMs}ms. Client lock: ${processingTurnEndRef.current}`);
 
 
-    if (timeLeftMs <= 0) {
-        console.log(`[${callInstanceId}] Timer already expired or due. Calling endCurrentDrawingTurn.`);
-        if (!processingTurnEndRef.current) {
-             endCurrentDrawingTurn("Timer ran out!");
-        } else {
-             console.log(`[${callInstanceId}] Timer expired, but client lock is true. Skipping endCurrentDrawingTurn call.`);
-        }
-    } else {
-        if (roundTimerRef.current) {
-            clearTimeout(roundTimerRef.current);
-        }
-        roundTimerRef.current = setTimeout(() => {
-            console.log(`[${callInstanceId}] setTimeout triggered. Client lock: ${processingTurnEndRef.current}`);
-            if (!processingTurnEndRef.current) {
-                 get(ref(database, `rooms/${roomId}`)).then(snap => { // Re-fetch latest room state
-                    if (snap.exists()) {
-                        const latestRoomData = snap.val() as Room;
-                        if (latestRoomData.gameState === 'drawing' &&
-                            latestRoomData.hostId === playerId &&
-                            latestRoomData.roundEndsAt &&
-                            Date.now() >= latestRoomData.roundEndsAt) {
-                           console.log(`[${callInstanceId}] setTimeout: Conditions met. Calling endCurrentDrawingTurn.`);
-                           endCurrentDrawingTurn("Timer ran out!");
-                        } else {
-                           console.log(`[${callInstanceId}] setTimeout: Conditions NOT met after re-fetch. GameState: ${latestRoomData.gameState}, IsHost: ${latestRoomData.hostId === playerId}, RoundEndsAt: ${latestRoomData.roundEndsAt}`);
-                        }
-                    }
-                 });
-            } else {
-                console.log(`[${callInstanceId}] setTimeout: Client lock is true. Skipping endCurrentDrawingTurn call.`);
-            }
-            roundTimerRef.current = null;
-        }, timeLeftMs);
-        console.log(`[${callInstanceId}] Timer set for ${timeLeftMs}ms.`);
-    }
+  //   if (timeLeftMs <= 0) {
+  //       console.log(`[${callInstanceId}] Timer already expired or due. Calling endCurrentDrawingTurn.`);
+  //       if (!processingTurnEndRef.current) {
+  //            endCurrentDrawingTurn("Timer ran out!");
+  //       } else {
+  //            console.log(`[${callInstanceId}] Timer expired, but client lock is true. Skipping endCurrentDrawingTurn call.`);
+  //       }
+  //   } else {
+  //       if (roundTimerRef.current) {
+  //           clearTimeout(roundTimerRef.current);
+  //       }
+  //       roundTimerRef.current = setTimeout(() => {
+  //           console.log(`[${callInstanceId}] setTimeout triggered. Client lock: ${processingTurnEndRef.current}`);
+  //           if (!processingTurnEndRef.current) {
+  //                get(ref(database, `rooms/${roomId}`)).then(snap => { // Re-fetch latest room state
+  //                   if (snap.exists()) {
+  //                       const latestRoomData = snap.val() as Room;
+  //                       if (latestRoomData.gameState === 'drawing' &&
+  //                           latestRoomData.hostId === playerId &&
+  //                           latestRoomData.roundEndsAt &&
+  //                           Date.now() >= latestRoomData.roundEndsAt) {
+  //                          console.log(`[${callInstanceId}] setTimeout: Conditions met. Calling endCurrentDrawingTurn.`);
+  //                          endCurrentDrawingTurn("Timer ran out!");
+  //                       } else {
+  //                          console.log(`[${callInstanceId}] setTimeout: Conditions NOT met after re-fetch. GameState: ${latestRoomData.gameState}, IsHost: ${latestRoomData.hostId === playerId}, RoundEndsAt: ${latestRoomData.roundEndsAt}`);
+  //                       }
+  //                   }
+  //                });
+  //           } else {
+  //               console.log(`[${callInstanceId}] setTimeout: Client lock is true. Skipping endCurrentDrawingTurn call.`);
+  //           }
+  //           roundTimerRef.current = null;
+  //       }, timeLeftMs);
+  //       console.log(`[${callInstanceId}] Timer set for ${timeLeftMs}ms.`);
+  //   }
 
-    return () => {
-        if (roundTimerRef.current) {
-            console.log(`[${callInstanceId}] Clearing timer on effect cleanup.`);
-            clearTimeout(roundTimerRef.current);
-            roundTimerRef.current = null;
-        }
-    };
-  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentDrawingTurn, roomId]);
+  //   return () => {
+  //       if (roundTimerRef.current) {
+  //           console.log(`[${callInstanceId}] Clearing timer on effect cleanup.`);
+  //           clearTimeout(roundTimerRef.current);
+  //           roundTimerRef.current = null;
+  //       }
+  //   };
+  // }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentDrawingTurn, roomId]);
 
+    useEffect(() => {
+      if (!room || room.gameState !== 'drawing' || room.hostId !== playerId || !room.roundEndsAt || processingTurnEndRef.current) {
+          if (roundTimerRef.current) {
+              clearTimeout(roundTimerRef.current);
+              roundTimerRef.current = null;
+          }
+          return;
+      }
+
+      // Prioritize checking if all active guessers have guessed correctly
+      if (room.activeGuesserCountAtTurnStart > 0 && 
+          (room.correctGuessersThisRound || []).length >= room.activeGuesserCountAtTurnStart) {
+          if (roundTimerRef.current) {
+              clearTimeout(roundTimerRef.current);
+              roundTimerRef.current = null;
+          }
+          if (!processingTurnEndRef.current) {
+              endCurrentDrawingTurn("All active players guessed correctly!");
+          }
+          return;
+      }
+
+      const now = Date.now();
+      const timeLeftMs = room.roundEndsAt - now;
+      const callInstanceId = `timerEffect_${Math.random().toString(36).substring(2, 8)}`;
+      console.log(`[${callInstanceId}] Timer effect evaluating. Time left: ${timeLeftMs}ms. Client lock: ${processingTurnEndRef.current}`);
+
+      if (timeLeftMs <= 0) {
+          console.log(`[${callInstanceId}] Timer already expired or due. Calling endCurrentDrawingTurn.`);
+          if (!processingTurnEndRef.current) {
+              endCurrentDrawingTurn("Timer ran out!");
+          } else {
+              console.log(`[${callInstanceId}] Timer expired, but client lock is true. Skipping endCurrentDrawingTurn call.`);
+          }
+      } else {
+          if (roundTimerRef.current) {
+              clearTimeout(roundTimerRef.current);
+          }
+          roundTimerRef.current = setTimeout(() => {
+              console.log(`[${callInstanceId}] setTimeout triggered. Client lock: ${processingTurnEndRef.current}`);
+              if (!processingTurnEndRef.current) {
+                  get(ref(database, `rooms/${roomId}`)).then(snap => { // Re-fetch latest room state
+                      if (snap.exists()) {
+                          const latestRoomData = snap.val() as Room;
+                          if (latestRoomData.gameState === 'drawing' &&
+                              latestRoomData.hostId === playerId &&
+                              latestRoomData.roundEndsAt &&
+                              Date.now() >= latestRoomData.roundEndsAt) {
+                              console.log(`[${callInstanceId}] setTimeout: Conditions met. Calling endCurrentDrawingTurn.`);
+                              endCurrentDrawingTurn("Timer ran out!");
+                          } else {
+                              console.log(`[${callInstanceId}] setTimeout: Conditions NOT met after re-fetch. GameState: ${latestRoomData.gameState}, IsHost: ${latestRoomData.hostId === playerId}, RoundEndsAt: ${latestRoomData.roundEndsAt}`);
+                          }
+                      }
+                  });
+              } else {
+                  console.log(`[${callInstanceId}] setTimeout: Client lock is true. Skipping endCurrentDrawingTurn call.`);
+              }
+              roundTimerRef.current = null;
+          }, timeLeftMs);
+          console.log(`[${callInstanceId}] Timer set for ${timeLeftMs}ms.`);
+      }
+
+      return () => {
+          if (roundTimerRef.current) {
+              console.log(`[${callInstanceId}] Clearing timer on effect cleanup.`);
+              clearTimeout(roundTimerRef.current);
+              roundTimerRef.current = null;
+          }
+      };
+  }, [room?.gameState, room?.roundEndsAt, room?.hostId, playerId, endCurrentDrawingTurn, roomId, room?.activeGuesserCountAtTurnStart, room?.correctGuessersThisRound]);
 
   useEffect(() => {
     if (room?.gameState === 'round_end' && playerId === room?.hostId) {
