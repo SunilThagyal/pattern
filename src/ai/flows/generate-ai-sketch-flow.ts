@@ -57,7 +57,7 @@ const generateAISketchFlow = ai.defineFlow(
         console.log(`Sketch for "${input.chosenWord}" generated successfully with Gemini.`);
         return { imageDataUri: media.url };
       }
-      console.warn('Gemini did not return image data. Media object:', JSON.stringify(media));
+      console.warn(`Gemini did not return image data for word "${input.chosenWord}". Media object:`, JSON.stringify(media));
       throw new Error('Gemini failed to return image data.'); // Trigger fallback
 
     } catch (geminiError: any) {
@@ -67,13 +67,11 @@ const generateAISketchFlow = ai.defineFlow(
 
       if (!DEEPSEEK_API_KEY) {
         console.error("DeepSeek API key (DEEPSEEK_API_KEY) not configured in .env. Cannot fallback.");
-        throw new Error('AI sketch generation failed (Gemini failed, DeepSeek API key missing).');
+        throw new Error('AI sketch generation failed (Gemini failed, DeepSeek API key missing). Please check server logs.');
       }
 
       try {
         console.log(`Attempting to generate sketch for "${input.chosenWord}" with DeepSeek...`);
-        // Using a common placeholder model name for DeepSeek Image API.
-        // You might need to adjust this if DeepSeek uses a different model identifier.
         const deepSeekModel = "deepseek-image"; 
 
         const response = await fetch('https://api.deepseek.com/v1/images/generations', {
@@ -86,17 +84,17 @@ const generateAISketchFlow = ai.defineFlow(
             prompt: commonPromptText,
             model: deepSeekModel,
             n: 1,
-            size: '512x512', // A common reasonable size
-            response_format: 'b64_json', // Requesting base64 encoded image
+            size: '512x512', 
+            response_format: 'b64_json', 
           }),
         });
 
         if (!response.ok) {
-          let errorBody = "Could not retrieve error body.";
+          let errorBody = "Could not retrieve error body from DeepSeek.";
           try {
             errorBody = await response.text();
-          } catch (e) { /* ignore */ }
-          console.error(`DeepSeek API error for word "${input.chosenWord}": ${response.status} ${response.statusText}`, errorBody);
+          } catch (e) { /* ignore if .text() fails */ }
+          console.error(`DeepSeek API error for word "${input.chosenWord}": ${response.status} ${response.statusText}. Response body:`, errorBody);
           throw new Error(`DeepSeek API request failed with status ${response.status}.`);
         }
 
@@ -108,11 +106,11 @@ const generateAISketchFlow = ai.defineFlow(
           return { imageDataUri };
         } else {
           console.error(`DeepSeek response did not contain expected image data for "${input.chosenWord}":`, JSON.stringify(data));
-          throw new Error('DeepSeek failed to return valid image data.');
+          throw new Error('DeepSeek failed to return valid image data in the expected format.');
         }
       } catch (deepSeekError: any) {
         console.error(`Error with DeepSeek fallback for word "${input.chosenWord}":`, deepSeekError.message || deepSeekError);
-        throw new Error('AI sketch generation failed (Gemini and DeepSeek attempts both failed).');
+        throw new Error('AI sketch generation failed. Both Gemini and DeepSeek attempts failed. Please check server logs for specific API error details from each service.');
       }
     }
   }
