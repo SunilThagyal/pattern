@@ -40,19 +40,26 @@ const generateAISketchFlow = ai.defineFlow(
         prompt: `Create a simple, minimalistic black-and-white line sketch of a '${input.chosenWord}' suitable for a Pictionary-style guessing game. Do not include any text or letters in the image. The sketch should be clear, easy to understand, and serve as a good base for a player to trace or add to. Focus on iconic representation.`,
         config: {
           responseModalities: ['TEXT', 'IMAGE'], // Must provide both
+          safetySettings: [ // Added safety settings
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+          ],
         },
       });
 
       if (media && media.url) {
         return { imageDataUri: media.url };
       } else {
-        console.error('AI did not return image data.');
+        console.error('AI did not return image data. Media object:', media);
         throw new Error('AI failed to generate sketch image data.');
       }
     } catch (error) {
-      console.error("Error in generateAISketchFlow:", error);
+      console.error("Error in generateAISketchFlow (original error):", error);
       // Consider a default fallback image data URI if needed, or rethrow.
       throw new Error('Failed to generate AI sketch due to an internal error.');
     }
   }
 );
+
