@@ -1999,7 +1999,7 @@ export default function GameRoomPage() {
                     delete toastTimeoutsRef.current[rt.uniqueId];
                 }
             });
-
+``
             const timeoutId = setTimeout(() => {
                 setToastMessages(currentToasts => currentToasts.filter(t => t.uniqueId !== newToastIdWithCounter));
                 if (toastTimeoutsRef.current[newToastIdWithCounter]) {
