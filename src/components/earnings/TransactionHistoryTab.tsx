@@ -103,7 +103,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                         return (currentEarnings || 0) + refundAmount;
                     });
 
-                    toast({ title: "Withdrawal Rejected & Refunded", description: `${tx.currency === 'USD' ? '$' : '₹'}${refundAmount.toFixed(2)} has been credited back to your balance for rejected withdrawal.` });
+                    toast({ title: "Withdrawal Rejected & Refunded", description: `${tx.currency === 'USD' ? '$' : '₹'}${refundAmount.toFixed(tx.currency === 'USD' ? 6 : 2)} has been credited back to your balance for rejected withdrawal.` });
                     processedRefundsRef.current.add(tx.id);
                 } catch (error) {
                     console.error("[TransactionHistoryTab] Error processing simulated refund:", error);
@@ -297,6 +297,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
               <TableBody>
                 {transactionsToDisplay.map((tx) => {
                   const txCurrencySymbol = tx.currency === 'USD' ? '$' : '₹';
+                  const decimalPlaces = tx.currency === 'USD' ? 6 : 2;
                   return (
                     <TableRow
                       key={tx.id}
@@ -306,7 +307,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
                       <TableCell>{format(new Date(tx.date), "PP pp")}</TableCell>
                       <TableCell className="font-medium">{tx.description}</TableCell>
                       <TableCell className={cn("text-right font-semibold", tx.type === 'earning' ? 'text-green-600' : 'text-red-600')}>
-                        {tx.type === 'earning' ? '+' : ''}{txCurrencySymbol}{tx.amount.toFixed(2)}
+                        {tx.type === 'earning' ? '+' : ''}{txCurrencySymbol}{tx.amount.toFixed(decimalPlaces)}
                       </TableCell>
                       <TableCell className="text-center">
                          <Badge variant={getStatusBadgeVariant(tx.status)} className={getStatusBadgeClass(tx.status)}>
@@ -353,7 +354,7 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
             <div className="py-4 space-y-3 text-sm">
               <div className="flex justify-between"><span>Date:</span> <span>{format(new Date(selectedTransaction.date), "PPP ppp")}</span></div>
               <div className="flex justify-between"><span>Description:</span> <span className="text-right">{selectedTransaction.description}</span></div>
-              <div className="flex justify-between"><span>Amount:</span> <span className={cn(selectedTransaction.type === 'earning' ? 'text-green-600' : 'text-red-600', "font-semibold")}>{selectedTransaction.type === 'earning' ? '+' : ''}{selectedTransaction.currency === 'USD' ? '$' : '₹'}{selectedTransaction.amount.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span>Amount:</span> <span className={cn(selectedTransaction.type === 'earning' ? 'text-green-600' : 'text-red-600', "font-semibold")}>{selectedTransaction.type === 'earning' ? '+' : ''}{selectedTransaction.currency === 'USD' ? '$' : '₹'}{selectedTransaction.amount.toFixed(selectedTransaction.currency === 'USD' ? 6 : 2)}</span></div>
               <div className="flex justify-between"><span>Type:</span> <span className="capitalize">{selectedTransaction.type}</span></div>
               <div className="flex justify-between items-center"><span>Status:</span> <Badge variant={getStatusBadgeVariant(selectedTransaction.status)} className={getStatusBadgeClass(selectedTransaction.status)}>{selectedTransaction.status}</Badge></div>
               {selectedTransaction.notes && <div className="flex justify-between"><span>Notes:</span> <span className="text-xs text-muted-foreground text-right">{selectedTransaction.notes}</span></div>}
@@ -391,3 +392,4 @@ export default function TransactionHistoryTab({ authUserUid }: TransactionHistor
     </div>
   );
 }
+

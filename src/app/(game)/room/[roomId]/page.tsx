@@ -1996,6 +1996,131 @@ export default function GameRoomPage() {
 
   const processedGameIdsRef = useRef<Set<string>>(new Set());
 
+  // useEffect(() => {
+  //   if (
+  //     !room ||
+  //     room.gameState !== 'game_over' ||
+  //     playerId !== room.hostId ||
+  //     !room.players ||
+  //     !room.config ||
+  //     !platformSettings.referralProgramEnabled ||
+  //     isLoadingPlatformSettings
+  //   ) {
+  //     return;
+  //   }
+
+  //   const gameSessionId = `${room.id}_${room.createdAt}`;
+  //   if (processedGameIdsRef.current.has(gameSessionId)) {
+  //     return;
+  //   }
+
+  //   processedGameIdsRef.current.add(gameSessionId);
+
+  //   const totalPlayersInGame = Object.keys(room.players).length;
+  //   const totalConfiguredRounds = room.config.totalRounds;
+  //   const fullGameCompleted =
+  //     room.currentRoundNumber > totalConfiguredRounds ||
+  //     (room.currentRoundNumber === totalConfiguredRounds &&
+  //       (room.currentTurnInRound || 0) >= (room.playerOrderForCurrentRound?.length || 0) - 1);
+
+  //   Object.values(room.players).forEach(async (p) => {
+  //     if (p.id && !p.isAnonymous) {
+  //       const userProfileRef = ref(database, `users/${p.id}`);
+  //       const userProfileSnap = await get(userProfileRef);
+
+  //       if (userProfileSnap.exists()) {
+  //         const userProfile = userProfileSnap.val() as UserProfile;
+  //         if (userProfile.referredBy && userProfile.referredBy !== p.id) {
+  //           const referrerId = userProfile.referredBy;
+  //           const referrerProfileSnap = await get(ref(database, `users/${referrerId}`));
+
+  //           if (referrerProfileSnap.exists()) {
+  //             const referrerName = referrerProfileSnap.val().displayName || 'Referrer';
+  //             let actualReward = 0;
+
+  //             if (!fullGameCompleted) {
+  //               console.log(
+  //                 `[ReferralReward] Game for ${p.name} (referred) did not complete all ${totalConfiguredRounds} rounds. Current round: ${room.currentRoundNumber}. No reward.`
+  //               );
+  //             } else if (totalPlayersInGame < MIN_PLAYERS_FOR_REWARD) {
+  //               console.log(
+  //                 `[ReferralReward] Game for ${p.name} (referred) had ${totalPlayersInGame} players, less than min ${MIN_PLAYERS_FOR_REWARD}. No reward.`
+  //               );
+  //             } else if (totalConfiguredRounds < MIN_ROUNDS_FOR_REWARD) {
+  //               console.log(
+  //                 `[ReferralReward] Game for ${p.name} (referred) had ${totalConfiguredRounds} rounds configured, less than min ${MIN_ROUNDS_FOR_REWARD}. No reward.`
+  //               );
+  //             } else {
+  //               const calculatedReward = REFERRAL_REWARD_BASE_RATE * totalPlayersInGame * totalConfiguredRounds * 1;
+  //               actualReward = Math.min(calculatedReward, MAX_REWARD_PER_GAME);
+  //             }
+
+  //             if (actualReward > 0) {
+  //               try {
+  //                 await runTransaction(ref(database, `users/${referrerId}/totalEarnings`), (currentEarnings) =>
+  //                   (currentEarnings || 0) + actualReward
+  //                 );
+
+  //                 const transactionsRef = ref(database, `transactions/${referrerId}`);
+  //                 const newTransaction: Transaction = {
+  //                   date: serverTimestamp() as number,
+  //                   description: `Reward from ${p.name} (Played ${totalConfiguredRounds} rounds with ${totalPlayersInGame} players)`,
+  //                   amount: actualReward,
+  //                   type: 'earning',
+  //                   status: 'Earned',
+  //                   currency: referrerProfileSnap.val().currency || 'INR',
+  //                 };
+  //                 await push(transactionsRef, newTransaction);
+
+  //                 const roomPlayerReferrerRef = ref(
+  //                   database,
+  //                   `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`
+  //                 );
+  //                 await runTransaction(roomPlayerReferrerRef, (currentRoomRewards) =>
+  //                   (currentRoomRewards || 0) + actualReward
+  //                 );
+
+  //                 addSystemMessage(
+  //                   `[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${
+  //                     referrerProfileSnap.val().currency === 'USD' ? '$' : '₹'
+  //                   }${actualReward.toFixed(2)} because ${p.name} completed a full game!`
+  //                 );
+  //               } catch (e) {
+  //                 console.error('Error awarding dynamic referral reward:', e);
+  //                 toast({
+  //                   title: 'Referral Reward Error',
+  //                   description: `Failed to process reward for ${referrerName}.`,
+  //                   variant: 'destructive',
+  //                 });
+  //               }
+  //             } else {
+  //               console.log(
+  //                 `[ReferralReward] Referrer ${referrerName} for player ${p.name} earned no reward based on game engagement criteria.`
+  //               );
+  //             }
+  //           }
+  //         }
+  //       }
+  //     }
+  //   });
+  // }, [
+  //   room?.gameState,
+  //   room?.players,
+  //   playerId,
+  //   room?.hostId,
+  //   room?.config,
+  //   room?.currentRoundNumber,
+  //   room?.currentTurnInRound,
+  //   room?.playerOrderForCurrentRound,
+  //   room?.id,
+  //   room?.createdAt,
+  //   roomId,
+  //   addSystemMessage,
+  //   toast,
+  //   platformSettings.referralProgramEnabled,
+  //   isLoadingPlatformSettings,
+  // ]);
+  // 
   useEffect(() => {
     if (
       !room ||
@@ -2008,59 +2133,63 @@ export default function GameRoomPage() {
     ) {
       return;
     }
-
+  
     const gameSessionId = `${room.id}_${room.createdAt}`;
     if (processedGameIdsRef.current.has(gameSessionId)) {
       return;
     }
-
+  
     processedGameIdsRef.current.add(gameSessionId);
-
+  
     const totalPlayersInGame = Object.keys(room.players).length;
     const totalConfiguredRounds = room.config.totalRounds;
     const fullGameCompleted =
       room.currentRoundNumber > totalConfiguredRounds ||
       (room.currentRoundNumber === totalConfiguredRounds &&
         (room.currentTurnInRound || 0) >= (room.playerOrderForCurrentRound?.length || 0) - 1);
-
+  
+    // Define conversion rate
+    const USD_TO_INR_RATE = 83;
+  
     Object.values(room.players).forEach(async (p) => {
       if (p.id && !p.isAnonymous) {
         const userProfileRef = ref(database, `users/${p.id}`);
         const userProfileSnap = await get(userProfileRef);
-
+  
         if (userProfileSnap.exists()) {
           const userProfile = userProfileSnap.val() as UserProfile;
           if (userProfile.referredBy && userProfile.referredBy !== p.id) {
             const referrerId = userProfile.referredBy;
             const referrerProfileSnap = await get(ref(database, `users/${referrerId}`));
-
+  
             if (referrerProfileSnap.exists()) {
               const referrerName = referrerProfileSnap.val().displayName || 'Referrer';
+              const referrerCurrency = referrerProfileSnap.val().currency || 'INR';
               let actualReward = 0;
-
+  
               if (!fullGameCompleted) {
-                console.log(
-                  `[ReferralReward] Game for ${p.name} (referred) did not complete all ${totalConfiguredRounds} rounds. Current round: ${room.currentRoundNumber}. No reward.`
-                );
+                console.log(`[ReferralReward] Game for ${p.name} did not complete all ${totalConfiguredRounds} rounds.`);
               } else if (totalPlayersInGame < MIN_PLAYERS_FOR_REWARD) {
-                console.log(
-                  `[ReferralReward] Game for ${p.name} (referred) had ${totalPlayersInGame} players, less than min ${MIN_PLAYERS_FOR_REWARD}. No reward.`
-                );
+                console.log(`[ReferralReward] Game had ${totalPlayersInGame} players, less than min ${MIN_PLAYERS_FOR_REWARD}.`);
               } else if (totalConfiguredRounds < MIN_ROUNDS_FOR_REWARD) {
-                console.log(
-                  `[ReferralReward] Game for ${p.name} (referred) had ${totalConfiguredRounds} rounds configured, less than min ${MIN_ROUNDS_FOR_REWARD}. No reward.`
-                );
+                console.log(`[ReferralReward] Game had ${totalConfiguredRounds} rounds, less than min ${MIN_ROUNDS_FOR_REWARD}.`);
               } else {
                 const calculatedReward = REFERRAL_REWARD_BASE_RATE * totalPlayersInGame * totalConfiguredRounds * 1;
-                actualReward = Math.min(calculatedReward, MAX_REWARD_PER_GAME);
+                const maxReward = MAX_REWARD_PER_GAME;
+  
+                if (referrerCurrency === 'USD') {
+                  actualReward = Math.min(calculatedReward / USD_TO_INR_RATE, maxReward / USD_TO_INR_RATE);
+                } else {
+                  actualReward = Math.min(calculatedReward, maxReward);
+                }
               }
-
+  
               if (actualReward > 0) {
                 try {
                   await runTransaction(ref(database, `users/${referrerId}/totalEarnings`), (currentEarnings) =>
                     (currentEarnings || 0) + actualReward
                   );
-
+  
                   const transactionsRef = ref(database, `transactions/${referrerId}`);
                   const newTransaction: Transaction = {
                     date: serverTimestamp() as number,
@@ -2068,10 +2197,10 @@ export default function GameRoomPage() {
                     amount: actualReward,
                     type: 'earning',
                     status: 'Earned',
-                    currency: referrerProfileSnap.val().currency || 'INR',
+                    currency: referrerCurrency,
                   };
                   await push(transactionsRef, newTransaction);
-
+  
                   const roomPlayerReferrerRef = ref(
                     database,
                     `rooms/${roomId}/players/${referrerId}/referralRewardsThisSession`
@@ -2079,11 +2208,9 @@ export default function GameRoomPage() {
                   await runTransaction(roomPlayerReferrerRef, (currentRoomRewards) =>
                     (currentRoomRewards || 0) + actualReward
                   );
-
+  
                   addSystemMessage(
-                    `[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${
-                      referrerProfileSnap.val().currency === 'USD' ? '$' : '₹'
-                    }${actualReward.toFixed(2)} because ${p.name} completed a full game!`
+                    `[[SYSTEM_REFERRAL_REWARD]]${referrerName} earned ${referrerCurrency === 'USD' ? '$' : '₹'}${actualReward.toFixed(2)} because ${p.name} completed a full game!`
                   );
                 } catch (e) {
                   console.error('Error awarding dynamic referral reward:', e);
@@ -2094,9 +2221,7 @@ export default function GameRoomPage() {
                   });
                 }
               } else {
-                console.log(
-                  `[ReferralReward] Referrer ${referrerName} for player ${p.name} earned no reward based on game engagement criteria.`
-                );
+                console.log(`[ReferralReward] No reward for ${referrerName} for player ${p.name}.`);
               }
             }
           }
@@ -2120,7 +2245,7 @@ export default function GameRoomPage() {
     platformSettings.referralProgramEnabled,
     isLoadingPlatformSettings,
   ]);
-
+  // 
   if (isLoading || isLoadingPlatformSettings || !playerId || !playerName) return <div className="flex items-center justify-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /> <span className="ml-4 text-xl text-foreground">Loading Room...</span></div>;
   if (error) return <div className="text-center text-destructive p-8 bg-destructive/10 border border-destructive/20 rounded-md h-screen flex flex-col justify-center items-center"><AlertCircle className="mx-auto h-12 w-12 mb-4" /> <h2 className="text-2xl font-semibold mb-2">Error Loading Room</h2><p>{error}</p><Button onClick={() => routerHook.push('/')} className="mt-4">Go Home</Button></div>;
   if (!room || !room.config) return <div className="text-center p-8 h-screen flex flex-col justify-center items-center">Room data is not available or incomplete. <Link href="/" className="text-primary hover:underline">Go Home</Link></div>;
