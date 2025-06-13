@@ -31,7 +31,7 @@ export default function RootLayout({
     <html lang="en" className={inter.variable}>
       <head>
         <meta name="description" content={`Join the fun in ${APP_NAME}! Draw, guess, and challenge friends in this exciting real-time multiplayer game with AI-powered features.`} />
-        <meta name="keywords" content="drawing game, guess game, multiplayer, online game, Pictionary, AI drawing, sketch game, Drawly" />
+        <meta name="keywords" content={`drawing game, guess game, multiplayer, online game, Pictionary, AI drawing, sketch game, ${APP_NAME}`} />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
       </head>

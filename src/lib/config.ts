@@ -1,5 +1,5 @@
 
-export const APP_NAME = "Pattern Party";
+export const APP_NAME = "SuviPlay";
 
 // Referral Reward Configuration
 export const REFERRAL_REWARD_BASE_RATE = 0.02; // e.g., ₹0.02 per player per round
