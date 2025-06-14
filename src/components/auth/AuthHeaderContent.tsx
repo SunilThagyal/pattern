@@ -5,15 +5,19 @@ import { CardTitle, CardDescription } from '@/components/ui/card';
 import { APP_NAME } from '@/lib/config';
 
 interface AuthHeaderContentProps {
-  mode: 'login' | 'signup' | 'resetPassword' | 'awaitingVerification';
+  mode: 'login' | 'signup' | 'resetPassword' | 'awaitingVerification' | 'postGoogleSignup';
   unverifiedUserEmail?: string | null;
+  displayNameForPostSignup?: string | null; // New prop
 }
 
-export function AuthHeaderContent({ mode, unverifiedUserEmail }: AuthHeaderContentProps) {
+export function AuthHeaderContent({ mode, unverifiedUserEmail, displayNameForPostSignup }: AuthHeaderContentProps) {
   let titleText = '';
   let descriptionText = '';
 
-  if (mode === 'awaitingVerification') {
+  if (mode === 'postGoogleSignup') {
+    titleText = `Welcome, ${displayNameForPostSignup || 'User'}!`;
+    descriptionText = `Just a few more details to complete your ${APP_NAME} account setup.`;
+  } else if (mode === 'awaitingVerification') {
     titleText = "Verify Your Email";
     descriptionText = `Your email address ${unverifiedUserEmail ? `"${unverifiedUserEmail}"` : ''} is not verified. A verification email has been sent. Please check your inbox (and spam folder).`;
   } else if (mode === 'resetPassword') {
