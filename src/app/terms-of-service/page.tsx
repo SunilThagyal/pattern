@@ -1,4 +1,3 @@
-
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { APP_NAME } from '@/lib/config';
 import { FileText, Home } from 'lucide-react';
@@ -14,7 +13,7 @@ export default function TermsOfServicePage() {
             <FileText className="mr-3 h-8 w-8 text-primary" />
             Terms of Service for {APP_NAME}
           </CardTitle>
-          <CardDescription>Last Updated: [Date]</CardDescription>
+          <CardDescription>Last Updated: [06/14/2025]</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-muted-foreground">
           <p>
@@ -56,10 +55,10 @@ export default function TermsOfServicePage() {
             <li>Impersonate any person or entity.</li>
             <li>Transmit any worms or viruses or any code of a destructive nature.</li>
             <li>Violate any applicable local, state, national, or international law.</li>
+            <li>Engage in cheating, unauthorized access, or any activity that manipulates or exploits the Service, including but not limited to the referral program, game mechanics, or reward systems.</li>
           </ul>
           <p>
-            We reserve the right to terminate your access to the Service for violating any of the
-            prohibited uses.
+            We reserve the right to terminate your access to the Service, block withdrawals, or take other actions as deemed necessary for violating any of the prohibited uses, including cheating or unauthorized access.
           </p>
 
           <h2 className="text-xl font-semibold text-foreground pt-4">3. Intellectual Property</h2>
@@ -76,41 +75,53 @@ export default function TermsOfServicePage() {
             with operating and promoting the Service.
           </p>
 
-          <h2 className="text-xl font-semibold text-foreground pt-4">4. Termination</h2>
+          <h2 className="text-xl font-semibold text-foreground pt-4">4. Referral Program and Rewards</h2>
+          <p>
+            The Service offers a referral program where users may earn rewards by inviting others to join and play games with more than two players. Upon successful completion of a game, participants may receive rewards as determined by the Service.
+          </p>
+          <p>
+            Rewards earned through the referral program or gameplay may be eligible for withdrawal, subject to our withdrawal policies. We reserve the right to verify the legitimacy of all reward claims and withdrawals. Any attempt to abuse the referral program or reward system, including through cheating or fraudulent activity, may result in immediate account termination, forfeiture of rewards, and/or blocking of withdrawals.
+          </p>
+
+          <h2 className="text-xl font-semibold text-foreground pt-4">5. Termination</h2>
           <p>
             We may terminate or suspend your account and bar access to the Service immediately,
             without prior notice or liability, under our sole discretion, for any reason whatsoever
-            and without limitation, including but not limited to a breach of the Terms.
+            and without limitation, including but not limited to a breach of the Terms, cheating, or unauthorized access. Termination may also result in the forfeiture of any earned rewards and the blocking of withdrawal requests.
           </p>
 
-          <h2 className="text-xl font-semibold text-foreground pt-4">5. Limitation Of Liability</h2>
+          <h2 className="text-xl font-semibold text-foreground pt-4">6. Limitation Of Liability</h2>
           <p>
             In no event shall [Your Company Name/Your Name], nor its directors, employees, partners,
             agents, suppliers, or affiliates, be liable for any indirect, incidental, special,
             consequential or punitive damages, including without limitation, loss of profits, data,
             use, goodwill, or other intangible losses, resulting from your access to or use of or
-            inability to access or use the Service.
+            inability to access or use the Service, including any issues related to rewards or withdrawals.
           </p>
           <p className="font-bold mt-2">Placeholder: Add detailed clauses here, including disclaimers of warranties.</p>
 
+          <h2 className="text-xl font-semibold text-foreground pt-4">7. Third-Party Services</h2>
+          <p>
+            The Service uses Google Ads and Google Analytics to provide advertisements and analyze usage data. By using the Service, you consent to the collection and use of your data by these third-party services in accordance with their respective privacy policies. We are not responsible for the practices of these third-party services.
+          </p>
 
-          <h2 className="text-xl font-semibold text-foreground pt-4">6. Governing Law</h2>
+          <h2 className="text-xl font-semibold text-foreground pt-4">8. Governing Law</h2>
           <p>
             These Terms shall be governed and construed in accordance with the laws of [Your Jurisdiction],
             without regard to its conflict of law provisions.
           </p>
 
-          <h2 className="text-xl font-semibold text-foreground pt-4">7. Changes</h2>
+          <h2 className="text-xl font-semibold text-foreground pt-4">9. Changes</h2>
           <p>
             We reserve the right, at our sole discretion, to modify or replace these Terms at any time.
             If a revision is material we will provide at least 30 days' notice prior to any new terms
             taking effect. What constitutes a material change will be determined at our sole discretion.
           </p>
 
-          <h2 className="text-xl font-semibold text-foreground pt-4">8. Contact Us</h2>
+          <h2 className="text-xl font-semibold text-foreground pt-4">10. Contact Us</h2>
           <p>
             If you have any questions about these Terms, please contact us through our
-            <a href="/contact-us" className="text-primary hover:underline">Contact Us page</a>.
+            <a href="/contact-us" className="text-primary hover:underline"> Contact Us page</a>.
           </p>
           <p className="pt-6 text-xs">
             <strong>Disclaimer:</strong> This is a template Terms of Service and may not be suitable for
