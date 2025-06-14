@@ -265,10 +265,6 @@ export default function AuthForm({
 
           if (referralProgramEnabled && newShortReferralCode) {
               newUserProfileData.shortReferralCode = newShortReferralCode;
-          } else if (referralProgramEnabled && !newShortReferralCode) {
-              // Do not add shortReferralCode to the object if it's empty
-          } else if (!referralProgramEnabled) {
-              // Do not add shortReferralCode if program is disabled
           }
           
           if (referralProgramEnabled) {
@@ -357,7 +353,8 @@ export default function AuthForm({
     console.log('[AuthForm GoogleAuth] Initial passedReferralCodeProp:', passedReferralCodeProp);
     try {
       console.log('[AuthForm GoogleAuth] Calling signInWithPopup...');
-      const result = await signInWithPopup(auth, new GoogleAuthProvider());
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
       console.log('[AuthForm GoogleAuth] signInWithPopup successful. Result User:', result.user);
       const user = result.user;
       if (user) {
@@ -399,10 +396,6 @@ export default function AuthForm({
           
           if (referralProgramEnabled && newShortReferralCode) {
               newUserProfileData.shortReferralCode = newShortReferralCode;
-          } else if (referralProgramEnabled && !newShortReferralCode) {
-             // Do not add shortReferralCode to the object if it's empty
-          } else if (!referralProgramEnabled) {
-            // Do not add shortReferralCode if program is disabled
           }
 
           if (referralProgramEnabled) {
@@ -463,9 +456,15 @@ export default function AuthForm({
       }
     } catch (fbError: any) {
       console.error('[AuthForm GoogleAuth] Error during signInWithPopup or subsequent processing:', fbError);
-      if (fbError.code === 'auth/popup-closed-by-user') { setError(null); toast({ title: "Google Sign-In Cancelled", description: "You closed the Google Sign-In window.", variant: "default" }); }
-      else if (fbError.code === 'auth/account-exists-with-different-credential') { setError("An account already exists with this email, but using a different sign-in method (e.g., email/password). Please log in with that method."); toast({ title: "Account Conflict", description: "Email already in use with a different sign-in method.", variant: "destructive", duration: 7000 }); }
-      else setError(fbError.message || "Google Sign-In failed. Please try again.");
+      if (fbError.code === 'auth/popup-closed-by-user') { 
+        setError("Google Sign-In failed. This might be due to a pop-up blocker or a Firebase/Google Cloud configuration issue (check Authorized Domains and OAuth settings). Please ensure pop-ups are allowed for this site."); 
+        toast({ title: "Google Sign-In Problem", description: "Pop-up might have been blocked or there's a configuration issue. See message below button for details.", variant: "destructive", duration: 10000 });
+      } else if (fbError.code === 'auth/account-exists-with-different-credential') { 
+        setError("An account already exists with this email, but using a different sign-in method (e.g., email/password). Please log in with that method."); 
+        toast({ title: "Account Conflict", description: "Email already in use with a different sign-in method.", variant: "destructive", duration: 7000 }); 
+      } else {
+        setError(fbError.message || "Google Sign-In failed. Please try again.");
+      }
     } finally { 
       console.log('[AuthForm GoogleAuth] Google Sign-In process finished. Setting isLoadingGoogle to false.');
       setIsLoadingGoogle(false); 
@@ -680,3 +679,4 @@ export default function AuthForm({
     </div>
   );
 }
+
