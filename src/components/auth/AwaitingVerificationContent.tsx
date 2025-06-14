@@ -7,8 +7,10 @@ import { Label } from '@/components/ui/label';
 import { Loader2, RefreshCw, Mail, LogOut } from 'lucide-react';
 import Link from 'next/link';
 import { AuthError } from './AuthError';
+import VerificationWatcher from './VerificationWatcher'; // Import the new component
 
 interface AwaitingVerificationContentProps {
+  unverifiedUserEmail: string | null;
   onResendVerificationEmail: () => void;
   isResendingVerification: boolean;
   newEmailForVerification: string;
@@ -16,18 +18,26 @@ interface AwaitingVerificationContentProps {
   onUpdateEmail: () => void;
   isUpdatingEmail: boolean;
   onLogout: () => void;
-  errorMessage: string | null; // Specific error for this view
+  errorMessage: string | null;
+  onUserVerifiedAndModalConfirmed: () => void; // New prop
 }
 
 export function AwaitingVerificationContent({
+  unverifiedUserEmail,
   onResendVerificationEmail, isResendingVerification,
   newEmailForVerification, onNewEmailChange, onUpdateEmail, isUpdatingEmail,
-  onLogout, errorMessage
+  onLogout, errorMessage,
+  onUserVerifiedAndModalConfirmed // Destructure new prop
 }: AwaitingVerificationContentProps) {
   const isProcessing = isResendingVerification || isUpdatingEmail;
 
   return (
     <div className="space-y-4">
+      {/* Render VerificationWatcher to start polling */}
+      <VerificationWatcher
+        onUserVerifiedAndModalConfirmed={onUserVerifiedAndModalConfirmed}
+        userEmailForModal={unverifiedUserEmail}
+      />
       <AuthError message={errorMessage} />
       <Button onClick={onResendVerificationEmail} className="w-full" disabled={isProcessing}>
         {isResendingVerification ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <RefreshCw className="mr-2 h-5 w-5" />}
