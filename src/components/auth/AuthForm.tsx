@@ -157,7 +157,6 @@ export default function AuthForm({
     if (isSigningUp !== propDrivenIsSigningUp) {
         setIsSigningUp(propDrivenIsSigningUp);
     }
-    // Only update authActionState if not currently awaiting verification, to prevent interrupting that flow
     if (authActionState !== 'awaitingVerification' && authActionState !== propDrivenAuthAction) {
         setAuthActionState(propDrivenAuthAction);
     }
@@ -166,7 +165,6 @@ export default function AuthForm({
 
 
   useEffect(() => {
-    // Clear errors only when mode changes, but not if we are moving *to* awaitingVerification
     if (authActionState !== 'awaitingVerification') {
       setError(null);
       setDisplayNameError(''); setEmailError(''); setPasswordError('');
@@ -182,7 +180,7 @@ export default function AuthForm({
   const handleUserVerifiedAndLogin = async () => {
     if (!auth.currentUser || !auth.currentUser.emailVerified) {
       toast({ title: "Verification Error", description: "Email not verified. Please try again.", variant: "destructive" });
-      setAuthActionState('default'); // Go back to login/signup
+      setAuthActionState('default'); 
       return;
     }
     const user = auth.currentUser;
@@ -196,7 +194,7 @@ export default function AuthForm({
       
       toast({ title: "Email Verified & Login Successful!", description: `Welcome, ${nameFromDB}!` });
       router.push(redirectAfterAuth || '/');
-      setAuthActionState('default'); // Reset auth form state, though redirect might unmount
+      setAuthActionState('default'); 
     } catch (dbError) {
         console.error("Error fetching profile after verification:", dbError);
         toast({ title: "Login Error", description: "Could not finalize login. Please try manually.", variant: "destructive" });
@@ -246,29 +244,32 @@ export default function AuthForm({
           let attempts = 0; 
           if (referralProgramEnabled) {
               let codeExists = true; 
-              while(codeExists && attempts < 10) { // Prevent infinite loop
-                  newShortReferralCode = generateShortAlphaNumericCode(5); // 5-char code
+              while(codeExists && attempts < 10) { 
+                  newShortReferralCode = generateShortAlphaNumericCode(5); 
                   const shortCodeRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
                   codeExists = (await get(shortCodeRef)).exists();
                   attempts++;
               }
               if (codeExists) {
                   console.warn("Could not generate unique short referral code after multiple attempts.");
-                  newShortReferralCode = ''; // Fallback to no short code if unique cannot be found
+                  newShortReferralCode = ''; 
               }
           }
-          const newUserProfile: UserProfile = {
+          const newUserProfileData: Partial<UserProfile> = { // Use Partial for conditional properties
             userId: user.uid, displayName: displayName.trim(), email: user.email || email,
-            referralCode: user.uid, // Full UID as primary referral code
-            shortReferralCode: referralProgramEnabled && newShortReferralCode ? newShortReferralCode : undefined,
+            referralCode: user.uid, 
             totalEarnings: 0, createdAt: serverTimestamp() as number, country: country,
             currency: country === 'India' ? 'INR' : 'USD', gender: gender as UserProfile['gender'],
             countryCode: countryCode.trim(), phoneNumber: phoneNumber.trim(), canWithdraw: true,
           };
+          if (referralProgramEnabled && newShortReferralCode) {
+              newUserProfileData.shortReferralCode = newShortReferralCode;
+          }
+          
           if (referralProgramEnabled) {
             let actualReferrerUid: string | null = null;
             const deviceOriginalReferrerUid = localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY);
-            const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); // Use the input state
+            const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase(); 
             
             if (deviceOriginalReferrerUid) {
               actualReferrerUid = deviceOriginalReferrerUid;
@@ -292,14 +293,14 @@ export default function AuthForm({
             }
             
             if (actualReferrerUid) {
-              newUserProfile.referredBy = actualReferrerUid;
+              newUserProfileData.referredBy = actualReferrerUid;
               await set(ref(database, `referrals/${actualReferrerUid}/${user.uid}`), {
                 referredUserName: displayName.trim(),
                 timestamp: serverTimestamp()
               });
             }
           }
-          await set(ref(database, `users/${user.uid}`), newUserProfile);
+          await set(ref(database, `users/${user.uid}`), newUserProfileData);
           if (referralProgramEnabled && newShortReferralCode) {
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
           }
@@ -342,6 +343,7 @@ export default function AuthForm({
   
   const handleGoogleAuth = async () => {
     setIsLoadingGoogle(true); setError(null);
+    console.log('[AuthForm GoogleAuth] Initial passedReferralCodeProp:', passedReferralCodeProp);
     try {
       const result = await signInWithPopup(auth, new GoogleAuthProvider());
       const user = result.user;
@@ -350,14 +352,14 @@ export default function AuthForm({
         let nameFromAuth = user.displayName || "Google User";
         if (!user.email) { toast({ title: "Email Missing", description: "Google account did not provide an email.", variant: "destructive" }); setIsLoadingGoogle(false); return; }
         
-        if (profileSnap.exists()) { // Existing user
-          nameFromAuth = profileSnap.val().displayName || nameFromAuth; // Use DB name if available
+        if (profileSnap.exists()) { 
+          nameFromAuth = profileSnap.val().displayName || nameFromAuth; 
           localStorage.setItem('drawlyAuthStatus', 'loggedIn'); 
           localStorage.setItem('drawlyUserDisplayName', nameFromAuth); 
           localStorage.setItem('drawlyUserUid', user.uid);
           toast({ title: "Login Successful!", description: `Welcome, ${nameFromAuth}!` });
           router.push(redirectAfterAuth || '/');
-        } else { // New user via Google
+        } else { 
           let newShortReferralCode = '';
           let attempts = 0;
           if (referralProgramEnabled) {
@@ -369,48 +371,51 @@ export default function AuthForm({
             if (codeExists) console.warn("Could not generate unique short referral code for Google user."); newShortReferralCode = '';
           }
 
-          const newUserProfile: UserProfile = {
+          const newUserProfileData: Partial<UserProfile> = { // Use Partial
             userId: user.uid, displayName: nameFromAuth, email: user.email, referralCode: user.uid,
-            shortReferralCode: referralProgramEnabled && newShortReferralCode ? newShortReferralCode : undefined,
-            totalEarnings: 0, createdAt: serverTimestamp() as number, country: 'India', currency: 'INR', // Default, can be changed
-            gender: 'prefer_not_to_say', countryCode: '', phoneNumber: '', canWithdraw: true, // Default empty, user can fill later
+            totalEarnings: 0, createdAt: serverTimestamp() as number, country: 'India', currency: 'INR', 
+            gender: 'prefer_not_to_say', countryCode: '', phoneNumber: '', canWithdraw: true,
           };
+          if (referralProgramEnabled && newShortReferralCode) {
+              newUserProfileData.shortReferralCode = newShortReferralCode;
+          }
 
           if (referralProgramEnabled) {
             let actualReferrerUid: string | null = null;
             const deviceReferrer = localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY);
-            const propReferrerShort = passedReferralCodeProp?.trim().toUpperCase(); // Use prop if available
+            const propReferrerShort = passedReferralCodeProp?.trim().toUpperCase();
+            console.log('[AuthForm GoogleAuth] propReferrerShort for Google new user:', propReferrerShort);
             
-            if (propReferrerShort) { // Prioritize referral code from URL/prop
+            if (propReferrerShort) { 
                 const mapSnap = await get(ref(database, `shortCodeToUserIdMap/${propReferrerShort}`));
                 if (mapSnap.exists()) {
                     const foundUid = mapSnap.val() as string;
                     if (foundUid !== user.uid) {
                         actualReferrerUid = foundUid;
-                        if (!deviceReferrer || deviceReferrer !== foundUid) { // Update device original if different or not set
+                        if (!deviceReferrer || deviceReferrer !== foundUid) { 
                             localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundUid);
                         }
+                    } else {
+                        toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "destructive"});
                     }
+                } else {
+                    toast({title: "Referral Code Invalid", description: `The code "${propReferrerShort}" is not valid.`, variant: "default"});
                 }
-            }
-            // Fallback to device referrer if no valid prop referrer
-            if (!actualReferrerUid && deviceReferrer && deviceReferrer !== user.uid) {
+            } else if (deviceReferrer && deviceReferrer !== user.uid) {
                 actualReferrerUid = deviceReferrer;
             }
 
             if (actualReferrerUid) {
-              newUserProfile.referredBy = actualReferrerUid;
+              newUserProfileData.referredBy = actualReferrerUid;
               await set(ref(database, `referrals/${actualReferrerUid}/${user.uid}`), {
                 referredUserName: nameFromAuth,
                 timestamp: serverTimestamp()
               });
               toast({title: "Referral Applied!", description: "Referral code successfully applied."});
-            } else if (propReferrerShort) { // If prop was there but invalid
-                toast({title: "Referral Code Invalid", description: `The code "${propReferrerShort}" is not valid.`, variant: "default"});
             }
           }
 
-          await set(ref(database, `users/${user.uid}`), newUserProfile);
+          await set(ref(database, `users/${user.uid}`), newUserProfileData);
           if (referralProgramEnabled && newShortReferralCode) {
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
           }
@@ -439,7 +444,7 @@ export default function AuthForm({
     try {
       await sendPasswordResetEmail(auth, email.trim());
       toast({ title: "Password Reset Email Sent", description: `If an account exists for ${email.trim()}, a password reset link has been sent. Please check your inbox.`, duration: 7000 });
-      setAuthActionState('default'); // Go back to login/signup view
+      setAuthActionState('default'); 
     } catch (fbError: any) {
       if (fbError.code === 'auth/invalid-email') { setEmailError("The email address is not valid."); setError("Please check the email format."); }
       else if (fbError.code === 'auth/missing-email') { setEmailError("Email address is required."); setError("Please enter your email address."); }
@@ -450,7 +455,7 @@ export default function AuthForm({
   const handleResendVerificationEmail = async () => {
     if (!auth.currentUser) { 
       toast({ title: "Error", description: "No active user session. Please log in again.", variant: "destructive" }); 
-      setAuthActionState('default'); // Revert to login/signup
+      setAuthActionState('default'); 
       return; 
     }
     setIsResendingVerification(true);
@@ -485,12 +490,12 @@ export default function AuthForm({
     setIsUpdatingEmail(true);
     try {
       const user = auth.currentUser;
-      const oldEmail = user.email; // For logging or confirmation
+      const oldEmail = user.email; 
       await firebaseUpdateEmail(user, newEmailForVerification.trim());
       await update(ref(database, `users/${user.uid}`), { email: newEmailForVerification.trim() });
-      await sendEmailVerification(user); // Send verification to the NEW email
-      setUnverifiedUserEmail(newEmailForVerification.trim()); // Update display for this screen
-      setNewEmailForVerification(''); // Clear input
+      await sendEmailVerification(user); 
+      setUnverifiedUserEmail(newEmailForVerification.trim()); 
+      setNewEmailForVerification(''); 
       toast({ title: "Email Address Updated", description: `Your email has been changed from ${oldEmail} to ${newEmailForVerification.trim()}. A new verification email has been sent.` });
     } catch (error: any) {
       if (error.code === 'auth/requires-recent-login') {
@@ -512,7 +517,7 @@ export default function AuthForm({
     localStorage.removeItem('drawlyUserUid');
     setAuthActionState('default'); 
     setUnverifiedUserEmail(null); 
-    setEmail(''); setPassword(''); // Clear form fields
+    setEmail(''); setPassword(''); 
     setError(null); setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
     toast({ title: "Logged Out", description: "You have been logged out." });
   };
@@ -524,8 +529,8 @@ export default function AuthForm({
   };
 
   const handleToggleMode = (mode: 'login' | 'signup' | 'resetPassword') => {
-    setError(null); // Clear general error
-    setDisplayNameError(''); setEmailError(''); setPasswordError(''); // Clear field errors
+    setError(null); 
+    setDisplayNameError(''); setEmailError(''); setPasswordError(''); 
     setCountryCodeError(''); setPhoneNumberError('');
     
     if (mode === 'resetPassword') {
@@ -534,7 +539,7 @@ export default function AuthForm({
     } else if (mode === 'login') {
       setAuthActionState('default');
       setIsSigningUp(false);
-    } else { // signup
+    } else { 
       setAuthActionState('default');
       setIsSigningUp(true);
     }
@@ -563,14 +568,14 @@ export default function AuthForm({
         onUpdateEmail={handleUpdateEmail}
         isUpdatingEmail={isUpdatingEmail}
         onLogout={handleUserLogoutForVerificationScreen}
-        errorMessage={error} // Pass general error if any for this screen
-        onUserVerifiedAndModalConfirmed={handleUserVerifiedAndLogin} // Pass the handler
+        errorMessage={error} 
+        onUserVerifiedAndModalConfirmed={handleUserVerifiedAndLogin} 
       />
     );
-  } else { // 'default' or 'resetPassword'
+  } else { 
     content = (
       <form onSubmit={handleFormSubmit} id="auth-form-main" className="space-y-3">
-        <AuthError message={error} /> {/* General error display */}
+        <AuthError message={error} /> 
         {authActionState === 'default' && isSigningUp && (
           <SignupSpecificFields
             displayName={displayName} onDisplayNameChange={handleDisplayNameChange} onDisplayNameBlur={handleDisplayNameBlur} displayNameError={displayNameError}
@@ -588,19 +593,18 @@ export default function AuthForm({
           email={email} onEmailChange={handleEmailChange} onEmailBlur={handleEmailBlur} emailError={emailError}
           password={password} onPasswordChange={handlePasswordChange} onPasswordBlur={handlePasswordBlur} passwordError={passwordError}
           isLoading={isLoadingEmail || isLoadingGoogle}
-          showPasswordInput={authActionState !== 'resetPassword'} // Don't show password for reset
+          showPasswordInput={authActionState !== 'resetPassword'} 
         />
-        {authActionState === 'default' && !isSigningUp && ( // Show "Forgot Password?" only on login screen
+        {authActionState === 'default' && !isSigningUp && ( 
              <Button
                 type="button" variant="link"
-                className="px-0 text-sm text-primary hover:underline h-auto py-0" // Adjusted styling
+                className="px-0 text-sm text-primary hover:underline h-auto py-0" 
                 onClick={() => handleToggleMode('resetPassword')}
                 disabled={isLoadingEmail || isLoadingGoogle}
             >
                 Forgot Password?
             </Button>
         )}
-         {/* Submit actions are rendered by AuthCard's footer prop via AuthSubmitActions component */}
       </form>
     );
   }
@@ -620,7 +624,7 @@ export default function AuthForm({
             <AuthSubmitActions
               authActionState={authActionState}
               isSigningUp={isSigningUp}
-              onEmailSubmit={handleFormSubmit} // Pass the main form submit handler
+              onEmailSubmit={handleFormSubmit} 
               onGoogleSubmit={handleGoogleAuth}
               isLoadingEmail={isLoadingEmail}
               isLoadingGoogle={isLoadingGoogle}
@@ -633,10 +637,11 @@ export default function AuthForm({
               isLoading={isLoadingEmail || isLoadingGoogle}
             />
           </>
-        ) : undefined} // No default footer actions on verification screen
-        showDefaultFooterLinks={authActionState !== 'awaitingVerification'} // Control default "Back to Home" link
+        ) : undefined} 
+        showDefaultFooterLinks={authActionState !== 'awaitingVerification'} 
         currentAuthActionState={authActionState}
       />
     </div>
   );
 }
+
