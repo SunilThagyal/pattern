@@ -13,7 +13,7 @@ export default function PrivacyPolicyPage() {
             <ShieldCheck className="mr-3 h-8 w-8 text-primary" />
             Privacy Policy for {APP_NAME}
           </CardTitle>
-          <CardDescription>Last Updated: [Date]</CardDescription>
+          <CardDescription>Last Updated: [06/14/2025]</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-muted-foreground">
           <p>
