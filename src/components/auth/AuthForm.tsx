@@ -28,7 +28,7 @@ const generateShortAlphaNumericCode = (length: number): string => {
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
   for (let i = 0; i < length; i++) {
-    result += characters.charAt(Math.floor(Math.random() * charactersLength));
+    result += characters.charAt(Math.floor(Math.random() * characters.length)); // Fixed: charactersLength -> characters.length
   }
   return result;
 };
@@ -216,8 +216,9 @@ export default function AuthForm({
         if (user) {
           await sendEmailVerification(user);
           let newShortReferralCode = '';
+          let attempts = 0; 
           if (referralProgramEnabled) {
-              let codeExists = true; attempts = 0;
+              let codeExists = true; 
               while(codeExists && attempts < 10) {
                   newShortReferralCode = generateShortAlphaNumericCode(5);
                   codeExists = (await get(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`))).exists();
@@ -285,8 +286,7 @@ export default function AuthForm({
     }
     setIsLoadingEmail(false);
   };
-  let attempts = 0; // Declared for createUserWithEmailAndPassword block
-
+  
   const handleGoogleAuth = async () => {
     setIsLoadingGoogle(true); setError(null);
     try {
@@ -303,8 +303,9 @@ export default function AuthForm({
           router.push(redirectAfterAuth || '/');
         } else {
           let newShortReferralCode = '';
+          let attempts = 0;
           if (referralProgramEnabled) {
-            let codeExists = true; attempts = 0;
+            let codeExists = true; 
             while(codeExists && attempts < 10) {
               newShortReferralCode = generateShortAlphaNumericCode(5);
               codeExists = (await get(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`))).exists(); attempts++;
@@ -527,3 +528,4 @@ export default function AuthForm({
     </div>
   );
 }
+
