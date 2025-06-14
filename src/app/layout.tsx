@@ -6,9 +6,10 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/Providers';
 import Header from '@/components/Header';
-import { APP_NAME } from '@/lib/config';
+import { APP_NAME, ADSENSE_CLIENT_ID } from '@/lib/config';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link'; // Added for footer links
+import Script from 'next/script'; // Import next/script
 
 const inter = Inter({
   subsets: ['latin'],
@@ -34,6 +35,16 @@ export default function RootLayout({
         <meta name="keywords" content={`drawing game, guess game, multiplayer, online game, Pictionary, AI drawing, sketch game, ${APP_NAME}`} />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
+        {/* AdSense Meta Tag */}
+        <meta name="google-adsense-account" content={ADSENSE_CLIENT_ID} />
+        {/* AdSense Script using next/script */}
+        <Script
+          id="adsbygoogle-init"
+          async
+          src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT_ID}`}
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
       </head>
       <body className="min-h-screen bg-background font-sans antialiased flex flex-col">
         <Providers>

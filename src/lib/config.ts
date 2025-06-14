@@ -7,3 +7,5 @@ export const MIN_PLAYERS_FOR_REWARD = 2;     // Minimum players in the game to q
 export const MIN_ROUNDS_FOR_REWARD = 2;      // Minimum rounds configured for the game to qualify
 export const MAX_REWARD_PER_GAME = 1.00;     // Maximum reward a referrer can earn from a single game completed by a referred user
 
+// AdSense Configuration
+export const ADSENSE_CLIENT_ID = "ca-pub-6826177562595509";

@@ -1,38 +1,34 @@
 
 "use client";
 
-import { useState, type FormEvent, useEffect } from 'react';
+import { useState, type FormEvent, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogIn, UserPlus, AlertCircle, Globe, Phone, UserCircle2, Mail, ArrowLeft, RefreshCw } from 'lucide-react';
-import Link from 'next/link';
-import { APP_NAME } from '@/lib/config';
 import { database, auth } from '@/lib/firebase';
-import { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut, type User, GoogleAuthProvider, signInWithPopup, updateEmail as firebaseUpdateEmail } from "firebase/auth";
-import type { UserProfile, PlatformSettings } from '@/lib/types';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword,
+  sendPasswordResetEmail, signOut as firebaseSignOut, type User,
+  GoogleAuthProvider, signInWithPopup, updateEmail as firebaseUpdateEmail
+} from "firebase/auth";
+import type { UserProfile } from '@/lib/types';
 import { ref, set, get, serverTimestamp, onValue, off, update } from 'firebase/database';
 
-
-const GoogleIcon = () => (
-  <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-  </svg>
-);
+import { AuthCard } from './AuthCard';
+import { AuthHeaderContent } from './AuthHeaderContent';
+import { AuthError } from './AuthError';
+import { EmailPasswordFields } from './EmailPasswordFields';
+import { SignupSpecificFields } from './SignupSpecificFields';
+import { AuthSubmitActions } from './AuthSubmitActions';
+import { AuthModeToggle } from './AuthModeToggle';
+import { AwaitingVerificationContent } from './AwaitingVerificationContent';
+import { ResetPasswordContent } from './ResetPasswordContent';
+import { PostGoogleSignupForm } from './PostGoogleSignupForm'; // New Import
 
 const generateShortAlphaNumericCode = (length: number): string => {
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
-  const charactersLength = characters.length;
   for (let i = 0; i < length; i++) {
-    result += characters.charAt(Math.floor(Math.random() * charactersLength));
+    result += characters.charAt(Math.floor(Math.random() * characters.length));
   }
   return result;
 };
@@ -49,17 +45,16 @@ interface AuthFormProps {
 }
 
 const determineInitialIsSigningUp = (
-    currentForceSignup: boolean,
-    currentInitialAction?: string | null,
-    currentReferralCode?: string | null
-  ): boolean => {
-    if (currentForceSignup) return true;
-    if (currentReferralCode && currentReferralCode.trim() !== "" && currentInitialAction !== 'login') return true;
-    if (currentInitialAction === 'signup') return true;
-    if (currentInitialAction === 'login') return false;
-    return false; // Default to Login
+  currentForceSignup: boolean,
+  currentInitialAction?: string | null,
+  currentReferralCode?: string | null
+): boolean => {
+  if (currentForceSignup) return true;
+  if (currentReferralCode && currentReferralCode.trim() !== "" && currentInitialAction !== 'login') return true;
+  if (currentInitialAction === 'signup') return true;
+  if (currentInitialAction === 'login') return false;
+  return false;
 };
-
 
 export default function AuthForm({
   passedReferralCodeProp,
@@ -67,35 +62,43 @@ export default function AuthForm({
   forceSignupFromPath = false,
   redirectAfterAuth = '/',
 }: AuthFormProps) {
+  // Main form state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [referralCodeInput, setReferralCodeInput] = useState(''); // For email signup
   const [country, setCountry] = useState<'India' | 'Other'>('India');
   const [gender, setGender] = useState<UserProfile['gender'] | ''>('');
   const [countryCode, setCountryCode] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
 
+  // Auth flow state
   const [authActionState, setAuthActionState] = useState<'default' | 'awaitingVerification' | 'resetPassword'>('default');
   const [unverifiedUserEmail, setUnverifiedUserEmail] = useState<string | null>(null);
   const [newEmailForVerification, setNewEmailForVerification] = useState('');
-
-  const [isSigningUp, setIsSigningUp] = useState(() =>
+  const [isSigningUp, setIsSigningUp] = useState<boolean>(() =>
     determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp)
   );
 
+  // Post Google Signup State
+  const [postGoogleSignupStep, setPostGoogleSignupStep] = useState<'none' | 'collectInfo'>('none');
+  const [googleAuthData, setGoogleAuthData] = useState<{ uid: string; email: string | null; displayName: string | null } | null>(null);
+  
+  // Error states
   const [error, setError] = useState<string | null>(null);
-
   const [displayNameError, setDisplayNameError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [countryCodeError, setCountryCodeError] = useState('');
   const [phoneNumberError, setPhoneNumberError] = useState('');
 
+  // Loading states
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
   const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const [isResendingVerification, setIsResendingVerification] = useState(false);
   const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
+  const [isLoadingPostGoogleSignup, setIsLoadingPostGoogleSignup] = useState(false);
+
 
   const router = useRouter();
   const { toast } = useToast();
@@ -103,6 +106,7 @@ export default function AuthForm({
   const [referralProgramEnabled, setReferralProgramEnabled] = useState(true);
   const [isLoadingPlatformSettings, setIsLoadingPlatformSettings] = useState(true);
 
+  // Validation functions
   const validateDisplayName = (name: string) => !name.trim() ? 'Display Name is required.' : '';
   const validateEmail = (val: string) => {
     if (!val.trim()) return 'Email is required.';
@@ -125,12 +129,24 @@ export default function AuthForm({
     if (!/^\d{7,15}$/.test(val)) return 'Phone number must be 7-15 digits.';
     return '';
   };
+  const validateGender = (val: string) => !val ? 'Gender is required.' : '';
 
+
+  // Input change handlers
+  const handleDisplayNameChange = (value: string) => { setDisplayName(value); if (displayNameError) setDisplayNameError(''); };
+  const handleEmailChange = (value: string) => { setEmail(value); if (emailError) setEmailError(''); };
+  const handlePasswordChange = (value: string) => { setPassword(value); if (passwordError) setPasswordError(''); };
+  const handleCountryCodeChange = (value: string) => { setCountryCode(value); if (countryCodeError) setCountryCodeError(''); };
+  const handlePhoneNumberChange = (value: string) => { setPhoneNumber(value); if (phoneNumberError) setPhoneNumberError(''); };
+  const handleReferralCodeInputChange = (value: string) => setReferralCodeInput(value);
+
+  // Input blur handlers for validation
   const handleDisplayNameBlur = () => setDisplayNameError(validateDisplayName(displayName));
   const handleEmailBlur = () => setEmailError(validateEmail(email));
   const handlePasswordBlur = () => setPasswordError(validatePassword(password));
   const handleCountryCodeBlur = () => setCountryCodeError(validateCountryCode(countryCode));
   const handlePhoneNumberBlur = () => setPhoneNumberError(validatePhoneNumber(phoneNumber));
+
 
   useEffect(() => {
     const settingsRef = ref(database, 'platformSettings');
@@ -142,48 +158,63 @@ export default function AuthForm({
       }
       setIsLoadingPlatformSettings(false);
     }, (err) => {
-      console.error("Error fetching platform settings for AuthForm:", err);
+      console.error("Error fetching platform settings in AuthForm:", err);
       setReferralProgramEnabled(true);
       setIsLoadingPlatformSettings(false);
     });
-
     return () => off(settingsRef, 'value', listener);
   }, []);
-
 
   useEffect(() => {
     const propDrivenIsSigningUp = determineInitialIsSigningUp(forceSignupFromPath, initialActionProp, passedReferralCodeProp);
     const propDrivenAuthAction = initialActionProp === 'resetPassword' ? 'resetPassword' : 'default';
-    
+
     if (isSigningUp !== propDrivenIsSigningUp) {
       setIsSigningUp(propDrivenIsSigningUp);
     }
-    
-    if (authActionState !== 'awaitingVerification' || propDrivenAuthAction === 'resetPassword') {
-        if(authActionState !== propDrivenAuthAction) {
-            setAuthActionState(propDrivenAuthAction);
-        }
+    if (authActionState !== 'awaitingVerification' && authActionState !== propDrivenAuthAction) {
+      setAuthActionState(propDrivenAuthAction);
     }
-    
-    if (authActionState !== 'awaitingVerification') {
-        setError(null);
-        setDisplayNameError('');
-        setEmailError('');
-        setPasswordError('');
-        setCountryCodeError('');
-        setPhoneNumberError('');
-    }
-  }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath, isSigningUp, authActionState]);
+  }, [passedReferralCodeProp, initialActionProp, forceSignupFromPath]);
 
 
   useEffect(() => {
-    let codeToSet = '';
-    if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
-      codeToSet = passedReferralCodeProp.trim().toUpperCase();
+    if (authActionState !== 'awaitingVerification') {
+      setError(null);
+      setDisplayNameError(''); setEmailError(''); setPasswordError('');
+      setCountryCodeError(''); setPhoneNumberError('');
     }
-    setReferralCodeInput(codeToSet);
+  }, [isSigningUp, authActionState]);
+
+
+  useEffect(() => {
+    setReferralCodeInput(passedReferralCodeProp?.trim().toUpperCase() || '');
   }, [passedReferralCodeProp]);
 
+  const handleUserVerifiedAndLogin = async () => {
+    if (!auth.currentUser || !auth.currentUser.emailVerified) {
+      toast({ title: "Verification Error", description: "Email not verified. Please try again.", variant: "destructive" });
+      setAuthActionState('default');
+      return;
+    }
+    const user = auth.currentUser;
+    try {
+      const profileSnap = await get(ref(database, `users/${user.uid}`));
+      const nameFromDB = profileSnap.exists() ? profileSnap.val().displayName || "Player" : "Player";
+
+      localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+      localStorage.setItem('drawlyUserDisplayName', nameFromDB);
+      localStorage.setItem('drawlyUserUid', user.uid);
+
+      toast({ title: "Email Verified & Login Successful!", description: `Welcome, ${nameFromDB}!` });
+      router.push(redirectAfterAuth || '/');
+      setAuthActionState('default');
+    } catch (dbError) {
+      console.error("Error fetching profile after verification:", dbError);
+      toast({ title: "Login Error", description: "Could not finalize login. Please try manually.", variant: "destructive" });
+      setAuthActionState('default');
+    }
+  };
 
   const handleFirebaseEmailAuth = async () => {
     setError(null);
@@ -195,128 +226,114 @@ export default function AuthForm({
     let currentDisplayNameError = '';
     let currentCountryCodeError = '';
     let currentPhoneNumberError = '';
+    let currentGenderError = '';
 
     if (isSigningUp) {
       currentDisplayNameError = validateDisplayName(displayName);
       currentCountryCodeError = validateCountryCode(countryCode);
       currentPhoneNumberError = validatePhoneNumber(phoneNumber);
+      currentGenderError = validateGender(gender);
       setDisplayNameError(currentDisplayNameError);
       setCountryCodeError(currentCountryCodeError);
       setPhoneNumberError(currentPhoneNumberError);
+      // Note: Gender error display would need to be added to SignupSpecificFields or a general error area
 
-      if (currentDisplayNameError || currentEmailError || currentPasswordError || currentCountryCodeError || currentPhoneNumberError || !country || !gender) {
-         setError("Please fill all required fields and correct any errors.");
-         setIsLoadingEmail(false);
-         return;
+      if (currentDisplayNameError || currentEmailError || currentPasswordError || currentCountryCodeError || currentPhoneNumberError || currentGenderError || !country) {
+        setError("Please fill all required fields and correct any errors.");
+        setIsLoadingEmail(false);
+        return;
       }
     } else { // Login
-       if (currentEmailError || currentPasswordError) {
-          setError("Please correct the errors above.");
-          setIsLoadingEmail(false);
-          return;
-       }
+      if (currentEmailError || currentPasswordError) {
+        setError("Please correct the errors above.");
+        setIsLoadingEmail(false);
+        return;
+      }
     }
-
     setIsLoadingEmail(true);
-
     if (isSigningUp) {
       try {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
-
         if (user) {
           await sendEmailVerification(user);
-
           let newShortReferralCode = '';
           if (referralProgramEnabled) {
-              let codeExists = true;
-              let attempts = 0;
-              const MAX_CODE_GEN_ATTEMPTS = 10;
-              while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
-                  newShortReferralCode = generateShortAlphaNumericCode(5);
-                  const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
-                  const shortCodeSnap = await get(shortCodeMapRef);
-                  codeExists = shortCodeSnap.exists();
-                  attempts++;
-              }
-              if (codeExists) console.warn("Could not generate unique referral code after attempts.");
+            let attempts = 0;
+            let codeExists = true;
+            while (codeExists && attempts < 10) {
+              newShortReferralCode = generateShortAlphaNumericCode(5);
+              const shortCodeRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
+              codeExists = (await get(shortCodeRef)).exists();
+              attempts++;
+            }
+            if (codeExists) {
+              console.warn("Could not generate unique short referral code after multiple attempts.");
+              newShortReferralCode = '';
+            }
           }
 
-          const newUserProfile: UserProfile = {
-            userId: user.uid,
-            displayName: displayName.trim(),
-            email: user.email || email,
-            referralCode: user.uid,
-            shortReferralCode: referralProgramEnabled && newShortReferralCode ? newShortReferralCode : undefined,
-            totalEarnings: 0,
-            createdAt: serverTimestamp() as number,
-            country: country,
-            currency: country === 'India' ? 'INR' : 'USD',
-            gender: gender as UserProfile['gender'],
-            countryCode: countryCode.trim(),
-            phoneNumber: phoneNumber.trim(),
-            canWithdraw: true,
+          const newUserProfileData: UserProfile = {
+            userId: user.uid, displayName: displayName.trim(), email: user.email || email,
+            referralCode: user.uid, // This is the user's own UID, used if they refer others
+            totalEarnings: 0, createdAt: serverTimestamp() as number, country: country,
+            currency: country === 'India' ? 'INR' : 'USD', gender: gender as UserProfile['gender'],
+            countryCode: countryCode.trim(), phoneNumber: phoneNumber.trim(), canWithdraw: true,
           };
+
+          if (referralProgramEnabled && newShortReferralCode) {
+            newUserProfileData.shortReferralCode = newShortReferralCode;
+          }
 
           if (referralProgramEnabled) {
             let actualReferrerUid: string | null = null;
-            const deviceOriginalReferrerUid = typeof window !== 'undefined' ? localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY) : null;
+            const deviceOriginalReferrerUid = localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY);
             const currentReferralShortCodeFromInput = referralCodeInput.trim().toUpperCase();
 
             if (deviceOriginalReferrerUid) {
               actualReferrerUid = deviceOriginalReferrerUid;
-               if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
-                    const mapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
-                    const mapSnap = await get(mapRef);
-                    if (mapSnap.exists() && mapSnap.val() !== deviceOriginalReferrerUid) {
-                         toast({ title: "Referral Overridden", description: "This device is already linked to a referrer. The original referral has been applied.", variant: "default" });
-                    }
-                }
-            } else if (currentReferralShortCodeFromInput && currentReferralShortCodeFromInput !== '') {
-              const referrerMapRef = ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`);
-              const referrerMapSnap = await get(referrerMapRef);
-              if (referrerMapSnap.exists()) {
-                const foundReferrerUid = referrerMapSnap.val() as string;
-                if (foundReferrerUid === user.uid) {
-                   toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "default"});
+              if (currentReferralShortCodeFromInput && (await get(ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`))).val() !== deviceOriginalReferrerUid) {
+                toast({ title: "Referral Overridden", description: "An earlier referral code from this device was applied.", variant: "default" });
+              }
+            } else if (currentReferralShortCodeFromInput) {
+              const mapSnap = await get(ref(database, `shortCodeToUserIdMap/${currentReferralShortCodeFromInput}`));
+              if (mapSnap.exists()) {
+                const foundUid = mapSnap.val() as string;
+                if (foundUid === user.uid) {
+                  toast({ title: "Invalid Referral", description: "You cannot refer yourself.", variant: "destructive" });
                 } else {
-                  actualReferrerUid = foundReferrerUid;
-                  if (typeof window !== 'undefined') localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid);
-                  toast({title: "Referral Applied!", description: `You were successfully referred.`});
+                  actualReferrerUid = foundUid;
+                  localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundUid);
+                  toast({ title: "Referral Applied!", description: "Referral code successfully applied." });
                 }
               } else {
-                toast({ title: "Referral Code Invalid", description: "The referral code was not found. Proceeding without referral.", variant: "default" });
+                toast({ title: "Referral Code Invalid", description: `The code "${currentReferralShortCodeFromInput}" is not valid.`, variant: "default" });
               }
             }
-             if (actualReferrerUid) {
-              newUserProfile.referredBy = actualReferrerUid;
+
+            if (actualReferrerUid) {
+              newUserProfileData.referredBy = actualReferrerUid;
               await set(ref(database, `referrals/${actualReferrerUid}/${user.uid}`), {
                 referredUserName: displayName.trim(),
-                timestamp: serverTimestamp() as number,
+                timestamp: serverTimestamp()
               });
             }
           }
+          
+          await set(ref(database, `users/${user.uid}`), newUserProfileData);
 
-          await set(ref(database, `users/${user.uid}`), newUserProfile);
           if (referralProgramEnabled && newShortReferralCode) {
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
           }
 
           setUnverifiedUserEmail(user.email);
           setAuthActionState('awaitingVerification');
-           toast({ title: "Sign Up Almost Complete!", description: `Welcome, ${displayName}! A verification email has been sent to ${email}. Please verify your email.` });
+          toast({ title: "Sign Up Almost Complete!", description: `Welcome, ${displayName}! A verification email has been sent to ${email}. Please check your inbox.` });
         }
       } catch (fbError: any) {
-        console.error("Firebase Signup Error:", fbError);
-        if (fbError.code === 'auth/email-already-in-use') {
-            setError("This email is already in use. Please login or use a different email.");
-            setEmailError("This email is already in use.");
-        } else if (fbError.code === 'auth/weak-password') {
-            setPasswordError("Password should be at least 6 characters.");
-            setError("Password should be at least 6 characters.");
-        } else {
-            setError(fbError.message || "Signup failed. Please try again.");
-        }
+        if (fbError.code === 'auth/email-already-in-use') { setError("An account already exists with this email address."); setEmailError("Email already in use."); }
+        else if (fbError.code === 'auth/weak-password') { setPasswordError("Password should be at least 6 characters."); setError("Password is too weak."); }
+        else setError(fbError.message || "Signup failed. Please try again.");
       }
     } else { // Login
       try {
@@ -326,222 +343,246 @@ export default function AuthForm({
           if (!user.emailVerified) {
             setUnverifiedUserEmail(user.email);
             setAuthActionState('awaitingVerification');
-            setIsLoadingEmail(false); 
+            setIsLoadingEmail(false);
             return;
           }
-
-          const userProfileRef = ref(database, `users/${user.uid}`);
-          const snapshot = await get(userProfileRef);
-          let userDisplayNameFromDB = "Player";
-          if (snapshot.exists()) {
-            userDisplayNameFromDB = snapshot.val().displayName || "Player";
-          }
-
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-            localStorage.setItem('drawlyUserDisplayName', userDisplayNameFromDB);
-            localStorage.setItem('drawlyUserUid', user.uid);
-          }
-          toast({ title: "Login Successful!", description: `Welcome back, ${userDisplayNameFromDB}!` });
+          const profileSnap = await get(ref(database, `users/${user.uid}`));
+          const nameFromDB = profileSnap.exists() ? profileSnap.val().displayName || "Player" : "Player";
+          localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+          localStorage.setItem('drawlyUserDisplayName', nameFromDB);
+          localStorage.setItem('drawlyUserUid', user.uid);
+          toast({ title: "Login Successful!", description: `Welcome back, ${nameFromDB}!` });
           router.push(redirectAfterAuth || '/');
         }
       } catch (fbError: any) {
-        console.error("Firebase Login Error:", fbError);
-        if (fbError.code === 'auth/user-not-found' || fbError.code === 'auth/wrong-password' || fbError.code === 'auth/invalid-credential') {
-            setError("Invalid email or password. Please try again or sign up.");
-        } else {
-            setError(fbError.message || "Login failed. Please try again.");
-        }
+        if (['auth/user-not-found', 'auth/wrong-password', 'auth/invalid-credential'].includes(fbError.code)) setError("Invalid email or password. Please check your credentials.");
+        else setError(fbError.message || "Login failed. Please try again.");
       }
     }
     setIsLoadingEmail(false);
   };
 
   const handleGoogleAuth = async () => {
+    console.log('[AuthForm GoogleAuth] Attempting Google Sign-In. isLoadingGoogle:', isLoadingGoogle);
+    if (isLoadingGoogle) {
+      console.log('[AuthForm GoogleAuth] Already processing Google Sign-In. Aborting.');
+      return;
+    }
     setIsLoadingGoogle(true);
     setError(null);
-  
-    const provider = new GoogleAuthProvider();
+    console.log('[AuthForm GoogleAuth] Initial passedReferralCodeProp:', passedReferralCodeProp);
     try {
+      console.log('[AuthForm GoogleAuth] Calling signInWithPopup...');
+      const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
+      console.log('[AuthForm GoogleAuth] signInWithPopup successful. Result User:', result.user);
       const user = result.user;
-  
       if (user) {
-        const userProfileRef = ref(database, `users/${user.uid}`);
-        const snapshot = await get(userProfileRef);
-  
-        let userDisplayNameFromAuth = user.displayName || "Google User";
-        let userEmailFromAuth = user.email; 
-        
-        if (!userEmailFromAuth) {
-            toast({ title: "Email Missing", description: "Google did not provide an email address. Cannot proceed.", variant: "destructive" });
-            setIsLoadingGoogle(false);
-            return;
+        const profileSnap = await get(ref(database, `users/${user.uid}`));
+        let nameFromAuth = user.displayName || "Google User";
+        if (!user.email) {
+          console.error('[AuthForm GoogleAuth] Google account did not provide an email.');
+          toast({ title: "Email Missing", description: "Google account did not provide an email.", variant: "destructive" });
+          setIsLoadingGoogle(false); return;
         }
-  
-        if (snapshot.exists()) {
-          const existingProfile = snapshot.val() as UserProfile;
-          userDisplayNameFromAuth = existingProfile.displayName || userDisplayNameFromAuth; 
-  
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-            localStorage.setItem('drawlyUserDisplayName', userDisplayNameFromAuth);
-            localStorage.setItem('drawlyUserUid', user.uid);
-          }
-          toast({ title: "Login Successful!", description: `Welcome back, ${userDisplayNameFromAuth}!` });
+
+        if (profileSnap.exists()) { // Existing user
+          nameFromAuth = profileSnap.val().displayName || nameFromAuth;
+          localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+          localStorage.setItem('drawlyUserDisplayName', nameFromAuth);
+          localStorage.setItem('drawlyUserUid', user.uid);
+          toast({ title: "Login Successful!", description: `Welcome, ${nameFromAuth}!` });
           router.push(redirectAfterAuth || '/');
-        } else {
-          let newShortReferralCode = '';
-          if (referralProgramEnabled) {
-            let codeExists = true;
-            let attempts = 0;
-            const MAX_CODE_GEN_ATTEMPTS = 10;
-            while(codeExists && attempts < MAX_CODE_GEN_ATTEMPTS) {
-                newShortReferralCode = generateShortAlphaNumericCode(5);
-                const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`);
-                const shortCodeSnap = await get(shortCodeMapRef);
-                codeExists = shortCodeSnap.exists();
-                attempts++;
-            }
-            if (codeExists) console.warn("Could not generate unique referral code after attempts for Google user.");
-          }
-  
-          const newUserProfile: UserProfile = {
-            userId: user.uid,
-            displayName: userDisplayNameFromAuth,
-            email: userEmailFromAuth,
-            referralCode: user.uid, 
-            shortReferralCode: referralProgramEnabled && newShortReferralCode ? newShortReferralCode : undefined,
-            totalEarnings: 0,
-            createdAt: serverTimestamp() as number,
-            country: 'India', 
-            currency: 'INR',  
-            gender: 'prefer_not_to_say',
-            countryCode: '', 
-            phoneNumber: '', 
-            canWithdraw: true,
-          };
-  
-          if (referralProgramEnabled) {
-            let actualReferrerUid: string | null = null;
-            const deviceOriginalReferrerUid = typeof window !== 'undefined' ? localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY) : null;
-            
-            if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
-                const shortCodeMapRef = ref(database, `shortCodeToUserIdMap/${passedReferralCodeProp.trim().toUpperCase()}`);
-                const shortCodeSnap = await get(shortCodeMapRef);
-                if (shortCodeSnap.exists()) {
-                    const foundUid = shortCodeSnap.val() as string;
-                    if (foundUid !== user.uid) { 
-                        actualReferrerUid = foundUid;
-                        if (typeof window !== 'undefined' && (!deviceOriginalReferrerUid || deviceOriginalReferrerUid !== foundUid)) {
-                           localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundUid);
-                        }
-                    }
-                }
-            }
-            
-            if (!actualReferrerUid && deviceOriginalReferrerUid && deviceOriginalReferrerUid !== user.uid) {
-                actualReferrerUid = deviceOriginalReferrerUid;
-            }
-  
-            if (actualReferrerUid) {
-              newUserProfile.referredBy = actualReferrerUid;
-              await set(ref(database, `referrals/${actualReferrerUid}/${user.uid}`), {
-                referredUserName: newUserProfile.displayName,
-                timestamp: serverTimestamp() as number,
-              });
-              toast({title: "Referral Applied!", description: `You were successfully referred.`});
-            } else if (passedReferralCodeProp && passedReferralCodeProp.trim() !== "") {
-              toast({title: "Referral Code Invalid", description: "The referral code from the link was not found. Proceeding without referral.", variant: "default"});
-            }
-          }
-  
-          await set(userProfileRef, newUserProfile);
-          if (referralProgramEnabled && newShortReferralCode) {
-            await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
-          }
-  
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('drawlyAuthStatus', 'loggedIn');
-            localStorage.setItem('drawlyUserDisplayName', newUserProfile.displayName);
-            localStorage.setItem('drawlyUserUid', user.uid);
-          }
-          toast({ title: "Account Created!", description: `Welcome to ${APP_NAME}, ${newUserProfile.displayName}!` });
-          router.push(redirectAfterAuth || '/');
+        } else { // New user - needs to collect additional info
+          console.log('[AuthForm GoogleAuth] New Google user detected. Preparing to collect additional info.');
+          setGoogleAuthData({ uid: user.uid, email: user.email, displayName: nameFromAuth });
+          setPostGoogleSignupStep('collectInfo');
+          // Pre-fill referral code for PostGoogleSignupForm if passed via URL
+          // This state will be picked up by PostGoogleSignupForm
         }
       } else {
-        setError("Google Sign-In failed: No user data received.");
+        console.error('[AuthForm GoogleAuth] Google Sign-In failed: No user data returned from Google.');
+        setError("Google Sign-In failed: No user data returned from Google.");
       }
     } catch (fbError: any) {
-      console.error("Firebase Google Sign-In Error:", fbError);
-      if (fbError.code === 'auth/popup-closed-by-user') {
-        setError("Google Sign-In cancelled.");
-        toast({ title: "Sign-In Cancelled", description: "You closed the Google Sign-In window.", variant: "default" });
+      console.error('[AuthForm GoogleAuth] Error during signInWithPopup or subsequent processing:', fbError);
+       if (fbError.code === 'auth/popup-closed-by-user') {
+        const detailedErrorMsg = "Google Sign-In cancelled or popup blocked. Please ensure pop-ups are allowed for this site. Check Firebase/Google Cloud (Authorized Domains, OAuth settings) if issue persists.";
+        setError(detailedErrorMsg);
+        toast({ title: "Google Sign-In Problem", description: "Pop-up might have been blocked or there's a configuration issue. See message below button for details.", variant: "destructive", duration: 10000 });
       } else if (fbError.code === 'auth/account-exists-with-different-credential') {
-        setError("An account already exists with this email address using a different sign-in method (e.g., Email/Password). Please sign in with that method.");
-        toast({ title: "Account Conflict", description: "This email is linked to an account with a different sign-in method.", variant: "destructive", duration: 7000 });
+        setError("An account already exists with this email, but using a different sign-in method (e.g., email/password). Please log in with that method.");
+        toast({ title: "Account Conflict", description: "Email already in use with a different sign-in method.", variant: "destructive", duration: 7000 });
       } else {
         setError(fbError.message || "Google Sign-In failed. Please try again.");
       }
     } finally {
+      console.log('[AuthForm GoogleAuth] Google Sign-In process finished. Setting isLoadingGoogle to false.');
       setIsLoadingGoogle(false);
     }
   };
 
-  const handleForgotPassword = async () => {
-    setError(null);
-    const currentEmailError = validateEmail(email);
-    setEmailError(currentEmailError);
-    if (currentEmailError) {
-      setError("Please enter a valid email address to reset password.");
+  const handleSavePostGoogleSignupInfo = async (formData: {
+    country: 'India' | 'Other';
+    gender: UserProfile['gender'] | '';
+    countryCode: string;
+    phoneNumber: string;
+    referralCode: string; // This is the short code input from the form
+  }) => {
+    if (!googleAuthData) {
+      setError("Google authentication data is missing.");
       return;
     }
+    setIsLoadingPostGoogleSignup(true);
+    setError(null);
+
+    // Validate new fields
+    const postGenderError = validateGender(formData.gender);
+    const postCountryCodeError = validateCountryCode(formData.countryCode);
+    const postPhoneNumberError = validatePhoneNumber(formData.phoneNumber);
+
+    if (postGenderError || postCountryCodeError || postPhoneNumberError || !formData.country) {
+      // For now, just log and toast. A more robust UI would show these errors on the PostGoogleSignupForm.
+      console.error("Validation errors in post-Google signup form:", { postGenderError, postCountryCodeError, postPhoneNumberError });
+      toast({title: "Validation Error", description: "Please ensure all fields in the additional info form are correct.", variant: "destructive"});
+      setIsLoadingPostGoogleSignup(false);
+      return;
+    }
+
+    try {
+      const { uid, email: googleEmail, displayName: googleDisplayName } = googleAuthData;
+      let newShortReferralCode = '';
+      if (referralProgramEnabled) {
+        let attempts = 0;
+        let codeExists = true;
+        while (codeExists && attempts < 10) {
+          newShortReferralCode = generateShortAlphaNumericCode(5);
+          codeExists = (await get(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`))).exists();
+          attempts++;
+        }
+        if (codeExists) {
+          console.warn("Could not generate unique short referral code for Google user post-signup.");
+          newShortReferralCode = '';
+        }
+      }
+
+      const newUserProfileData: UserProfile = {
+        userId: uid,
+        displayName: googleDisplayName || "User",
+        email: googleEmail || undefined,
+        referralCode: uid, // User's own UID for referring others
+        totalEarnings: 0,
+        createdAt: serverTimestamp() as number,
+        country: formData.country,
+        currency: formData.country === 'India' ? 'INR' : 'USD',
+        gender: formData.gender as UserProfile['gender'],
+        countryCode: formData.countryCode.trim(),
+        phoneNumber: formData.phoneNumber.trim(),
+        canWithdraw: true,
+      };
+
+      if (referralProgramEnabled && newShortReferralCode) {
+        newUserProfileData.shortReferralCode = newShortReferralCode;
+      }
+      
+      // Process referral code from the post-Google signup form
+      // This overrides any device-based referral if a new one is entered here.
+      // If a URL referral was passed, `passedReferralCodeProp` was used to prefill this input.
+      if (referralProgramEnabled && formData.referralCode.trim()) {
+        const postSignupReferralShortCode = formData.referralCode.trim().toUpperCase();
+        const mapSnap = await get(ref(database, `shortCodeToUserIdMap/${postSignupReferralShortCode}`));
+        if (mapSnap.exists()) {
+          const foundReferrerUid = mapSnap.val() as string;
+          if (foundReferrerUid === uid) {
+            toast({ title: "Invalid Referral", description: "You cannot refer yourself.", variant: "destructive" });
+          } else {
+            newUserProfileData.referredBy = foundReferrerUid;
+            await set(ref(database, `referrals/${foundReferrerUid}/${uid}`), {
+              referredUserName: newUserProfileData.displayName,
+              timestamp: serverTimestamp()
+            });
+            localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid); // Persist this referral
+            toast({ title: "Referral Applied!", description: "Referral code successfully applied." });
+          }
+        } else {
+          toast({ title: "Referral Code Invalid", description: `The code "${postSignupReferralShortCode}" is not valid.`, variant: "default" });
+        }
+      } else if (referralProgramEnabled && passedReferralCodeProp && !formData.referralCode.trim()) {
+        // If no new code was entered in post-signup form, but one came from URL, re-check it
+        const urlReferralShortCode = passedReferralCodeProp.trim().toUpperCase();
+        const mapSnap = await get(ref(database, `shortCodeToUserIdMap/${urlReferralShortCode}`));
+        if (mapSnap.exists()) {
+            const foundReferrerUid = mapSnap.val() as string;
+             if (foundReferrerUid !== uid) {
+                 newUserProfileData.referredBy = foundReferrerUid;
+                 await set(ref(database, `referrals/${foundReferrerUid}/${uid}`), { referredUserName: newUserProfileData.displayName, timestamp: serverTimestamp() });
+                 localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundReferrerUid);
+                 toast({ title: "Referral Applied!", description: `Referral code ${urlReferralShortCode} from link applied.` });
+             }
+        }
+      }
+
+
+      await set(ref(database, `users/${uid}`), newUserProfileData);
+
+      if (referralProgramEnabled && newShortReferralCode) {
+        await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), uid);
+      }
+
+      localStorage.setItem('drawlyAuthStatus', 'loggedIn');
+      localStorage.setItem('drawlyUserDisplayName', newUserProfileData.displayName);
+      localStorage.setItem('drawlyUserUid', uid);
+      toast({ title: "Account Created & Logged In!", description: `Welcome, ${newUserProfileData.displayName}!` });
+      router.push(redirectAfterAuth || '/');
+      setPostGoogleSignupStep('none');
+      setGoogleAuthData(null);
+
+    } catch (error: any) {
+      console.error("Error saving post-Google signup info:", error);
+      setError(error.message || "Failed to save additional details. Please try again.");
+      toast({ title: "Error Saving Details", description: "Could not save your additional information.", variant: "destructive" });
+    } finally {
+      setIsLoadingPostGoogleSignup(false);
+    }
+  };
+
+
+  const handleForgotPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const currentEmailError = validateEmail(email); setEmailError(currentEmailError);
+    if (currentEmailError) { setError("Please enter a valid email address to reset your password."); return; }
     setIsLoadingEmail(true);
     try {
       await sendPasswordResetEmail(auth, email.trim());
-      toast({
-        title: "Password Reset Email Sent",
-        description: `If an account for ${email.trim()} exists, a password reset link has been sent. Please check your inbox and spam/junk folder.`,
-        duration: 7000
-      });
+      toast({ title: "Password Reset Email Sent", description: `If an account exists for ${email.trim()}, a password reset link has been sent. Please check your inbox.`, duration: 7000 });
       setAuthActionState('default');
     } catch (fbError: any) {
-      console.error("Forgot Password Error:", fbError);
-       if (fbError.code === 'auth/invalid-email') {
-            setEmailError("The email address format is not valid.");
-            setError("Please check the email address format.");
-      } else if (fbError.code === 'auth/missing-email') {
-            setEmailError("Please enter your email address.");
-            setError("Please enter your email address.");
-      } else {
-            setError("Could not send password reset email at this time. Please try again later.");
-      }
-    } finally {
-      setIsLoadingEmail(false);
-    }
+      if (fbError.code === 'auth/invalid-email') { setEmailError("The email address is not valid."); setError("Please check the email format."); }
+      else if (fbError.code === 'auth/missing-email') { setEmailError("Email address is required."); setError("Please enter your email address."); }
+      else setError("Could not send password reset email. Please try again later.");
+    } finally { setIsLoadingEmail(false); }
   };
 
   const handleResendVerificationEmail = async () => {
     if (!auth.currentUser) {
-      toast({ title: "Error", description: "No user session found. Please log in again.", variant: "destructive" });
+      toast({ title: "Error", description: "No active user session. Please log in again.", variant: "destructive" });
       setAuthActionState('default');
       return;
     }
     setIsResendingVerification(true);
-    const lastSent = Number(localStorage.getItem(LSTORAGE_LAST_VERIFICATION_EMAIL_SENT_AT));
-    if (Date.now() - lastSent < EMAIL_RESEND_COOLDOWN_MS) {
-      toast({ title: "Please Wait", description: `You can resend the verification email again in about ${Math.ceil((EMAIL_RESEND_COOLDOWN_MS - (Date.now() - lastSent)) / 60000)} minute(s).`, variant: "default" });
+    const lastSentTimestamp = Number(localStorage.getItem(LSTORAGE_LAST_VERIFICATION_EMAIL_SENT_AT));
+    if (Date.now() - lastSentTimestamp < EMAIL_RESEND_COOLDOWN_MS) {
+      toast({ title: "Please Wait", description: `You can resend the verification email in ${Math.ceil((EMAIL_RESEND_COOLDOWN_MS - (Date.now() - lastSentTimestamp)) / 60000)} minute(s).`, variant: "default" });
       setIsResendingVerification(false);
       return;
     }
-
     try {
       await sendEmailVerification(auth.currentUser);
       localStorage.setItem(LSTORAGE_LAST_VERIFICATION_EMAIL_SENT_AT, Date.now().toString());
-      toast({ title: "Verification Email Resent", description: `A new verification email has been sent to ${auth.currentUser.email}. Please check your inbox (and spam folder).` });
+      toast({ title: "Verification Email Resent", description: `A new verification email has been sent to ${auth.currentUser.email}.` });
     } catch (error: any) {
-      console.error("Error resending verification email:", error);
-      toast({ title: "Error", description: error.message || "Could not resend verification email.", variant: "destructive" });
+      toast({ title: "Error Resending Email", description: error.message || "Could not resend verification email.", variant: "destructive" });
     } finally {
       setIsResendingVerification(false);
     }
@@ -549,39 +590,35 @@ export default function AuthForm({
 
   const handleUpdateEmail = async () => {
     if (!auth.currentUser) {
-      toast({ title: "Error", description: "No user session found. Please log in again.", variant: "destructive" });
+      toast({ title: "Error", description: "No active user session.", variant: "destructive" });
       setAuthActionState('default');
       return;
     }
-    const newEmailValidationError = validateEmail(newEmailForVerification.trim());
-    if (newEmailValidationError) {
-        toast({ title: "Invalid Email", description: newEmailValidationError, variant: "destructive" });
-        return;
+    const newEmailValError = validateEmail(newEmailForVerification.trim());
+    if (newEmailValError) {
+      toast({ title: "Invalid New Email", description: newEmailValError, variant: "destructive" });
+      return;
     }
     setIsUpdatingEmail(true);
     try {
-        const currentFbUser = auth.currentUser;
-        await firebaseUpdateEmail(currentFbUser, newEmailForVerification.trim());
-
-        await update(ref(database, `users/${currentFbUser.uid}`), { email: newEmailForVerification.trim() });
-
-        await sendEmailVerification(currentFbUser);
-
-        setUnverifiedUserEmail(newEmailForVerification.trim());
-        setNewEmailForVerification('');
-        toast({ title: "Email Updated", description: `Your email has been updated to ${newEmailForVerification.trim()}. A new verification link has been sent. Please check your inbox.` });
-    } catch (error: any)
-      {
-        console.error("Error updating email:", error);
-        if (error.code === 'auth/requires-recent-login') {
-            toast({ title: "Action Requires Re-authentication", description: "For security, please log out and log back in before changing your email.", variant: "destructive", duration: 7000 });
-        } else if (error.code === 'auth/email-already-in-use') {
-            toast({ title: "Email In Use", description: "This email address is already associated with another account.", variant: "destructive"});
-        } else {
-            toast({ title: "Error", description: error.message || "Could not update email.", variant: "destructive" });
-        }
+      const user = auth.currentUser;
+      const oldEmail = user.email;
+      await firebaseUpdateEmail(user, newEmailForVerification.trim());
+      await update(ref(database, `users/${user.uid}`), { email: newEmailForVerification.trim() });
+      await sendEmailVerification(user);
+      setUnverifiedUserEmail(newEmailForVerification.trim());
+      setNewEmailForVerification('');
+      toast({ title: "Email Address Updated", description: `Your email has been changed from ${oldEmail} to ${newEmailForVerification.trim()}. A new verification email has been sent.` });
+    } catch (error: any) {
+      if (error.code === 'auth/requires-recent-login') {
+        toast({ title: "Re-authentication Required", description: "For security, please log out and log back in to change your email address.", variant: "destructive", duration: 7000 });
+      } else if (error.code === 'auth/email-already-in-use') {
+        toast({ title: "Email Already In Use", description: "This email address is already associated with another account.", variant: "destructive" });
+      } else {
+        toast({ title: "Error Updating Email", description: error.message || "Could not update email address.", variant: "destructive" });
+      }
     } finally {
-        setIsUpdatingEmail(false);
+      setIsUpdatingEmail(false);
     }
   };
 
@@ -592,347 +629,159 @@ export default function AuthForm({
     localStorage.removeItem('drawlyUserUid');
     setAuthActionState('default');
     setUnverifiedUserEmail(null);
-    setEmail('');
-    setPassword('');
-    setError(null);
-    setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
-    toast({ title: "Logged Out" });
+    setEmail(''); setPassword('');
+    setError(null); setDisplayNameError(''); setEmailError(''); setPasswordError(''); setCountryCodeError(''); setPhoneNumberError('');
+    toast({ title: "Logged Out", description: "You have been logged out." });
   };
 
-
-  const handleSubmit = (e: FormEvent) => {
+  const handleFormSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (authActionState === 'resetPassword') {
-      handleForgotPassword();
-    } else if (authActionState === 'default') {
-      handleFirebaseEmailAuth();
+    handleFirebaseEmailAuth();
+  };
+
+  const handleToggleMode = (mode: 'login' | 'signup' | 'resetPassword') => {
+    setError(null);
+    setDisplayNameError(''); setEmailError(''); setPasswordError('');
+    setCountryCodeError(''); setPhoneNumberError('');
+
+    if (mode === 'resetPassword') {
+      setAuthActionState('resetPassword');
+      setIsSigningUp(false);
+    } else if (mode === 'login') {
+      setAuthActionState('default');
+      setIsSigningUp(false);
+    } else {
+      setAuthActionState('default');
+      setIsSigningUp(true);
     }
   };
 
-
+  // Determine if submit button should be disabled for email/password form
   const signupFieldsValid = displayName.trim() && country && gender && countryCode.trim() && phoneNumber.trim() && email.trim() && password.trim();
-  const signupErrorsClear = !displayNameError && !emailError && !passwordError && !countryCodeError && !phoneNumberError;
+  const signupErrorsClear = !displayNameError && !emailError && !passwordError && !countryCodeError && !phoneNumberError && !validateGender(gender);
   const canSubmitSignup = signupFieldsValid && signupErrorsClear;
-
   const loginFieldsValid = email.trim() && password.trim();
   const loginErrorsClear = !emailError && !passwordError;
   const canSubmitLogin = loginFieldsValid && loginErrorsClear;
+  const isMainFormSubmitDisabled = isLoadingEmail || isLoadingGoogle ||
+    (authActionState === 'default' && (isSigningUp ? !canSubmitSignup : !canSubmitLogin));
 
-  const isSubmitDisabled = isLoadingEmail || isLoadingGoogle || (authActionState === 'default' && (isSigningUp ? !canSubmitSignup : !canSubmitLogin));
 
-
-  if (authActionState === 'awaitingVerification') {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen py-12">
-        <Card className="w-full max-w-md shadow-xl">
-          <CardHeader>
-            <CardTitle className="text-2xl text-center">Verify Your Email</CardTitle>
-            <CardDescription className="text-center">
-              Your email address <strong className="text-primary">{unverifiedUserEmail}</strong> is not verified.
-              A verification email has been sent. Please check your inbox (and spam folder).
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {error && (
-                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-center text-sm text-destructive">
-                    <AlertCircle className="inline-block mr-1 h-4 w-4" /> {error}
-                </div>
-            )}
-            <Button onClick={handleResendVerificationEmail} className="w-full" disabled={isResendingVerification || isUpdatingEmail}>
-              {isResendingVerification ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <RefreshCw className="mr-2 h-5 w-5" />}
-              {isResendingVerification ? 'Sending...' : 'Resend Verification Email'}
-            </Button>
-
-            <div className="space-y-2 pt-4 border-t">
-                <Label htmlFor="newEmailForVerification" className="text-md">Incorrect email? Update it here:</Label>
-                <Input
-                    id="newEmailForVerification"
-                    type="email"
-                    placeholder="Enter new email address"
-                    value={newEmailForVerification}
-                    onChange={(e) => setNewEmailForVerification(e.target.value)}
-                    disabled={isResendingVerification || isUpdatingEmail}
-                />
-                <Button onClick={handleUpdateEmail} variant="outline" className="w-full" disabled={isResendingVerification || isUpdatingEmail || !newEmailForVerification.trim()}>
-                    {isUpdatingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Mail className="mr-2 h-5 w-5" />}
-                    {isUpdatingEmail ? 'Updating...' : 'Update Email & Resend Verification'}
-                </Button>
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-3">
-            <Button variant="link" onClick={handleUserLogoutForVerificationScreen} disabled={isResendingVerification || isUpdatingEmail}>
-              Logout
-            </Button>
-            <Link href="/" className="text-sm text-muted-foreground hover:text-primary">
-                Back to Home
-            </Link>
-          </CardFooter>
-        </Card>
-      </div>
+  let content;
+  if (postGoogleSignupStep === 'collectInfo' && googleAuthData) {
+    content = (
+      <PostGoogleSignupForm
+        initialDisplayName={googleAuthData.displayName || "User"}
+        passedReferralCodeProp={passedReferralCodeProp} // Pass it down to prefill
+        onSubmit={handleSavePostGoogleSignupInfo}
+        isLoading={isLoadingPostGoogleSignup}
+        referralProgramEnabled={referralProgramEnabled}
+        isLoadingPlatformSettings={isLoadingPlatformSettings}
+        onCancel={() => {
+            setPostGoogleSignupStep('none');
+            setGoogleAuthData(null);
+            firebaseSignOut(auth); // Log out the partially signed-in Google user
+        }}
+      />
+    );
+  } else if (authActionState === 'awaitingVerification') {
+    content = (
+      <AwaitingVerificationContent
+        unverifiedUserEmail={unverifiedUserEmail}
+        onResendVerificationEmail={handleResendVerificationEmail}
+        isResendingVerification={isResendingVerification}
+        newEmailForVerification={newEmailForVerification}
+        onNewEmailChange={setNewEmailForVerification}
+        onUpdateEmail={handleUpdateEmail}
+        isUpdatingEmail={isUpdatingEmail}
+        onLogout={handleUserLogoutForVerificationScreen}
+        errorMessage={error}
+        onUserVerifiedAndModalConfirmed={handleUserVerifiedAndLogin}
+      />
+    );
+  } else if (authActionState === 'resetPassword') {
+    content = (
+      <ResetPasswordContent
+        email={email}
+        onEmailChange={handleEmailChange}
+        onEmailBlur={handleEmailBlur}
+        emailError={emailError}
+        onSubmit={handleForgotPassword}
+        isLoading={isLoadingEmail}
+        onBackToLogin={() => handleToggleMode('login')}
+        error={error}
+      />
+    );
+  } else { // default state (login or signup)
+    content = (
+      <form onSubmit={handleFormSubmit} id="auth-form-main" className="space-y-3">
+        <AuthError message={error} />
+        {isSigningUp && (
+          <SignupSpecificFields
+            displayName={displayName} onDisplayNameChange={handleDisplayNameChange} onDisplayNameBlur={handleDisplayNameBlur} displayNameError={displayNameError}
+            country={country} onCountryChange={setCountry}
+            gender={gender} onGenderChange={setGender} // Pass gender state
+            countryCode={countryCode} onCountryCodeChange={handleCountryCodeChange} onCountryCodeBlur={handleCountryCodeBlur} countryCodeError={countryCodeError}
+            phoneNumber={phoneNumber} onPhoneNumberChange={handlePhoneNumberChange} onPhoneNumberBlur={handlePhoneNumberBlur} phoneNumberError={phoneNumberError}
+            referralCodeInput={referralCodeInput} onReferralCodeInputChange={handleReferralCodeInputChange}
+            isLoading={isLoadingEmail || isLoadingGoogle}
+            referralProgramEnabled={referralProgramEnabled}
+            isLoadingPlatformSettings={isLoadingPlatformSettings}
+          />
+        )}
+        <EmailPasswordFields
+          email={email} onEmailChange={handleEmailChange} onEmailBlur={handleEmailBlur} emailError={emailError}
+          password={password} onPasswordChange={handlePasswordChange} onPasswordBlur={handlePasswordBlur} passwordError={passwordError}
+          isLoading={isLoadingEmail || isLoadingGoogle}
+          showPasswordInput={true}
+        />
+        {!isSigningUp && (
+          <button
+            type="button"
+            className="px-0 text-sm text-primary hover:underline h-auto py-0"
+            onClick={() => handleToggleMode('resetPassword')}
+            disabled={isLoadingEmail || isLoadingGoogle}
+          >
+            Forgot Password?
+          </button>
+        )}
+      </form>
     );
   }
 
-
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-12">
-      <Card className="w-full max-w-md shadow-xl">
-        <CardHeader>
-          <CardTitle className="text-3xl text-center">
-            {authActionState === 'resetPassword' ? "Reset Password" : (isSigningUp ? "Sign Up" : "Login")} to {APP_NAME}
-          </CardTitle>
-          <CardDescription className="text-center">
-            {authActionState === 'resetPassword'
-              ? "Enter your email to receive a password reset link."
-              : isSigningUp
-                ? "Create an account to play, refer friends, and earn rewards! A verification email will be sent to complete your registration."
-                : "Welcome back! Log in to continue."}
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-3">
-            {error && (
-                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-center text-sm text-destructive">
-                    <AlertCircle className="inline-block mr-1 h-4 w-4" /> {error}
-                </div>
-            )}
-            {authActionState === 'default' && isSigningUp && (
-              <>
-                <div className="space-y-1">
-                  <Label htmlFor="displayName_auth_form">Display Name <span className="text-destructive">*</span></Label>
-                  <Input
-                    id="displayName_auth_form"
-                    name="displayName"
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => { setDisplayName(e.target.value); if (displayNameError) setDisplayNameError(''); }}
-                    onBlur={handleDisplayNameBlur}
-                    placeholder="Your game name"
-                    required={isSigningUp}
-                    className="text-base"
-                    disabled={isLoadingEmail || isLoadingGoogle}
-                  />
-                  {displayNameError && <p className="text-xs text-destructive mt-1">{displayNameError}</p>}
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="country_auth_form" className="flex items-center">
-                    <Globe size={16} className="mr-1 text-muted-foreground"/> Country <span className="text-destructive">*</span>
-                  </Label>
-                  <Select
-                    value={country}
-                    onValueChange={(value: 'India' | 'Other') => setCountry(value)}
-                    required
-                    disabled={isLoadingEmail || isLoadingGoogle}
-                  >
-                    <SelectTrigger id="country_auth_form" className="text-base">
-                      <SelectValue placeholder="Select your country" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="India">India (INR ₹)</SelectItem>
-                      <SelectItem value="Other">Other (USD $)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="gender_auth_form" className="flex items-center">
-                    <UserCircle2 size={16} className="mr-1 text-muted-foreground"/> Gender <span className="text-destructive">*</span>
-                  </Label>
-                  <Select
-                    value={gender}
-                    onValueChange={(value: UserProfile['gender'] | '') => setGender(value)}
-                    required
-                    disabled={isLoadingEmail || isLoadingGoogle}
-                  >
-                    <SelectTrigger id="gender_auth_form" className="text-base">
-                      <SelectValue placeholder="Select your gender" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                      <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-1 space-y-1">
-                        <Label htmlFor="country_code_auth_form" className="flex items-center">Code <span className="text-destructive ml-1">*</span></Label>
-                        <Input
-                            id="country_code_auth_form"
-                            name="countryCode"
-                            type="text"
-                            value={countryCode}
-                            onChange={(e) => { setCountryCode(e.target.value); if (countryCodeError) setCountryCodeError(''); }}
-                            onBlur={handleCountryCodeBlur}
-                            placeholder="+91"
-                            required={isSigningUp}
-                            className="text-base"
-                            disabled={isLoadingEmail || isLoadingGoogle}
-                        />
-                        {countryCodeError && <p className="text-xs text-destructive mt-1">{countryCodeError}</p>}
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                        <Label htmlFor="phone_number_auth_form" className="flex items-center">
-                           <Phone size={16} className="mr-1 text-muted-foreground"/> Phone <span className="text-destructive ml-1">*</span>
-                        </Label>
-                        <Input
-                            id="phone_number_auth_form"
-                            name="phoneNumber"
-                            type="tel"
-                            value={phoneNumber}
-                            onChange={(e) => { setPhoneNumber(e.target.value); if (phoneNumberError) setPhoneNumberError(''); }}
-                            onBlur={handlePhoneNumberBlur}
-                            placeholder="Your phone number"
-                            required={isSigningUp}
-                            className="text-base"
-                            disabled={isLoadingEmail || isLoadingGoogle}
-                        />
-                        {phoneNumberError && <p className="text-xs text-destructive mt-1">{phoneNumberError}</p>}
-                    </div>
-                </div>
-                 <p className="text-xs text-muted-foreground">Your phone number is used for account purposes only.</p>
-              </>
-            )}
-            <div className="space-y-1">
-              <Label htmlFor="email_auth_form">Email <span className="text-destructive">*</span></Label>
-              <Input
-                id="email_auth_form"
-                name="email"
-                type="email"
-                value={email}
-                onChange={(e) => { setEmail(e.target.value); if (emailError) setEmailError(''); }}
-                onBlur={handleEmailBlur}
-                placeholder="you@example.com"
-                required
-                className="text-base"
-                disabled={isLoadingEmail || isLoadingGoogle}
+      <AuthCard
+        header={
+          <AuthHeaderContent
+            mode={postGoogleSignupStep === 'collectInfo' ? 'postGoogleSignup' : authActionState === 'awaitingVerification' ? 'awaitingVerification' : authActionState === 'resetPassword' ? 'resetPassword' : isSigningUp ? 'signup' : 'login'}
+            unverifiedUserEmail={unverifiedUserEmail}
+            displayNameForPostSignup={googleAuthData?.displayName}
+          />
+        }
+        content={content}
+        footer={
+          (authActionState === 'default' && postGoogleSignupStep === 'none') ? (
+            <>
+              <AuthSubmitActions
+                isSigningUp={isSigningUp}
+                onEmailSubmit={handleFormSubmit}
+                onGoogleSubmit={handleGoogleAuth}
+                isLoadingEmail={isLoadingEmail}
+                isLoadingGoogle={isLoadingGoogle}
+                isSubmitDisabled={isMainFormSubmitDisabled}
               />
-              {emailError && <p className="text-xs text-destructive mt-1">{emailError}</p>}
-            </div>
-            {authActionState !== 'resetPassword' && (
-                 <div className="space-y-1">
-                    <Label htmlFor="password_auth_form">Password <span className="text-destructive">*</span></Label>
-                    <Input
-                        id="password_auth_form"
-                        name="password"
-                        type="password"
-                        value={password}
-                        onChange={(e) => { setPassword(e.target.value); if (passwordError) setPasswordError(''); }}
-                        onBlur={handlePasswordBlur}
-                        placeholder="••••••••"
-                        required
-                        className="text-base"
-                        disabled={isLoadingEmail || isLoadingGoogle}
-                    />
-                    {passwordError && <p className="text-xs text-destructive mt-1">{passwordError}</p>}
-                </div>
-            )}
-
-            {authActionState === 'default' && !isSigningUp && (
-                <Button
-                    type="button"
-                    variant="link"
-                    className="px-0 text-sm text-primary hover:underline h-auto py-0"
-                    onClick={() => {setAuthActionState('resetPassword'); setError(null); setEmailError(''); setPasswordError('');}}
-                    disabled={isLoadingEmail || isLoadingGoogle}
-                >
-                    Forgot Password?
-                </Button>
-            )}
-            {authActionState === 'default' && isSigningUp && (
-              <div className="space-y-1">
-                <Label htmlFor="referral_code" className="flex items-center">
-                   <UserPlus size={16} className="mr-1 text-muted-foreground"/> Referral Code (Optional)
-                </Label>
-                <Input
-                  id="referral_code"
-                  name="referral_code"
-                  type="text"
-                  value={referralCodeInput}
-                  onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
-                  placeholder="Enter 5-character code"
-                  className="text-base"
-                  maxLength={5}
-                  disabled={isLoadingEmail || isLoadingGoogle || isLoadingPlatformSettings || !referralProgramEnabled}
-                />
-                {isLoadingPlatformSettings && <p className="text-xs text-muted-foreground"><Loader2 className="h-3 w-3 mr-1 animate-spin inline-block"/>Loading referral status...</p>}
-                {!isLoadingPlatformSettings && !referralProgramEnabled && (
-                    <p className="text-xs text-yellow-600 flex items-center gap-1">
-                        <AlertCircle size={14}/> The referral program is currently disabled.
-                    </p>
-                )}
-              </div>
-            )}
-          </CardContent>
-          <CardFooter className="flex flex-col gap-2 pt-4">
-            <Button type="submit" className="w-full text-base py-5" disabled={isSubmitDisabled}>
-              {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> :
-                (authActionState === 'resetPassword' ? <Mail className="mr-2 h-5 w-5" /> : (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />))
-              }
-              {isLoadingEmail ? 'Processing...' :
-                (authActionState === 'resetPassword' ? "Send Reset Email" : (isSigningUp ? 'Sign Up with Email' : 'Login with Email'))
-              }
-            </Button>
-
-            {authActionState !== 'resetPassword' && (
-                <>
-                <div className="relative w-full my-1">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-background px-2 text-muted-foreground">
-                      Or
-                    </span>
-                  </div>
-                </div>
-
-                <Button
-                  variant="outline"
-                  className="w-full text-base py-5"
-                  onClick={handleGoogleAuth}
-                  disabled={isLoadingGoogle || isLoadingEmail}
-                  type="button"
-                >
-                  {isLoadingGoogle ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <GoogleIcon />}
-                  {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google' : 'Login with Google')}
-                </Button>
-                </>
-            )}
-
-            <Button
-                variant="link"
-                onClick={() => {
-                    if (authActionState === 'resetPassword') {
-                        setAuthActionState('default');
-                        setIsSigningUp(false); // Ensure we go back to login view
-                    } else {
-                        setIsSigningUp(prev => !prev);
-                    }
-                    setError(null);
-                    setDisplayNameError('');
-                    setEmailError('');
-                    setPasswordError('');
-                    setCountryCodeError('');
-                    setPhoneNumberError('');
-                }}
-                className="mt-1"
-                disabled={isLoadingEmail || isLoadingGoogle}
-                type="button"
-            >
-              {authActionState === 'resetPassword'
-                ? <><ArrowLeft className="mr-1 h-4 w-4"/> Back to Login</>
-                : isSigningUp
-                    ? "Already have an account? Login"
-                    : "Don't have an account? Sign Up"}
-            </Button>
-
-            <Link href="/" className="text-sm text-muted-foreground hover:text-primary mt-1">
-                Maybe later? Back to Home
-            </Link>
-          </CardFooter>
-        </form>
-      </Card>
+              <AuthModeToggle
+                isSigningUp={isSigningUp}
+                onToggleMode={() => handleToggleMode(isSigningUp ? 'login' : 'signup')}
+                isLoading={isLoadingEmail || isLoadingGoogle}
+              />
+            </>
+          ) : undefined
+        }
+        showDefaultFooterLinks={authActionState !== 'awaitingVerification' && authActionState !== 'resetPassword' && postGoogleSignupStep === 'none'}
+        currentAuthActionState={authActionState}
+      />
     </div>
   );
 }
-
