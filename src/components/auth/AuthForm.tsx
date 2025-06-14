@@ -255,15 +255,20 @@ export default function AuthForm({
                   newShortReferralCode = ''; 
               }
           }
-          const newUserProfileData: Partial<UserProfile> = { // Use Partial for conditional properties
+          const newUserProfileData: Partial<UserProfile> = { 
             userId: user.uid, displayName: displayName.trim(), email: user.email || email,
             referralCode: user.uid, 
             totalEarnings: 0, createdAt: serverTimestamp() as number, country: country,
             currency: country === 'India' ? 'INR' : 'USD', gender: gender as UserProfile['gender'],
             countryCode: countryCode.trim(), phoneNumber: phoneNumber.trim(), canWithdraw: true,
           };
+
           if (referralProgramEnabled && newShortReferralCode) {
               newUserProfileData.shortReferralCode = newShortReferralCode;
+          } else if (referralProgramEnabled && !newShortReferralCode) {
+              // Do not add shortReferralCode to the object if it's empty
+          } else if (!referralProgramEnabled) {
+              // Do not add shortReferralCode if program is disabled
           }
           
           if (referralProgramEnabled) {
@@ -342,15 +347,27 @@ export default function AuthForm({
   };
   
   const handleGoogleAuth = async () => {
-    setIsLoadingGoogle(true); setError(null);
+    console.log('[AuthForm GoogleAuth] Attempting Google Sign-In. isLoadingGoogle:', isLoadingGoogle);
+    if (isLoadingGoogle) {
+        console.log('[AuthForm GoogleAuth] Already processing Google Sign-In. Aborting.');
+        return;
+    }
+    setIsLoadingGoogle(true);
+    setError(null);
     console.log('[AuthForm GoogleAuth] Initial passedReferralCodeProp:', passedReferralCodeProp);
     try {
+      console.log('[AuthForm GoogleAuth] Calling signInWithPopup...');
       const result = await signInWithPopup(auth, new GoogleAuthProvider());
+      console.log('[AuthForm GoogleAuth] signInWithPopup successful. Result User:', result.user);
       const user = result.user;
       if (user) {
         const profileSnap = await get(ref(database, `users/${user.uid}`));
         let nameFromAuth = user.displayName || "Google User";
-        if (!user.email) { toast({ title: "Email Missing", description: "Google account did not provide an email.", variant: "destructive" }); setIsLoadingGoogle(false); return; }
+        if (!user.email) { 
+            console.error('[AuthForm GoogleAuth] Google account did not provide an email.');
+            toast({ title: "Email Missing", description: "Google account did not provide an email.", variant: "destructive" }); 
+            setIsLoadingGoogle(false); return; 
+        }
         
         if (profileSnap.exists()) { 
           nameFromAuth = profileSnap.val().displayName || nameFromAuth; 
@@ -368,23 +385,31 @@ export default function AuthForm({
               newShortReferralCode = generateShortAlphaNumericCode(5);
               codeExists = (await get(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`))).exists(); attempts++;
             }
-            if (codeExists) console.warn("Could not generate unique short referral code for Google user."); newShortReferralCode = '';
+            if (codeExists) {
+                console.warn("Could not generate unique short referral code for Google user."); 
+                newShortReferralCode = '';
+            }
           }
 
-          const newUserProfileData: Partial<UserProfile> = { // Use Partial
+          const newUserProfileData: Partial<UserProfile> = { 
             userId: user.uid, displayName: nameFromAuth, email: user.email, referralCode: user.uid,
             totalEarnings: 0, createdAt: serverTimestamp() as number, country: 'India', currency: 'INR', 
             gender: 'prefer_not_to_say', countryCode: '', phoneNumber: '', canWithdraw: true,
           };
+          
           if (referralProgramEnabled && newShortReferralCode) {
               newUserProfileData.shortReferralCode = newShortReferralCode;
+          } else if (referralProgramEnabled && !newShortReferralCode) {
+             // Do not add shortReferralCode to the object if it's empty
+          } else if (!referralProgramEnabled) {
+            // Do not add shortReferralCode if program is disabled
           }
 
           if (referralProgramEnabled) {
             let actualReferrerUid: string | null = null;
             const deviceReferrer = localStorage.getItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY);
             const propReferrerShort = passedReferralCodeProp?.trim().toUpperCase();
-            console.log('[AuthForm GoogleAuth] propReferrerShort for Google new user:', propReferrerShort);
+            console.log('[AuthForm GoogleAuth] For new Google user - URL Ref Code (propReferrerShort):', propReferrerShort, 'Device Ref UID:', deviceReferrer);
             
             if (propReferrerShort) { 
                 const mapSnap = await get(ref(database, `shortCodeToUserIdMap/${propReferrerShort}`));
@@ -392,17 +417,22 @@ export default function AuthForm({
                     const foundUid = mapSnap.val() as string;
                     if (foundUid !== user.uid) {
                         actualReferrerUid = foundUid;
+                        console.log(`[AuthForm GoogleAuth] Referrer found via URL code ${propReferrerShort}: ${foundUid}`);
                         if (!deviceReferrer || deviceReferrer !== foundUid) { 
                             localStorage.setItem(LSTORAGE_DEVICE_ORIGINAL_REFERRER_UID_KEY, foundUid);
+                             console.log(`[AuthForm GoogleAuth] Set device referrer UID to ${foundUid} from URL code.`);
                         }
                     } else {
+                        console.warn(`[AuthForm GoogleAuth] User tried to refer themselves with code ${propReferrerShort}.`);
                         toast({title: "Invalid Referral", description: "You cannot refer yourself.", variant: "destructive"});
                     }
                 } else {
+                    console.warn(`[AuthForm GoogleAuth] Referral code ${propReferrerShort} from URL not found in map.`);
                     toast({title: "Referral Code Invalid", description: `The code "${propReferrerShort}" is not valid.`, variant: "default"});
                 }
             } else if (deviceReferrer && deviceReferrer !== user.uid) {
                 actualReferrerUid = deviceReferrer;
+                console.log(`[AuthForm GoogleAuth] Using device referrer UID: ${deviceReferrer}`);
             }
 
             if (actualReferrerUid) {
@@ -411,6 +441,7 @@ export default function AuthForm({
                 referredUserName: nameFromAuth,
                 timestamp: serverTimestamp()
               });
+              console.log(`[AuthForm GoogleAuth] Referral recorded for ${actualReferrerUid} from new user ${user.uid}.`);
               toast({title: "Referral Applied!", description: "Referral code successfully applied."});
             }
           }
@@ -427,13 +458,18 @@ export default function AuthForm({
           router.push(redirectAfterAuth || '/');
         }
       } else {
+        console.error('[AuthForm GoogleAuth] Google Sign-In failed: No user data returned from Google.');
         setError("Google Sign-In failed: No user data returned from Google.");
       }
     } catch (fbError: any) {
+      console.error('[AuthForm GoogleAuth] Error during signInWithPopup or subsequent processing:', fbError);
       if (fbError.code === 'auth/popup-closed-by-user') { setError(null); toast({ title: "Google Sign-In Cancelled", description: "You closed the Google Sign-In window.", variant: "default" }); }
       else if (fbError.code === 'auth/account-exists-with-different-credential') { setError("An account already exists with this email, but using a different sign-in method (e.g., email/password). Please log in with that method."); toast({ title: "Account Conflict", description: "Email already in use with a different sign-in method.", variant: "destructive", duration: 7000 }); }
       else setError(fbError.message || "Google Sign-In failed. Please try again.");
-    } finally { setIsLoadingGoogle(false); }
+    } finally { 
+      console.log('[AuthForm GoogleAuth] Google Sign-In process finished. Setting isLoadingGoogle to false.');
+      setIsLoadingGoogle(false); 
+    }
   };
 
   const handleForgotPassword = async () => {
@@ -644,4 +680,3 @@ export default function AuthForm({
     </div>
   );
 }
-
