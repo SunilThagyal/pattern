@@ -15,7 +15,6 @@ const GoogleIconSvg = () => (
 
 
 interface AuthSubmitActionsProps {
-  authActionState: 'default' | 'resetPassword';
   isSigningUp: boolean;
   onEmailSubmit: (e: React.FormEvent) => void;
   onGoogleSubmit: () => void;
@@ -25,7 +24,7 @@ interface AuthSubmitActionsProps {
 }
 
 export function AuthSubmitActions({
-  authActionState, isSigningUp, onEmailSubmit, onGoogleSubmit,
+  isSigningUp, onEmailSubmit, onGoogleSubmit,
   isLoadingEmail, isLoadingGoogle, isSubmitDisabled,
 }: AuthSubmitActionsProps) {
   const isProcessing = isLoadingEmail || isLoadingGoogle;
@@ -34,16 +33,13 @@ export function AuthSubmitActions({
     <div className="space-y-2">
       <Button type="submit" className="w-full text-base py-5" disabled={isSubmitDisabled || isProcessing} form="auth-form-main">
         {isLoadingEmail ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> :
-          (authActionState === 'resetPassword' ? <Mail className="mr-2 h-5 w-5" /> :
-            (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />))
+            (isSigningUp ? <UserPlus className="mr-2 h-5 w-5" /> : <LogIn className="mr-2 h-5 w-5" />)
         }
         {isLoadingEmail ? 'Processing...' :
-          (authActionState === 'resetPassword' ? "Send Reset Email" :
-            (isSigningUp ? 'Sign Up with Email' : 'Login with Email'))
+            (isSigningUp ? 'Sign Up with Email' : 'Login with Email')
         }
       </Button>
 
-      {authActionState !== 'resetPassword' && (
         <>
           <div className="relative w-full my-1">
             <div className="absolute inset-0 flex items-center">
@@ -64,7 +60,7 @@ export function AuthSubmitActions({
             {isLoadingGoogle ? 'Processing...' : (isSigningUp ? 'Sign Up with Google' : 'Login with Google')}
           </Button>
         </>
-      )}
     </div>
   );
 }
+

@@ -12,7 +12,6 @@ import {
 } from "firebase/auth";
 import type { UserProfile } from '@/lib/types';
 import { ref, set, get, serverTimestamp, onValue, off, update } from 'firebase/database';
-import Link from 'next/link';
 
 import { AuthCard } from './AuthCard';
 import { AuthHeaderContent } from './AuthHeaderContent';
@@ -22,7 +21,7 @@ import { SignupSpecificFields } from './SignupSpecificFields';
 import { AuthSubmitActions } from './AuthSubmitActions';
 import { AuthModeToggle } from './AuthModeToggle';
 import { AwaitingVerificationContent } from './AwaitingVerificationContent';
-import { Button } from '@/components/ui/button';
+import { ResetPasswordContent } from './ResetPasswordContent'; // New Import
 
 const generateShortAlphaNumericCode = (length: number): string => {
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -53,7 +52,7 @@ const determineInitialIsSigningUp = (
   if (currentReferralCode && currentReferralCode.trim() !== "" && currentInitialAction !== 'login') return true;
   if (currentInitialAction === 'signup') return true;
   if (currentInitialAction === 'login') return false;
-  return false; // Default to login if no specific action
+  return false; 
 };
 
 export default function AuthForm({
@@ -255,6 +254,7 @@ export default function AuthForm({
                   newShortReferralCode = ''; 
               }
           }
+          
           const newUserProfileData: Partial<UserProfile> = { 
             userId: user.uid, displayName: displayName.trim(), email: user.email || email,
             referralCode: user.uid, 
@@ -301,7 +301,15 @@ export default function AuthForm({
               });
             }
           }
+          
+          if (newUserProfileData.shortReferralCode === undefined && referralProgramEnabled) {
+            delete newUserProfileData.shortReferralCode; // Ensure undefined is not written
+          } else if (!referralProgramEnabled) {
+            delete newUserProfileData.shortReferralCode;
+          }
+
           await set(ref(database, `users/${user.uid}`), newUserProfileData);
+
           if (referralProgramEnabled && newShortReferralCode) {
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
           }
@@ -438,8 +446,15 @@ export default function AuthForm({
               toast({title: "Referral Applied!", description: "Referral code successfully applied."});
             }
           }
-
+          
+          if (newUserProfileData.shortReferralCode === undefined && referralProgramEnabled) {
+            delete newUserProfileData.shortReferralCode; 
+          } else if (!referralProgramEnabled) {
+            delete newUserProfileData.shortReferralCode;
+          }
+          
           await set(ref(database, `users/${user.uid}`), newUserProfileData);
+          
           if (referralProgramEnabled && newShortReferralCode) {
             await set(ref(database, `shortCodeToUserIdMap/${newShortReferralCode}`), user.uid);
           }
@@ -457,7 +472,8 @@ export default function AuthForm({
     } catch (fbError: any) {
       console.error('[AuthForm GoogleAuth] Error during signInWithPopup or subsequent processing:', fbError);
       if (fbError.code === 'auth/popup-closed-by-user') { 
-        setError("Google Sign-In failed. This might be due to a pop-up blocker or a Firebase/Google Cloud configuration issue (check Authorized Domains and OAuth settings). Please ensure pop-ups are allowed for this site."); 
+        const detailedErrorMsg = "Google Sign-In failed. This might be due to a pop-up blocker or a Firebase/Google Cloud configuration issue (check Authorized Domains and OAuth settings). Please ensure pop-ups are allowed for this site.";
+        setError(detailedErrorMsg); 
         toast({ title: "Google Sign-In Problem", description: "Pop-up might have been blocked or there's a configuration issue. See message below button for details.", variant: "destructive", duration: 10000 });
       } else if (fbError.code === 'auth/account-exists-with-different-credential') { 
         setError("An account already exists with this email, but using a different sign-in method (e.g., email/password). Please log in with that method."); 
@@ -471,7 +487,8 @@ export default function AuthForm({
     }
   };
 
-  const handleForgotPassword = async () => {
+  const handleForgotPassword = async (e: FormEvent) => {
+    e.preventDefault(); // Prevent default form submission if called directly
     setError(null);
     const currentEmailError = validateEmail(email); setEmailError(currentEmailError);
     if (currentEmailError) { setError("Please enter a valid email address to reset your password."); return; }
@@ -559,8 +576,7 @@ export default function AuthForm({
 
   const handleFormSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (authActionState === 'resetPassword') handleForgotPassword();
-    else if (authActionState === 'default') handleFirebaseEmailAuth();
+    handleFirebaseEmailAuth();
   };
 
   const handleToggleMode = (mode: 'login' | 'signup' | 'resetPassword') => {
@@ -607,11 +623,24 @@ export default function AuthForm({
         onUserVerifiedAndModalConfirmed={handleUserVerifiedAndLogin} 
       />
     );
-  } else { 
+  } else if (authActionState === 'resetPassword') {
+    content = (
+      <ResetPasswordContent
+        email={email}
+        onEmailChange={handleEmailChange}
+        onEmailBlur={handleEmailBlur}
+        emailError={emailError}
+        onSubmit={handleForgotPassword}
+        isLoading={isLoadingEmail}
+        onBackToLogin={() => handleToggleMode('login')}
+        error={error}
+      />
+    );
+  } else { // default state (login or signup)
     content = (
       <form onSubmit={handleFormSubmit} id="auth-form-main" className="space-y-3">
         <AuthError message={error} /> 
-        {authActionState === 'default' && isSigningUp && (
+        {isSigningUp && (
           <SignupSpecificFields
             displayName={displayName} onDisplayNameChange={handleDisplayNameChange} onDisplayNameBlur={handleDisplayNameBlur} displayNameError={displayNameError}
             country={country} onCountryChange={setCountry}
@@ -628,17 +657,17 @@ export default function AuthForm({
           email={email} onEmailChange={handleEmailChange} onEmailBlur={handleEmailBlur} emailError={emailError}
           password={password} onPasswordChange={handlePasswordChange} onPasswordBlur={handlePasswordBlur} passwordError={passwordError}
           isLoading={isLoadingEmail || isLoadingGoogle}
-          showPasswordInput={authActionState !== 'resetPassword'} 
+          showPasswordInput={true} 
         />
-        {authActionState === 'default' && !isSigningUp && ( 
-             <Button
-                type="button" variant="link"
+        {!isSigningUp && ( 
+             <button
+                type="button"
                 className="px-0 text-sm text-primary hover:underline h-auto py-0" 
                 onClick={() => handleToggleMode('resetPassword')}
                 disabled={isLoadingEmail || isLoadingGoogle}
             >
                 Forgot Password?
-            </Button>
+            </button>
         )}
       </form>
     );
@@ -654,29 +683,28 @@ export default function AuthForm({
           />
         }
         content={content}
-        footer={ authActionState !== 'awaitingVerification' ? (
-          <>
-            <AuthSubmitActions
-              authActionState={authActionState}
-              isSigningUp={isSigningUp}
-              onEmailSubmit={handleFormSubmit} 
-              onGoogleSubmit={handleGoogleAuth}
-              isLoadingEmail={isLoadingEmail}
-              isLoadingGoogle={isLoadingGoogle}
-              isSubmitDisabled={isSubmitDisabled}
-            />
-            <AuthModeToggle
-              authActionState={authActionState}
-              isSigningUp={isSigningUp}
-              onToggleMode={handleToggleMode}
-              isLoading={isLoadingEmail || isLoadingGoogle}
-            />
-          </>
-        ) : undefined} 
-        showDefaultFooterLinks={authActionState !== 'awaitingVerification'} 
+        footer={ 
+          authActionState === 'default' ? (
+            <>
+              <AuthSubmitActions
+                isSigningUp={isSigningUp}
+                onEmailSubmit={handleFormSubmit} 
+                onGoogleSubmit={handleGoogleAuth}
+                isLoadingEmail={isLoadingEmail}
+                isLoadingGoogle={isLoadingGoogle}
+                isSubmitDisabled={isSubmitDisabled}
+              />
+              <AuthModeToggle
+                isSigningUp={isSigningUp}
+                onToggleMode={() => handleToggleMode(isSigningUp ? 'login' : 'signup')}
+                isLoading={isLoadingEmail || isLoadingGoogle}
+              />
+            </>
+          ) : undefined 
+        } 
+        showDefaultFooterLinks={authActionState !== 'awaitingVerification' && authActionState !== 'resetPassword'} 
         currentAuthActionState={authActionState}
       />
     </div>
   );
 }
-
