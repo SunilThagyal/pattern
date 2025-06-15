@@ -34,7 +34,22 @@ export default function RootLayout({
         <meta name="description" content={`Join the fun in ${APP_NAME}! Draw, guess, and challenge friends in this exciting real-time multiplayer game with AI-powered features.`} />
         <meta name="keywords" content={`drawing game, guess game, multiplayer, online game, Pictionary, AI drawing, sketch game, ${APP_NAME}`} />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        
+        {/* Standard favicon */}
         <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+
+        {/* Apple Touch Icon */}
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+        {/* Android / PWA */}
+        <link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/android-chrome-512x512.png" />
+
+        {/* Manifest (if you have one) */}
+        <link rel="manifest" href="/site.webmanifest" />
+
         {/* AdSense Meta Tag */}
         <meta name="google-adsense-account" content={ADSENSE_CLIENT_ID} />
         {/* AdSense Script using next/script */}
