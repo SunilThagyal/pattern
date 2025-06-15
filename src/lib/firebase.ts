@@ -39,3 +39,4 @@ const auth = getAuth(app); // Initialize auth
 // const analytics = typeof window !== 'undefined' ? getAnalytics(app) : undefined; // If analytics is needed
 
 export { app, database, auth }; // Export auth
+
