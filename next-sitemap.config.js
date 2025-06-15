@@ -4,10 +4,27 @@ module.exports = {
   generateRobotsTxt: true,
   robotsTxtOptions: {
     policies: [
-      { userAgent: '*', allow: '/' },
-      // Add any specific disallow rules here if needed beyond sitemap exclusion
-      // For example, if you want to explicitly tell bots not to crawl certain API patterns
-      // { userAgent: '*', disallow: '/api/' }, 
+      {
+        userAgent: 'Googlebot',
+        allow: [
+          '/',
+          '/create-room',
+          '/join',         // Allow the static /join page
+          '/auth',
+          '/how-to-earn',
+        ],
+        disallow: [
+          '/admin/',      // Disallow admin section for Googlebot
+          '/room/',       // Disallow all game rooms for Googlebot
+          '/join/',       // Disallow anything deeper under /join (e.g., /join/[roomId]) for Googlebot
+          '/referral/',   // Disallow referral redirect pages for Googlebot
+          '/api/',        // Disallow API routes for Googlebot
+        ],
+      },
+      {
+        userAgent: '*', // For all other bots
+        disallow: ['/'], // Disallow everything
+      },
     ],
     // The Sitemap directive is automatically added by next-sitemap
   },
@@ -18,16 +35,13 @@ module.exports = {
     // Dynamic game/utility routes not meant for direct SEO indexing
     '/room',
     '/room/*',
-    '/join', // Excludes the base /join if you want, but usually it's fine to keep
-    '/join/*',
+    // Static /join page IS included in sitemap (not in exclude)
+    '/join/*', // Excludes /join/[roomId] etc. from sitemap
     '/referral',
     '/referral/*',
     // Default next-sitemap exclusion for its server-side sitemap functionality
     '/server-sitemap.xml',
-    // API routes (good practice, though Next.js often handles this)
+    // API routes
     '/api/*',
   ],
-  // Optional: Default priority and changefreq are usually fine.
-  // priority: 0.7,
-  // changefreq: 'daily',
 };
